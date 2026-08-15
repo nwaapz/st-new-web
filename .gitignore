@@ -1,0 +1,13 @@
+# DB passwords — never push
+cms/config.local.php
+
+# User files stay on the server
+uploads/
+
+# Junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+.env
+.env.*
