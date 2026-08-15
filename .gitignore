@@ -1,6 +1,3 @@
-# DB passwords — never push
-cms/config.local.php
-
 # User files stay on the server
 uploads/
 
