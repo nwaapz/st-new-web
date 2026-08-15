@@ -1,0 +1,7 @@
+1:"$Sreact.fragment"
+2:I[35127,["/test2/_next/static/chunks/0bpjg_oq19flx.js","/test2/_next/static/chunks/0ek055t8tf3cs.js","/test2/_next/static/chunks/0f-kbgkdq8gje.js","/test2/_next/static/chunks/0d3shmwh5_nmn.js","/test2/_next/static/chunks/0v46m1v5~jm.l.js","/test2/_next/static/chunks/1029z9bv__ils.js"],"FontLabAuthGate"]
+3:I[42115,["/test2/_next/static/chunks/0bpjg_oq19flx.js","/test2/_next/static/chunks/0ek055t8tf3cs.js","/test2/_next/static/chunks/0f-kbgkdq8gje.js","/test2/_next/static/chunks/0d3shmwh5_nmn.js","/test2/_next/static/chunks/0v46m1v5~jm.l.js","/test2/_next/static/chunks/1029z9bv__ils.js"],"FontLab"]
+4:I[97367,["/test2/_next/static/chunks/0bpjg_oq19flx.js","/test2/_next/static/chunks/0ek055t8tf3cs.js","/test2/_next/static/chunks/0f-kbgkdq8gje.js","/test2/_next/static/chunks/0d3shmwh5_nmn.js"],"OutletBoundary"]
+5:"$Sreact.suspense"
+0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"children":["$","$L3",null,{}]}],[["$","script","script-0",{"src":"/test2/_next/static/chunks/0v46m1v5~jm.l.js","async":true}],["$","script","script-1",{"src":"/test2/_next/static/chunks/1029z9bv__ils.js","async":true}]],["$","$L4",null,{"children":["$","$5",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"FNH4DHjWXIIjN3zWioylA"}
+6:null
