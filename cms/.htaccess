@@ -1,0 +1,4 @@
+# Deny direct access to local config
+<Files "config.local.php">
+  Require all denied
+</Files>
