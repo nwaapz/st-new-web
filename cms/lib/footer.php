@@ -54,7 +54,7 @@ function footer_default_config(): array
             ['label' => 'خدمات پس از فروش', 'href' => '/warranty'],
             ['label' => 'فروشگاه', 'href' => '/products'],
             ['label' => 'تکنولوژی', 'href' => '/danestaniha'],
-            ['label' => 'باشگاه مشتریان', 'href' => '/customerclub'],
+            ['label' => 'دستیار اوستا کار', 'href' => '/customerclub'],
             ['label' => 'درباره ما', 'href' => '/about'],
             ['label' => 'تماس با ما', 'href' => '/contact'],
         ],

@@ -96,6 +96,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
         'mechanic-view.php' => 'customerclub.php',
         'rewards.php' => 'hero.php',
         'home-backgrounds.php' => 'hero.php',
+        'hero-mobile.php' => 'hero.php',
     ];
 
     $nestedGroups = [
@@ -106,6 +107,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
         ],
         'hero.php' => [
             'hero.php' => 'هیرو',
+            'hero-mobile.php' => 'هیرو موبایل',
             'rewards.php' => 'جوایز',
             'home-backgrounds.php' => 'پس‌زمینه و متن',
         ],

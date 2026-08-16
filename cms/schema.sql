@@ -133,6 +133,18 @@ CREATE TABLE IF NOT EXISTS hero_slides (
   UNIQUE KEY uq_hero_index (slide_index)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS hero_slides_mobile (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  slide_index TINYINT UNSIGNED NOT NULL,
+  background VARCHAR(512) NOT NULL,
+  part1 VARCHAR(255) NOT NULL DEFAULT '',
+  part2 TEXT NOT NULL,
+  part3 VARCHAR(255) NOT NULL DEFAULT '',
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_hero_mobile_index (slide_index)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Homepage product series groups (name + image on home; linked products for later)
 CREATE TABLE IF NOT EXISTS product_series (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
