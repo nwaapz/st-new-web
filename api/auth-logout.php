@@ -21,7 +21,7 @@ try {
         api_error('Method not allowed', 405);
     }
 
-    site_auth_logout();
+    site_auth_logout($pdo);
     api_json(['ok' => true]);
 } catch (Throwable $e) {
     error_log('[auth-logout] ' . $e->getMessage());

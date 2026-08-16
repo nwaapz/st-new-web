@@ -98,9 +98,7 @@ try {
     }
 
     site_auth_login($userId, $phone);
-    if (!$isBranchMode) {
-        site_auth_issue_device_token($pdo, $userId, $phone);
-    }
+    site_auth_issue_device_token($pdo, $userId, $phone);
 
     $payload = branches_auth_user_payload($pdo, $userId, $phone);
     $payload = array_merge($payload, mechanics_auth_user_payload($pdo, $userId));

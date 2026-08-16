@@ -6,6 +6,11 @@ declare(strict_types=1);
  * Include after _common.php.
  */
 
+const SITE_DEVICE_COOKIE = 'STARTECH_DEVICE';
+/** Stay signed in on this device for 30 days after last use. */
+const SITE_AUTH_TTL_SECONDS = 30 * 24 * 60 * 60;
+const SITE_DEVICE_TTL_SECONDS = SITE_AUTH_TTL_SECONDS;
+
 /** Replace wildcard CORS so credentialed session cookies work. */
 function site_auth_prepare_cors(): void
 {
@@ -22,10 +27,34 @@ function site_auth_session_start(): void
     if (session_status() === PHP_SESSION_ACTIVE) {
         return;
     }
-    session_start([
-        'cookie_httponly' => true,
-        'cookie_samesite' => 'Lax',
-        'name' => 'STARTECHWEBSESSID',
+    $ttl = SITE_AUTH_TTL_SECONDS;
+    ini_set('session.gc_maxlifetime', (string) $ttl);
+    session_set_cookie_params([
+        'lifetime' => $ttl,
+        'path' => '/',
+        'secure' => site_auth_device_cookie_secure(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_name('STARTECHWEBSESSID');
+    session_start();
+}
+
+function site_auth_refresh_session_cookie(): void
+{
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        return;
+    }
+    $id = session_id();
+    if ($id === '') {
+        return;
+    }
+    setcookie(session_name(), $id, [
+        'expires' => time() + SITE_AUTH_TTL_SECONDS,
+        'path' => '/',
+        'secure' => site_auth_device_cookie_secure(),
+        'httponly' => true,
+        'samesite' => 'Lax',
     ]);
 }
 
@@ -103,16 +132,24 @@ function site_auth_ensure_schema(PDO $pdo): void
     $ready = true;
 }
 
-const SITE_DEVICE_COOKIE = 'STARTECH_DEVICE';
-/** Device trust lifetime: 1 year. */
-const SITE_DEVICE_TTL_SECONDS = 365 * 24 * 60 * 60;
-
 function site_auth_device_cookie_secure(): bool
 {
     if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
         return true;
     }
     return isset($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443';
+}
+
+function site_auth_clear_device_cookie(): void
+{
+    setcookie(SITE_DEVICE_COOKIE, '', [
+        'expires' => time() - 42000,
+        'path' => '/',
+        'secure' => site_auth_device_cookie_secure(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    unset($_COOKIE[SITE_DEVICE_COOKIE]);
 }
 
 function site_auth_set_device_cookie(string $token, int $maxAge): void
@@ -144,7 +181,6 @@ function site_auth_issue_device_token(PDO $pdo, int $userId, string $phone): voi
         ->modify('+' . SITE_DEVICE_TTL_SECONDS . ' seconds')
         ->format('Y-m-d H:i:s');
 
-    // Drop previous token for this cookie (if any) and stale rows for phone.
     $oldRaw = site_auth_read_device_cookie();
     if ($oldRaw !== '') {
         $oldHash = hash('sha256', $oldRaw);
@@ -161,14 +197,12 @@ function site_auth_issue_device_token(PDO $pdo, int $userId, string $phone): voi
 }
 
 /**
- * If the device cookie is valid for this phone, return the user row; else null.
- *
- * @return array{id: int, phone: string}|null
+ * @return array{id: int, user_id: int, phone: string}|null
  */
-function site_auth_lookup_device(PDO $pdo, string $phone): ?array
+function site_auth_find_device_row(PDO $pdo): ?array
 {
     $raw = site_auth_read_device_cookie();
-    if ($raw === '' || !site_auth_is_valid_mobile($phone)) {
+    if ($raw === '') {
         return null;
     }
 
@@ -176,10 +210,10 @@ function site_auth_lookup_device(PDO $pdo, string $phone): ?array
     $stmt = $pdo->prepare(
         'SELECT id, user_id, phone, expires_at
          FROM site_device_tokens
-         WHERE token_hash = ? AND phone = ?
+         WHERE token_hash = ?
          LIMIT 1'
     );
-    $stmt->execute([$hash, $phone]);
+    $stmt->execute([$hash]);
     $row = $stmt->fetch();
     if (!$row) {
         return null;
@@ -188,19 +222,39 @@ function site_auth_lookup_device(PDO $pdo, string $phone): ?array
     $expiresAt = strtotime((string) $row['expires_at']);
     if ($expiresAt === false || $expiresAt < time()) {
         $pdo->prepare('DELETE FROM site_device_tokens WHERE id = ?')->execute([(int) $row['id']]);
+        site_auth_clear_device_cookie();
         return null;
     }
 
-    $userId = (int) $row['user_id'];
+    return [
+        'id' => (int) $row['id'],
+        'user_id' => (int) $row['user_id'],
+        'phone' => (string) $row['phone'],
+    ];
+}
+
+/**
+ * Restore the site user from the device cookie (no phone required).
+ *
+ * @return array{id: int, phone: string}|null
+ */
+function site_auth_restore_from_device(PDO $pdo): ?array
+{
+    $row = site_auth_find_device_row($pdo);
+    if ($row === null) {
+        return null;
+    }
+
     $check = $pdo->prepare('SELECT id, phone FROM site_users WHERE id = ? AND phone = ? LIMIT 1');
-    $check->execute([$userId, $phone]);
+    $check->execute([$row['user_id'], $row['phone']]);
     $user = $check->fetch();
     if (!$user) {
-        $pdo->prepare('DELETE FROM site_device_tokens WHERE id = ?')->execute([(int) $row['id']]);
+        $pdo->prepare('DELETE FROM site_device_tokens WHERE id = ?')->execute([$row['id']]);
+        site_auth_clear_device_cookie();
         return null;
     }
 
-    site_auth_touch_device($pdo, (int) $row['id']);
+    site_auth_touch_device($pdo, $row['id']);
 
     return [
         'id' => (int) $user['id'],
@@ -208,10 +262,36 @@ function site_auth_lookup_device(PDO $pdo, string $phone): ?array
     ];
 }
 
+/**
+ * If the device cookie is valid for this phone, return the user row; else null.
+ *
+ * @return array{id: int, phone: string}|null
+ */
+function site_auth_lookup_device(PDO $pdo, string $phone): ?array
+{
+    if (!site_auth_is_valid_mobile($phone)) {
+        return null;
+    }
+    $row = site_auth_find_device_row($pdo);
+    if ($row === null || $row['phone'] !== $phone) {
+        return null;
+    }
+    return site_auth_restore_from_device($pdo);
+}
+
 function site_auth_touch_device(PDO $pdo, int $tokenId): void
 {
-    $pdo->prepare('UPDATE site_device_tokens SET last_used_at = NOW() WHERE id = ?')
-        ->execute([$tokenId]);
+    $expires = (new DateTimeImmutable('now'))
+        ->modify('+' . SITE_DEVICE_TTL_SECONDS . ' seconds')
+        ->format('Y-m-d H:i:s');
+    $pdo->prepare(
+        'UPDATE site_device_tokens SET last_used_at = NOW(), expires_at = ? WHERE id = ?'
+    )->execute([$expires, $tokenId]);
+
+    $raw = site_auth_read_device_cookie();
+    if ($raw !== '') {
+        site_auth_set_device_cookie($raw, SITE_DEVICE_TTL_SECONDS);
+    }
 }
 
 function site_auth_is_valid_mobile(string $phone): bool
@@ -227,7 +307,12 @@ function site_auth_current_user(PDO $pdo): ?array
     site_auth_session_start();
     $id = isset($_SESSION['web_user_id']) ? (int) $_SESSION['web_user_id'] : 0;
     if ($id <= 0) {
-        return null;
+        $restored = site_auth_restore_from_device($pdo);
+        if ($restored === null) {
+            return null;
+        }
+        site_auth_login($restored['id'], $restored['phone']);
+        $id = $restored['id'];
     }
 
     $stmt = $pdo->prepare('SELECT id, phone, branch_id FROM site_users WHERE id = ? LIMIT 1');
@@ -238,9 +323,19 @@ function site_auth_current_user(PDO $pdo): ?array
         return null;
     }
 
+    $userId = (int) $row['id'];
+    $phone = (string) $row['phone'];
+    $device = site_auth_find_device_row($pdo);
+    if ($device === null || $device['user_id'] !== $userId) {
+        site_auth_issue_device_token($pdo, $userId, $phone);
+    } else {
+        site_auth_touch_device($pdo, $device['id']);
+    }
+    site_auth_refresh_session_cookie();
+
     return [
-        'id' => (int) $row['id'],
-        'phone' => (string) $row['phone'],
+        'id' => $userId,
+        'phone' => $phone,
         'branch_id' => isset($row['branch_id']) && $row['branch_id'] !== null
             ? (int) $row['branch_id']
             : null,
@@ -253,12 +348,29 @@ function site_auth_login(int $userId, string $phone): void
     session_regenerate_id(true);
     $_SESSION['web_user_id'] = $userId;
     $_SESSION['web_user_phone'] = $phone;
+    site_auth_refresh_session_cookie();
 }
 
-function site_auth_logout(): void
+function site_auth_logout(?PDO $pdo = null): void
 {
+    if ($pdo instanceof PDO) {
+        $raw = site_auth_read_device_cookie();
+        if ($raw !== '') {
+            $hash = hash('sha256', $raw);
+            $pdo->prepare('DELETE FROM site_device_tokens WHERE token_hash = ?')->execute([$hash]);
+        }
+    }
+    site_auth_clear_device_cookie();
+
     site_auth_session_start();
     unset($_SESSION['web_user_id'], $_SESSION['web_user_phone']);
+    setcookie(session_name(), '', [
+        'expires' => time() - 42000,
+        'path' => '/',
+        'secure' => site_auth_device_cookie_secure(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
 }
 
 /**
