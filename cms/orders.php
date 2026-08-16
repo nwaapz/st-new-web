@@ -129,9 +129,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $changed += $upd->rowCount() > 0 ? 1 : 0;
             }
             cms_flash($changed > 0 ? 'قیمت‌های تومان ذخیره شد' : 'تغییری در قیمت‌ها ثبت نشد');
+        } elseif ($action === 'accept') {
+            // Warehouse accept always requires prices + auto-issues / sends pre-invoice.
+            if ($current !== 'submitted') {
+                throw new RuntimeException('تأیید انبار فقط برای سفارش تازه ثبت‌شده مجاز است');
+            }
+            $prices = $_POST['price'] ?? [];
+            if (!is_array($prices) || $prices === []) {
+                throw new RuntimeException('قبل از تأیید انبار، قیمت تومان همه اقلام را وارد کنید');
+            }
+            $pdo->beginTransaction();
+            $updPrice = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
+            foreach ($prices as $itemId => $priceRaw) {
+                $itemId = (int) $itemId;
+                if ($itemId <= 0) {
+                    continue;
+                }
+                try {
+                    $normalized = invoices_normalize_price_text((string) $priceRaw);
+                } catch (InvalidArgumentException $e) {
+                    throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
+                }
+                if ($normalized === null || $normalized === '') {
+                    throw new RuntimeException('قیمت تومان همه اقلام برای تأیید انبار الزامی است');
+                }
+                $updPrice->execute([$normalized, $itemId, $orderId]);
+            }
+            $pricedItems = orders_fetch_items($pdo, $orderId);
+            if ($pricedItems === []) {
+                throw new RuntimeException('سفارش بدون قلم است');
+            }
+            foreach ($pricedItems as $item) {
+                $parsed = invoices_parse_toman_amount(
+                    isset($item['price_text']) ? (string) $item['price_text'] : null
+                );
+                if ($parsed === null) {
+                    throw new RuntimeException('قبل از تأیید انبار، قیمت تومان همه اقلام را وارد کنید');
+                }
+            }
+            $dueAt = trim((string) ($_POST['pre_invoice_due_at'] ?? ''));
+            if ($dueAt === '') {
+                $dueAt = date('Y-m-d', strtotime('+7 days'));
+            }
+            invoices_issue_pre($pdo, $orderId, $dueAt);
+            $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
+            $upd->execute(['accepted', $orderId]);
+            $acceptNote = trim((string) ($_POST['message'] ?? ''));
+            orders_add_event(
+                $pdo,
+                $orderId,
+                $current,
+                'accepted',
+                'admin',
+                $acceptNote !== '' ? $acceptNote : 'تأیید انبار و ارسال خودکار پیش‌فاکتور'
+            );
+            $pdo->commit();
+            cms_flash('انبار تأیید شد و پیش‌فاکتور برای مشتری ارسال شد');
         } elseif ($action === 'issue_pre_invoice') {
-            if (!in_array($current, ['submitted', 'accepted', 'payment_proof_sent'], true)) {
-                throw new RuntimeException('در این وضعیت امکان صدور پیش‌فاکتور نیست');
+            if (!in_array($current, ['accepted', 'payment_proof_sent'], true)) {
+                throw new RuntimeException('ابتدا انبار را با قیمت‌گذاری تأیید کنید؛ پیش‌فاکتور هنگام تأیید انبار ارسال می‌شود');
             }
             // Save any posted prices first so PDF matches the form.
             $prices = $_POST['price'] ?? [];
@@ -155,7 +211,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_flash('پیش‌فاکتور صادر شد و در پیگیری سفارش مشتری قابل دریافت است');
         } else {
             $nextMap = [
-                'accept' => 'accepted',
                 'reject' => 'rejected',
                 'mark_paid' => 'paid',
                 'mark_shipped' => 'shipped',
@@ -298,7 +353,7 @@ if ($viewOrder) {
 <div class="cms-page-head">
   <div>
     <h1 style="margin:0">سفارش‌ها</h1>
-    <p class="cms-muted" style="margin:.35rem 0 0">انبار → قیمت/پیش‌فاکتور → پرداخت → ارسال → تأیید دریافت</p>
+    <p class="cms-muted" style="margin:.35rem 0 0">انبار + قیمت/پیش‌فاکتور → پرداخت → ارسال → تأیید دریافت</p>
   </div>
 </div>
 
@@ -445,7 +500,8 @@ if ($viewOrder) {
     $nextActions = [];
     foreach ($allowed[$cur] ?? [] as $nextStatus) {
         if ($nextStatus === 'accepted') {
-            $nextActions[] = ['action' => 'accept', 'label' => 'تأیید انبار', 'class' => ''];
+            // Accept is forced through the prices tab (prices + auto pre-invoice).
+            continue;
         } elseif ($nextStatus === 'rejected') {
             $nextActions[] = ['action' => 'reject', 'label' => 'رد انبار و بایگانی', 'class' => 'cms-btn--ghost'];
         } elseif ($nextStatus === 'paid') {
@@ -592,7 +648,7 @@ if ($viewOrder) {
                     ><?= cms_h($draftMessage) ?></textarea>
                   </label>
                   <?php if ($cur === 'submitted'): ?>
-                    <p class="cms-muted cms-vtabs__hint">رد انبار سفارش را برای ادمین و مشتری می‌بندد و در بایگانی می‌ماند.</p>
+                    <p class="cms-muted cms-vtabs__hint">برای تأیید انبار به تب «اقلام و قیمت» بروید — قیمت همه اقلام الزامی است و پیش‌فاکتور خودکار برای مشتری ارسال می‌شود. رد انبار سفارش را می‌بندد و بایگانی می‌کند.</p>
                   <?php elseif ($cur === 'payment_proof_sent'): ?>
                     <p class="cms-muted cms-vtabs__hint">هشدار نقص مدارک وضعیت را عوض نمی‌کند؛ مشتری اصلاح می‌کند و دوباره می‌فرستد.</p>
                   <?php elseif (orders_is_parcel_open($cur)): ?>
@@ -611,7 +667,7 @@ if ($viewOrder) {
                 </form>
               <?php else: ?>
                 <?php if ($cur === 'accepted'): ?>
-                  <p class="cms-muted">در انتظار ارسال مدارک پرداخت توسط مشتری. از تب «فاکتورها» پیش‌فاکتور صادر کنید.</p>
+                  <p class="cms-muted">در انتظار ارسال مدارک پرداخت توسط مشتری. پیش‌فاکتور هنگام تأیید انبار ارسال شده؛ در صورت نیاز از تب «فاکتورها» دوباره بفرستید.</p>
                 <?php elseif (orders_is_archived($cur)): ?>
                   <p class="cms-muted">این سفارش بسته و بایگانی شده است — اقدامی باقی نمانده.</p>
                 <?php elseif (orders_is_finished($cur)): ?>
@@ -632,7 +688,9 @@ if ($viewOrder) {
                 <form method="post" class="cms-invoice-form" id="order-prices-form">
                   <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
                   <?php $returnHiddens(); ?>
-                  <input type="hidden" name="pre_invoice_due_at" value="<?= cms_h($dueDefault) ?>">
+                  <?php if ($cur !== 'submitted'): ?>
+                    <input type="hidden" name="pre_invoice_due_at" value="<?= cms_h($dueDefault) ?>">
+                  <?php endif; ?>
                   <table class="cms-table">
                     <thead>
                       <tr>
@@ -682,6 +740,7 @@ if ($viewOrder) {
                               data-qty="<?= (int) ($line['quantity'] ?? 1) ?>"
                               dir="ltr"
                               autocomplete="off"
+                              <?= $cur === 'submitted' ? 'required' : '' ?>
                             >
                           <?php else: ?>
                             <?= cms_h((string) ($lineMeta['unit_label'] ?? ($line['price_text'] ?? '—'))) ?>
@@ -701,10 +760,26 @@ if ($viewOrder) {
                     </tfoot>
                   </table>
                   <?php if ($canEditPrices): ?>
-                    <div class="cms-btn-row" style="margin-top:1rem">
-                      <button class="cms-btn" type="submit" name="action" value="save_prices">ذخیره قیمت‌ها</button>
-                    </div>
-                    <p class="cms-muted cms-vtabs__hint">پس از ذخیره، از تب «فاکتورها» پیش‌فاکتور صادر کنید.</p>
+                    <?php if ($cur === 'submitted'): ?>
+                      <label class="cms-field" style="max-width:16rem;margin-top:1rem">
+                        <span class="cms-label">تاریخ سررسید پیش‌فاکتور</span>
+                        <input class="cms-input" type="date" name="pre_invoice_due_at" dir="ltr" value="<?= cms_h($dueDefault) ?>" required>
+                      </label>
+                      <div class="cms-btn-row" style="margin-top:1rem">
+                        <button class="cms-btn" type="submit" name="action" value="accept">
+                          تأیید انبار و ارسال پیش‌فاکتور
+                        </button>
+                        <button class="cms-btn cms-btn--ghost" type="submit" name="action" value="save_prices">
+                          فقط ذخیره قیمت‌ها
+                        </button>
+                      </div>
+                      <p class="cms-muted cms-vtabs__hint">با تأیید انبار، قیمت‌ها ذخیره می‌شود، پیش‌فاکتور برای مشتری ارسال می‌شود و وضعیت به «تأیید انبار» می‌رود.</p>
+                    <?php else: ?>
+                      <div class="cms-btn-row" style="margin-top:1rem">
+                        <button class="cms-btn" type="submit" name="action" value="save_prices">ذخیره قیمت‌ها</button>
+                      </div>
+                      <p class="cms-muted cms-vtabs__hint">پس از ذخیره، از تب «فاکتورها» می‌توانید پیش‌فاکتور را دوباره بفرستید.</p>
+                    <?php endif; ?>
                     <script>
                     (function () {
                       var form = document.getElementById('order-prices-form');
@@ -773,7 +848,7 @@ if ($viewOrder) {
                 </div>
               </div>
 
-              <?php if ($canEditPrices): ?>
+              <?php if ($canEditPrices && $cur !== 'submitted'): ?>
                 <form method="post" class="cms-invoice-form" style="margin-top:1.1rem">
                   <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
                   <?php $returnHiddens(); ?>
@@ -791,6 +866,8 @@ if ($viewOrder) {
                   </div>
                   <p class="cms-muted cms-vtabs__hint">مشتری همیشه آخرین پیش‌فاکتور را می‌بیند. مبالغ PDF به تومان و شامل جمع کل است.</p>
                 </form>
+              <?php elseif ($cur === 'submitted'): ?>
+                <p class="cms-muted" style="margin-top:1rem">پیش‌فاکتور با «تأیید انبار و ارسال پیش‌فاکتور» از تب اقلام و قیمت صادر می‌شود.</p>
               <?php endif; ?>
             </section>
 
