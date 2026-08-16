@@ -1,5 +1,5 @@
-:HL["/test2/_next/static/chunks/0ierjzsvlef._.css","style"]
+:HL["/test2/_next/static/chunks/17d22kg1glwq9.css","style"]
 :HC["/",""]
 :HL["https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap","style"]
 :HL["/test2/images/header-hero-image-button-metal.png","image"]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"k","param":null,"prefetchHints":0,"slots":{"children":{"name":"token","param":{"type":"d","key":"_","siblings":null},"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}}}},"staleTime":300,"buildId":"FNH4DHjWXIIjN3zWioylA"}
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"k","param":null,"prefetchHints":0,"slots":{"children":{"name":"token","param":{"type":"d","key":"_","siblings":null},"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}}}},"staleTime":300,"buildId":"KqIvo39f2PDr2hGM0XmB8"}
