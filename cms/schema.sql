@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS products (
   category_id INT UNSIGNED NOT NULL,
   name VARCHAR(191) NOT NULL,
   slug VARCHAR(191) NOT NULL,
+  visual_id VARCHAR(64) NULL,
   description TEXT NULL,
   price_text VARCHAR(128) NULL,
   pack_size INT UNSIGNED NULL,
@@ -96,6 +97,7 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_prod_slug (slug),
+  UNIQUE KEY uq_prod_visual_id (visual_id),
   KEY idx_prod_cat (category_id),
   CONSTRAINT fk_prod_cat FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -328,6 +330,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   factory_name VARCHAR(191) NULL,
   model_name VARCHAR(191) NULL,
   category_name VARCHAR(191) NULL,
+  visual_id VARCHAR(64) NULL,
   PRIMARY KEY (id),
   KEY idx_order_items_order (order_id),
   CONSTRAINT fk_order_items_order

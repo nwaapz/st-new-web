@@ -57,20 +57,21 @@ try {
     $products = [];
     try {
         $stmt = $pdo->prepare(
-            "SELECT p.id, p.name, p.slug, c.name AS category_name, {$factoryNamesSql} AS factory_name
+            "SELECT p.id, p.name, p.slug, p.visual_id, c.name AS category_name, {$factoryNamesSql} AS factory_name
              FROM products p
              JOIN categories c ON c.id = p.category_id
              WHERE p.published = 1
-               AND ({$nameP} LIKE ? OR {$slugP} LIKE ? OR {$nameC} LIKE ? OR {$factoryNamesSql} LIKE ? OR {$modelNamesSql} LIKE ?)
+               AND ({$nameP} LIKE ? OR {$slugP} LIKE ? OR {$nameC} LIKE ? OR {$factoryNamesSql} LIKE ? OR {$modelNamesSql} LIKE ? OR " . search_name_sql('p.visual_id') . " LIKE ?)
              ORDER BY p.sort_order ASC, p.name ASC
              LIMIT 5"
         );
-        $stmt->execute([$like, $like, $like, $like, $like]);
+        $stmt->execute([$like, $like, $like, $like, $like, $like]);
         foreach ($stmt->fetchAll() ?: [] as $row) {
             $products[] = [
                 'id' => (int) $row['id'],
                 'name' => (string) $row['name'],
                 'slug' => (string) $row['slug'],
+                'visual_id' => $row['visual_id'] !== null ? (string) $row['visual_id'] : null,
                 'category_name' => (string) $row['category_name'],
                 'factory_name' => (string) $row['factory_name'],
             ];

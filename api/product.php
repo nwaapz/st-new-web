@@ -35,6 +35,14 @@ function product_api_ensure_schema(PDO $pdo): void
             $pdo->exec("ALTER TABLE products ADD COLUMN {$col} {$definition}");
         }
     }
+    $visualExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'visual_id'")->fetchAll();
+    if (count($visualExists) === 0) {
+        $pdo->exec('ALTER TABLE products ADD COLUMN visual_id VARCHAR(64) NULL AFTER slug');
+    }
+    $visualIdx = $pdo->query("SHOW INDEX FROM products WHERE Key_name = 'uq_prod_visual_id'")->fetchAll();
+    if (count($visualIdx) === 0) {
+        $pdo->exec('ALTER TABLE products ADD UNIQUE KEY uq_prod_visual_id (visual_id)');
+    }
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS product_images (
           id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -90,7 +98,7 @@ try {
     $primaryModelSql = cms_product_primary_car_model_id_sql('p');
     $primaryFactorySql = cms_product_primary_factory_id_sql('p');
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.category_id, p.name, p.slug, p.description,
+        'SELECT p.id, p.category_id, p.name, p.slug, p.visual_id, p.description,
                 p.price_text, p.pack_size, p.banner, p.image, p.video_path, p.video_path_low, p.video_poster,
                 p.detail_lead_image, p.shop_display_image, p.sort_order,
                 p.dim_length, p.dim_width, p.dim_height, p.dim_weight,

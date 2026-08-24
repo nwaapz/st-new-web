@@ -243,6 +243,22 @@ function orders_ensure_schema(PDO $pdo): void
         if (!isset($itemCols['pack_size'])) {
             $pdo->exec('ALTER TABLE order_items ADD COLUMN pack_size INT UNSIGNED NULL AFTER unit_type');
         }
+        if (!isset($itemCols['visual_id'])) {
+            $pdo->exec('ALTER TABLE order_items ADD COLUMN visual_id VARCHAR(64) NULL AFTER category_name');
+        }
+    } catch (Throwable $e) {
+        /* ignore */
+    }
+
+    try {
+        $prodVisual = $pdo->query("SHOW COLUMNS FROM products LIKE 'visual_id'")->fetchAll();
+        if (count($prodVisual) === 0) {
+            $pdo->exec('ALTER TABLE products ADD COLUMN visual_id VARCHAR(64) NULL AFTER slug');
+        }
+        $visualIdx = $pdo->query("SHOW INDEX FROM products WHERE Key_name = 'uq_prod_visual_id'")->fetchAll();
+        if (count($visualIdx) === 0) {
+            $pdo->exec('ALTER TABLE products ADD UNIQUE KEY uq_prod_visual_id (visual_id)');
+        }
     } catch (Throwable $e) {
         /* ignore */
     }
@@ -381,6 +397,9 @@ function orders_serialize(array $order, array $items, array $events): array
             'factory_name' => $item['factory_name'] !== null ? (string) $item['factory_name'] : null,
             'model_name' => $item['model_name'] !== null ? (string) $item['model_name'] : null,
             'category_name' => $item['category_name'] !== null ? (string) $item['category_name'] : null,
+            'visual_id' => isset($item['visual_id']) && $item['visual_id'] !== null && trim((string) $item['visual_id']) !== ''
+                ? (string) $item['visual_id']
+                : null,
         ];
     }
 

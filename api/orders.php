@@ -125,6 +125,7 @@ try {
             'factory_name' => null,
             'model_name' => null,
             'category_name' => null,
+            'visual_id' => null,
         ];
 
         if (isset($raw['price_text']) && is_string($raw['price_text']) && trim($raw['price_text']) !== '') {
@@ -138,12 +139,15 @@ try {
                 $snapshot[$key] = mb_substr(trim($raw[$key]), 0, 191);
             }
         }
+        if (isset($raw['visual_id']) && is_string($raw['visual_id']) && trim($raw['visual_id']) !== '') {
+            $snapshot['visual_id'] = mb_substr(trim($raw['visual_id']), 0, 64);
+        }
 
         // Prefer live catalog fields when the product still exists.
         $factoryNamesSql = cms_product_factory_names_sql('p');
         $modelNamesSql = cms_product_model_names_sql('p');
         $prodStmt = $pdo->prepare(
-            'SELECT p.id, p.name, p.slug, p.price_text, p.image, p.pack_size, p.shop_display_image,
+            'SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.pack_size, p.shop_display_image,
                     COALESCE(NULLIF(p.shop_display_image, \'\'), p.image) AS display_image,
                     ' . $factoryNamesSql . ' AS factory_name,
                     ' . $modelNamesSql . ' AS model_name,
@@ -183,6 +187,9 @@ try {
             $snapshot['category_name'] = $prod['category_name'] !== null
                 ? (string) $prod['category_name']
                 : $snapshot['category_name'];
+            if ($prod['visual_id'] !== null && trim((string) $prod['visual_id']) !== '') {
+                $snapshot['visual_id'] = (string) $prod['visual_id'];
+            }
         } elseif ($unitType === 'pack' && $clientPack <= 0) {
             $snapshot['unit_type'] = 'piece';
             $snapshot['pack_size'] = null;
@@ -255,8 +262,8 @@ try {
         $itemIns = $pdo->prepare(
             'INSERT INTO order_items
               (order_id, product_id, name, slug, price_text, image, quantity,
-               unit_type, pack_size, factory_name, model_name, category_name)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+               unit_type, pack_size, factory_name, model_name, category_name, visual_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($normalized as $item) {
             $itemIns->execute([
@@ -272,6 +279,7 @@ try {
                 $item['factory_name'],
                 $item['model_name'],
                 $item['category_name'],
+                $item['visual_id'] ?? null,
             ]);
         }
 

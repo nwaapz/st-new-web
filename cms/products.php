@@ -43,6 +43,14 @@ function product_ensure_detail_schema(PDO $pdo): void
             $pdo->exec("ALTER TABLE products ADD COLUMN {$col} {$definition}");
         }
     }
+    $visualExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'visual_id'")->fetchAll();
+    if (count($visualExists) === 0) {
+        $pdo->exec('ALTER TABLE products ADD COLUMN visual_id VARCHAR(64) NULL AFTER slug');
+    }
+    $visualIdx = $pdo->query("SHOW INDEX FROM products WHERE Key_name = 'uq_prod_visual_id'")->fetchAll();
+    if (count($visualIdx) === 0) {
+        $pdo->exec('ALTER TABLE products ADD UNIQUE KEY uq_prod_visual_id (visual_id)');
+    }
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS product_images (
           id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -221,6 +229,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($slug === '') {
             $slug = cms_slugify($name);
         }
+        $visualId = trim((string) ($_POST['visual_id'] ?? ''));
+        $visualId = $visualId !== '' ? $visualId : null;
         $description = trim((string) ($_POST['description'] ?? ''));
         $priceText = trim((string) ($_POST['price_text'] ?? ''));
         $packSizeRaw = trim((string) ($_POST['pack_size'] ?? ''));
@@ -278,6 +288,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($slugCheck->fetch()) {
             throw new RuntimeException('این اسلاگ قبلاً استفاده شده است');
         }
+        if ($visualId !== null) {
+            $visualCheck = $pdo->prepare('SELECT id FROM products WHERE visual_id = ? AND id <> ? LIMIT 1');
+            $visualCheck->execute([$visualId, $id]);
+            if ($visualCheck->fetch()) {
+                throw new RuntimeException('این شناسه نمایشی قبلاً استفاده شده است');
+            }
+        }
 
         if ($action === 'add_gallery') {
             if (count($collectedGallery) >= PRODUCT_GALLERY_MAX) {
@@ -290,12 +307,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE products SET category_id=?, name=?, slug=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
+                'UPDATE products SET category_id=?, name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
                  video_path=?, video_path_low=?, video_poster=?, detail_lead_image=?, shop_display_image=?,
                  dim_length=?, dim_width=?, dim_height=?, dim_weight=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
-                $categoryId, $name, $slug,
+                $categoryId, $name, $slug, $visualId,
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
                 $packSize,
@@ -315,13 +332,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productId = $id;
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO products (category_id, name, slug, description, price_text, pack_size, banner, image,
+                'INSERT INTO products (category_id, name, slug, visual_id, description, price_text, pack_size, banner, image,
                  video_path, video_path_low, video_poster, detail_lead_image, shop_display_image,
                  dim_length, dim_width, dim_height, dim_weight, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
-                $categoryId, $name, $slug,
+                $categoryId, $name, $slug, $visualId,
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
                 $packSize,
@@ -451,6 +468,10 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
       <input class="cms-input" name="slug" dir="ltr" value="<?= cms_h($edit['slug'] ?? '') ?>">
     </label>
   </div>
+  <label class="cms-field"><span class="cms-label">شناسه نمایشی</span>
+    <input class="cms-input" name="visual_id" dir="ltr" value="<?= cms_h($edit['visual_id'] ?? '') ?>" placeholder="ST-2041">
+    <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">کد یکتا برای نمایش در سایت؛ در گوشه تصویر کارت‌ها دیده می‌شود</span>
+  </label>
   <div class="cms-grid-2">
     <label class="cms-field"><span class="cms-label">قیمت (متن نمایشی)</span>
       <input class="cms-input" name="price_text" value="<?= cms_h($edit['price_text'] ?? '') ?>" placeholder="۱٬۲۵۰٬۰۰۰ تومان">
@@ -569,11 +590,12 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
     <p class="cms-empty">هنوز محصولی ثبت نشده. <a href="products.php?new=1">اولین مورد را اضافه کنید</a>.</p>
   <?php else: ?>
   <table class="cms-table">
-    <thead><tr><th>محصول</th><th>خودرو</th><th>دسته</th><th>بنر</th><th>قیمت</th><th></th></tr></thead>
+    <thead><tr><th>محصول</th><th>شناسه</th><th>خودرو</th><th>دسته</th><th>بنر</th><th>قیمت</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($items as $item): ?>
       <tr>
         <td><div class="cms-list-name"><?php cms_list_thumb(product_list_thumb_image($item)); ?><span><?= cms_h($item['name']) ?></span></div></td>
+        <td dir="ltr"><?= cms_h($item['visual_id'] ?? '') ?></td>
         <td><?= cms_h($item['factory_name'] . ' / ' . $item['model_name']) ?></td>
         <td><?= cms_h($item['category_name']) ?></td>
         <td><?= cms_h($bannerLabels[$item['banner']] ?? $item['banner']) ?></td>

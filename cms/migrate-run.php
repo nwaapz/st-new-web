@@ -690,6 +690,28 @@ try {
     } else {
         $log[] = 'product_car_models already migrated';
     }
+
+    $visualCol = $pdo->query("SHOW COLUMNS FROM products LIKE 'visual_id'")->fetchAll();
+    if (count($visualCol) === 0) {
+        $pdo->exec('ALTER TABLE products ADD COLUMN visual_id VARCHAR(64) NULL AFTER slug');
+        $log[] = 'Added products.visual_id column';
+    } else {
+        $log[] = 'products.visual_id already exists';
+    }
+    $visualIdx = $pdo->query("SHOW INDEX FROM products WHERE Key_name = 'uq_prod_visual_id'")->fetchAll();
+    if (count($visualIdx) === 0) {
+        $pdo->exec('ALTER TABLE products ADD UNIQUE KEY uq_prod_visual_id (visual_id)');
+        $log[] = 'Added unique index uq_prod_visual_id';
+    } else {
+        $log[] = 'uq_prod_visual_id index already exists';
+    }
+    $orderVisualCol = $pdo->query("SHOW COLUMNS FROM order_items LIKE 'visual_id'")->fetchAll();
+    if (count($orderVisualCol) === 0) {
+        $pdo->exec('ALTER TABLE order_items ADD COLUMN visual_id VARCHAR(64) NULL AFTER category_name');
+        $log[] = 'Added order_items.visual_id column';
+    } else {
+        $log[] = 'order_items.visual_id already exists';
+    }
 } catch (Throwable $e) {
     $ok = false;
     $log[] = 'ERROR: ' . $e->getMessage();
