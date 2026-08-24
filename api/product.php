@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/_common.php';
+require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 
 function product_api_ensure_schema(PDO $pdo): void
 {
@@ -18,6 +19,19 @@ function product_api_ensure_schema(PDO $pdo): void
     $packExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'pack_size'")->fetchAll();
     if (count($packExists) === 0) {
         $pdo->exec('ALTER TABLE products ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
+    }
+    foreach (
+        [
+            'video_path' => 'VARCHAR(512) NULL AFTER image',
+            'video_poster' => 'VARCHAR(512) NULL AFTER video_path',
+            'detail_lead_image' => 'VARCHAR(512) NULL AFTER video_poster',
+            'shop_display_image' => 'VARCHAR(512) NULL AFTER detail_lead_image',
+        ] as $col => $definition
+    ) {
+        $exists = $pdo->query('SHOW COLUMNS FROM products LIKE ' . $pdo->quote($col))->fetchAll();
+        if (count($exists) === 0) {
+            $pdo->exec("ALTER TABLE products ADD COLUMN {$col} {$definition}");
+        }
     }
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS product_images (
@@ -50,6 +64,7 @@ function product_api_ensure_schema(PDO $pdo): void
 try {
     $pdo = cms_pdo();
     product_api_ensure_schema($pdo);
+    cms_ensure_car_model_factories_schema($pdo);
     $slug = isset($_GET['slug']) ? trim((string) $_GET['slug']) : '';
     $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 
@@ -67,16 +82,19 @@ try {
         $params[] = $id;
     }
 
+    $factoryNamesSql = cms_car_model_factory_names_sql('m');
+    $primaryFactorySql = cms_car_model_primary_factory_id_sql('m');
     $stmt = $pdo->prepare(
         'SELECT p.id, p.category_id, p.car_model_id, p.name, p.slug, p.description,
-                p.price_text, p.pack_size, p.banner, p.image, p.sort_order,
+                p.price_text, p.pack_size, p.banner, p.image, p.video_path, p.video_poster,
+                p.detail_lead_image, p.shop_display_image, p.sort_order,
                 p.dim_length, p.dim_width, p.dim_height, p.dim_weight,
                 c.name AS category_name, c.slug AS category_slug,
-                m.name AS model_name, f.name AS factory_name, f.id AS factory_id
+                m.name AS model_name, ' . $factoryNamesSql . ' AS factory_name,
+                ' . $primaryFactorySql . ' AS factory_id
          FROM products p
          JOIN categories c ON c.id = p.category_id
          JOIN car_models m ON m.id = p.car_model_id
-         JOIN factories f ON f.id = m.factory_id
          WHERE ' . implode(' AND ', $where) . '
          LIMIT 1'
     );

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/_common.php';
 require_once dirname(__DIR__) . '/cms/lib/iran-provinces.php';
 require_once dirname(__DIR__) . '/cms/lib/search-text.php';
+require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 
 function search_add_place(array &$places, array &$seen, string $code, string $label): void
 {
@@ -26,6 +27,7 @@ function search_add_place(array &$places, array &$seen, string $code, string $la
 
 try {
     $pdo = cms_pdo();
+    cms_ensure_car_model_factories_schema($pdo);
     $q = search_normalize((string) ($_GET['q'] ?? ''));
 
     $empty = [
@@ -45,19 +47,19 @@ try {
     $nameP = search_name_sql('p.name');
     $slugP = search_name_sql('p.slug');
     $nameC = search_name_sql('c.name');
-    $nameF = search_name_sql('f.name');
     $nameM = search_name_sql('m.name');
+    $factoryNamesSql = cms_car_model_factory_names_sql('m');
+    $primaryFactorySql = cms_car_model_primary_factory_id_sql('m');
 
     $products = [];
     try {
         $stmt = $pdo->prepare(
-            "SELECT p.id, p.name, p.slug, c.name AS category_name, f.name AS factory_name
+            "SELECT p.id, p.name, p.slug, c.name AS category_name, {$factoryNamesSql} AS factory_name
              FROM products p
              JOIN categories c ON c.id = p.category_id
              JOIN car_models m ON m.id = p.car_model_id
-             JOIN factories f ON f.id = m.factory_id
              WHERE p.published = 1
-               AND ({$nameP} LIKE ? OR {$slugP} LIKE ? OR {$nameC} LIKE ? OR {$nameF} LIKE ? OR {$nameM} LIKE ?)
+               AND ({$nameP} LIKE ? OR {$slugP} LIKE ? OR {$nameC} LIKE ? OR {$factoryNamesSql} LIKE ? OR {$nameM} LIKE ?)
              ORDER BY p.sort_order ASC, p.name ASC
              LIMIT 5"
         );
@@ -116,21 +118,41 @@ try {
     $carModels = [];
     try {
         $stmt = $pdo->prepare(
-            'SELECT m.id, m.name, m.factory_id, f.name AS factory_name
+            "SELECT m.id, m.name, {$primaryFactorySql} AS factory_id, {$factoryNamesSql} AS factory_name
              FROM car_models m
-             JOIN factories f ON f.id = m.factory_id
-             WHERE m.published = 1 AND f.published = 1
-               AND (' . search_name_sql('m.name') . ' LIKE ? OR ' . search_name_sql('f.name') . ' LIKE ?)
+             WHERE m.published = 1
+               AND (
+                 {$nameM} LIKE ?
+                 OR {$factoryNamesSql} LIKE ?
+                 OR EXISTS (
+                   SELECT 1 FROM car_model_factories cmf_s
+                   JOIN factories f_s ON f_s.id = cmf_s.factory_id
+                   WHERE cmf_s.car_model_id = m.id
+                     AND f_s.published = 1
+                     AND " . search_name_sql('f_s.name') . " LIKE ?
+                 )
+               )
              ORDER BY m.sort_order ASC, m.name ASC
-             LIMIT 3'
+             LIMIT 3"
         );
-        $stmt->execute([$like, $like]);
+        $stmt->execute([$like, $like, $like]);
         foreach ($stmt->fetchAll() ?: [] as $row) {
+            $factoryIdsStmt = $pdo->prepare(
+                'SELECT factory_id FROM car_model_factories
+                 WHERE car_model_id = ?
+                 ORDER BY sort_order ASC, factory_id ASC'
+            );
+            $factoryIdsStmt->execute([(int) $row['id']]);
+            $factoryIds = array_map(
+                static fn (array $r): int => (int) $r['factory_id'],
+                $factoryIdsStmt->fetchAll() ?: []
+            );
             $carModels[] = [
                 'id' => (int) $row['id'],
                 'name' => (string) $row['name'],
-                'factory_id' => (int) $row['factory_id'],
-                'factory_name' => (string) $row['factory_name'],
+                'factory_id' => (int) ($row['factory_id'] ?? 0),
+                'factory_ids' => $factoryIds,
+                'factory_name' => (string) ($row['factory_name'] ?? ''),
             ];
         }
     } catch (Throwable $e) {

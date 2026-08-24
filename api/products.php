@@ -3,9 +3,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/_common.php';
 require_once dirname(__DIR__) . '/cms/lib/search-text.php';
+require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 
 try {
     $pdo = cms_pdo();
+    cms_ensure_car_model_factories_schema($pdo);
     $packExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'pack_size'")->fetchAll();
     if (count($packExists) === 0) {
         $pdo->exec('ALTER TABLE products ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
@@ -64,7 +66,7 @@ try {
         $params[] = $carModelId;
     }
     if ($factoryId > 0) {
-        $where[] = 'm.factory_id = ?';
+        $where[] = cms_car_model_factory_filter_sql('m');
         $params[] = $factoryId;
     }
     if ($banner !== '') {
@@ -73,10 +75,11 @@ try {
     }
     if ($q !== '') {
         $like = '%' . search_like_escape($q) . '%';
+        $factoryNamesSql = cms_car_model_factory_names_sql('m');
         $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR '
             . search_name_sql('p.slug') . ' LIKE ? OR '
             . search_name_sql('c.name') . ' LIKE ? OR '
-            . search_name_sql('f.name') . ' LIKE ? OR '
+            . $factoryNamesSql . ' LIKE ? OR '
             . search_name_sql('m.name') . ' LIKE ?)';
         array_push($params, $like, $like, $like, $like, $like);
     }
@@ -88,14 +91,18 @@ try {
         $orderBy = 'psi.sort_order ASC, p.sort_order ASC, p.name ASC';
     }
 
+    $factoryNamesSql = cms_car_model_factory_names_sql('m');
+    $primaryFactorySql = cms_car_model_primary_factory_id_sql('m');
     $sql = 'SELECT p.id, p.category_id, p.car_model_id, p.name, p.slug, p.description,
-                   p.price_text, p.pack_size, p.banner, p.image, p.sort_order,
-                   c.name AS category_name, m.name AS model_name, f.name AS factory_name
+                   p.price_text, p.pack_size, p.banner, p.image, p.shop_display_image, p.sort_order,
+                   COALESCE(NULLIF(p.shop_display_image, \'\'), p.image) AS display_image,
+                   c.name AS category_name, m.name AS model_name,
+                   ' . $factoryNamesSql . ' AS factory_name,
+                   ' . $primaryFactorySql . ' AS factory_id
             FROM products p
             ' . $seriesJoin . '
             JOIN categories c ON c.id = p.category_id
             JOIN car_models m ON m.id = p.car_model_id
-            JOIN factories f ON f.id = m.factory_id
             WHERE ' . implode(' AND ', $where) . '
             ORDER BY ' . $orderBy;
 
