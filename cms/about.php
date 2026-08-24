@@ -49,6 +49,10 @@ function about_ensure_tables(PDO $pdo): void
             ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
+    $lowExists = $pdo->query("SHOW COLUMNS FROM about_exhibitions LIKE 'video_path_low'")->fetchAll();
+    if (count($lowExists) === 0) {
+        $pdo->exec('ALTER TABLE about_exhibitions ADD COLUMN video_path_low VARCHAR(512) NULL AFTER video_path');
+    }
     $ready = true;
 }
 
@@ -266,13 +270,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['exhibition_form'])) {
         $cover = cms_handle_optional_upload('cover_image', $coverExisting);
         $videoExisting = (string) ($_POST['video_path'] ?? '');
         $video = cms_handle_optional_video_upload('video_path', $videoExisting);
+        $videoLowExisting = (string) ($_POST['video_path_low'] ?? '');
+        $videoLow = cms_handle_optional_video_upload('video_path_low', $videoLowExisting);
         $collected = $slideCount > 0 ? about_collect_slides_from_post($slideCount) : [];
 
         $persist = static function (PDO $pdo, int $id, array $fields, array $slides): int {
             if ($id > 0) {
                 $stmt = $pdo->prepare(
                     'UPDATE about_exhibitions
-                     SET title=?, year=?, location=?, cover_image=?, video_path=?, explanation=?, sort_order=?, published=?
+                     SET title=?, year=?, location=?, cover_image=?, video_path=?, video_path_low=?, explanation=?, sort_order=?, published=?
                      WHERE id=?'
                 );
                 $stmt->execute([
@@ -281,6 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['exhibition_form'])) {
                     $fields['location'],
                     $fields['cover'],
                     $fields['video'],
+                    $fields['video_low'],
                     $fields['explanation'],
                     $fields['sort_order'],
                     $fields['published'],
@@ -290,8 +297,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['exhibition_form'])) {
             } else {
                 $stmt = $pdo->prepare(
                     'INSERT INTO about_exhibitions
-                     (title, year, location, cover_image, video_path, explanation, sort_order, published)
-                     VALUES (?,?,?,?,?,?,?,?)'
+                     (title, year, location, cover_image, video_path, video_path_low, explanation, sort_order, published)
+                     VALUES (?,?,?,?,?,?,?,?,?)'
                 );
                 $stmt->execute([
                     $fields['title'],
@@ -299,6 +306,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['exhibition_form'])) {
                     $fields['location'],
                     $fields['cover'],
                     $fields['video'],
+                    $fields['video_low'],
                     $fields['explanation'],
                     $fields['sort_order'],
                     $fields['published'],
@@ -315,6 +323,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['exhibition_form'])) {
             'location' => $location !== '' ? $location : null,
             'cover' => $cover !== '' ? $cover : null,
             'video' => $video !== '' ? $video : null,
+            'video_low' => $videoLow !== '' ? $videoLow : null,
             'explanation' => $explanation !== '' ? $explanation : null,
             'sort_order' => $sortOrder,
             'published' => $published,
@@ -512,6 +521,13 @@ cms_layout_start('درباره ما', cms_current_username(), 'website');
   </label>
   <?php cms_image_field('cover_image', 'تصویر جلد', (string) ($edit['cover_image'] ?? '')); ?>
   <?php cms_video_field('video_path', 'ویدیوی غرفه (MP4 / WebM)', (string) ($edit['video_path'] ?? '')); ?>
+  <?php cms_video_field(
+      'video_path_low',
+      'ویدیو کیفیت پایین (اختیاری)',
+      (string) ($edit['video_path_low'] ?? ''),
+      'about/videos',
+      'نسخه فشرده برای اینترنت کند. اگر خالی باشد فقط ویدیوی اصلی پخش می‌شود.'
+  ); ?>
   <label class="cms-field"><span class="cms-label">ترتیب نمایش</span>
     <input class="cms-input" type="number" name="sort_order" value="<?= (int) ($edit['sort_order'] ?? 0) ?>">
   </label>

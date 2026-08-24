@@ -33,6 +33,7 @@ function product_ensure_detail_schema(PDO $pdo): void
             'video_poster' => 'VARCHAR(512) NULL AFTER video_path',
             'detail_lead_image' => 'VARCHAR(512) NULL AFTER video_poster',
             'shop_display_image' => 'VARCHAR(512) NULL AFTER detail_lead_image',
+            'video_path_low' => 'VARCHAR(512) NULL AFTER video_poster',
         ] as $col => $definition
     ) {
         $exists = $pdo->query('SHOW COLUMNS FROM products LIKE ' . $pdo->quote($col))->fetchAll();
@@ -231,6 +232,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (string) ($_POST['video_path'] ?? ''),
             'products/videos'
         );
+        $videoPathLow = cms_handle_optional_video_upload(
+            'video_path_low',
+            (string) ($_POST['video_path_low'] ?? ''),
+            'products/videos'
+        );
         $detailLeadImage = product_normalize_image_picker((string) ($_POST['detail_lead_image'] ?? ''));
         $shopDisplayImage = product_normalize_image_picker((string) ($_POST['shop_display_image'] ?? ''));
         $videoPoster = product_normalize_image_picker((string) ($_POST['video_poster'] ?? ''));
@@ -269,7 +275,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id > 0) {
             $stmt = $pdo->prepare(
                 'UPDATE products SET category_id=?, car_model_id=?, name=?, slug=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
-                 video_path=?, video_poster=?, detail_lead_image=?, shop_display_image=?,
+                 video_path=?, video_path_low=?, video_poster=?, detail_lead_image=?, shop_display_image=?,
                  dim_length=?, dim_width=?, dim_height=?, dim_weight=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
@@ -280,6 +286,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $banner,
                 $image !== '' ? $image : null,
                 $videoPath !== '' ? $videoPath : null,
+                $videoPathLow !== '' ? $videoPathLow : null,
                 $videoPoster,
                 $detailLeadImage,
                 $shopDisplayImage,
@@ -293,9 +300,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $stmt = $pdo->prepare(
                 'INSERT INTO products (category_id, car_model_id, name, slug, description, price_text, pack_size, banner, image,
-                 video_path, video_poster, detail_lead_image, shop_display_image,
+                 video_path, video_path_low, video_poster, detail_lead_image, shop_display_image,
                  dim_length, dim_width, dim_height, dim_weight, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $categoryId, $carModelId, $name, $slug,
@@ -305,6 +312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $banner,
                 $image !== '' ? $image : null,
                 $videoPath !== '' ? $videoPath : null,
+                $videoPathLow !== '' ? $videoPathLow : null,
                 $videoPoster,
                 $detailLeadImage,
                 $shopDisplayImage,
@@ -460,7 +468,7 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   <?php cms_image_field('image', 'تصویر اصلی', (string) ($edit['image'] ?? '')); ?>
 
   <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">گالری تصاویر</h3>
-  <p class="cms-muted" style="margin:0 0 .75rem">تصاویر اضافی صفحه محصول (علاوه بر تصویر اصلی)</p>
+  <p class="cms-muted" style="margin:0 0 .75rem">تصاویر اضافی صفحه محصول. اسلاید اول از طریق «اسلاید اول» قابل تنظیم است؛ تصویر اصلی همیشه در گالری نمایش داده می‌شود.</p>
   <input type="hidden" name="gallery_count" value="<?= count($gallery) ?>">
   <?php if ($gallery === []): ?>
     <p class="cms-muted">هنوز تصویری در گالری نیست.</p>
@@ -484,6 +492,13 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
 
   <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">ویدیو و نمایش تصاویر</h3>
   <?php cms_video_field('video_path', 'ویدیو محصول (اسلاید آخر)', (string) ($edit['video_path'] ?? ''), 'products/videos'); ?>
+  <?php cms_video_field(
+      'video_path_low',
+      'ویدیو کیفیت پایین (اختیاری)',
+      (string) ($edit['video_path_low'] ?? ''),
+      'products/videos',
+      'نسخه فشرده (مثلاً ۴۸۰p MP4) برای اینترنت کند. اگر خالی باشد فقط ویدیوی اصلی پخش می‌شود.'
+  ); ?>
   <div class="cms-grid-2">
     <label class="cms-field"><span class="cms-label">اسلاید اول صفحه محصول</span>
       <select class="cms-select" name="detail_lead_image">

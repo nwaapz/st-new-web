@@ -16,6 +16,7 @@ function about_api_ensure_tables(PDO $pdo): void
               location VARCHAR(191) NULL,
               cover_image VARCHAR(512) NULL,
               video_path VARCHAR(512) NULL,
+              video_path_low VARCHAR(512) NULL,
               explanation TEXT NULL,
               sort_order INT NOT NULL DEFAULT 0,
               published TINYINT(1) NOT NULL DEFAULT 1,
@@ -39,6 +40,10 @@ function about_api_ensure_tables(PDO $pdo): void
                 ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
+    }
+    $lowExists = $pdo->query("SHOW COLUMNS FROM about_exhibitions LIKE 'video_path_low'")->fetchAll();
+    if (count($lowExists) === 0) {
+        $pdo->exec('ALTER TABLE about_exhibitions ADD COLUMN video_path_low VARCHAR(512) NULL AFTER video_path');
     }
 }
 
@@ -69,7 +74,7 @@ try {
     $exists = $pdo->query("SHOW TABLES LIKE 'about_exhibitions'")->fetchAll();
     if (count($exists) > 0) {
         $rows = $pdo->query(
-            'SELECT id, title, year, location, cover_image, video_path, explanation, sort_order
+            'SELECT id, title, year, location, cover_image, video_path, video_path_low, explanation, sort_order
              FROM about_exhibitions
              WHERE published = 1
              ORDER BY sort_order ASC, id ASC'
@@ -102,6 +107,7 @@ try {
                 'location' => (string) ($row['location'] ?? ''),
                 'cover' => (string) ($row['cover_image'] ?? ''),
                 'video' => (string) ($row['video_path'] ?? ''),
+                'video_low' => (string) ($row['video_path_low'] ?? ''),
                 'explanation' => (string) ($row['explanation'] ?? ''),
                 'sort_order' => (int) $row['sort_order'],
                 'slides' => $slides,

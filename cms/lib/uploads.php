@@ -5,6 +5,62 @@ declare(strict_types=1);
  * Shared image/video upload storage for CMS forms and upload.php AJAX.
  */
 
+/** Site-root uploads directory (public/uploads), not cms/uploads. */
+function cms_uploads_root(): string
+{
+    return dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'uploads';
+}
+
+/**
+ * Move legacy files from cms/uploads/ into site-root uploads/ (preserves subdirs).
+ *
+ * @return array{moved:int, skipped:int, errors:string[]}
+ */
+function cms_migrate_legacy_cms_uploads(): array
+{
+    $legacyRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads';
+    $targetRoot = cms_uploads_root();
+    $result = ['moved' => 0, 'skipped' => 0, 'errors' => []];
+
+    if (!is_dir($legacyRoot)) {
+        return $result;
+    }
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($legacyRoot, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+
+    foreach ($iterator as $item) {
+        if (!$item->isFile()) {
+            continue;
+        }
+        $legacyPath = $item->getPathname();
+        $relative = substr($legacyPath, strlen($legacyRoot));
+        $relative = str_replace('\\', '/', ltrim($relative, '/\\'));
+        $dest = $targetRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+
+        if (is_file($dest)) {
+            $result['skipped']++;
+            continue;
+        }
+
+        $destDir = dirname($dest);
+        if (!is_dir($destDir) && !mkdir($destDir, 0755, true) && !is_dir($destDir)) {
+            $result['errors'][] = 'Cannot create directory: ' . $destDir;
+            continue;
+        }
+
+        if (!rename($legacyPath, $dest)) {
+            $result['errors'][] = 'Failed to move: ' . $relative;
+            continue;
+        }
+        $result['moved']++;
+    }
+
+    return $result;
+}
+
 function cms_unique_upload_name(string $uploadsDir, string $originalName, string $ext): string
 {
     $base = pathinfo($originalName, PATHINFO_FILENAME);
@@ -82,7 +138,7 @@ function cms_store_uploaded_image(array $file): string
         throw new RuntimeException('حداکثر حجم تصویر ۵ مگابایت است');
     }
 
-    $uploadsDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads';
+    $uploadsDir = cms_uploads_root();
     if (!is_dir($uploadsDir) && !mkdir($uploadsDir, 0755, true) && !is_dir($uploadsDir)) {
         throw new RuntimeException('ساخت پوشه uploads ممکن نیست — دسترسی نوشتن را بررسی کنید');
     }
@@ -135,7 +191,7 @@ function cms_store_uploaded_video(array $file, string $subdir = 'about/videos'):
         throw new RuntimeException('حداکثر حجم ویدیو ۸۰ مگابایت است — فیلم را فشرده کنید');
     }
 
-    $uploadsRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads';
+    $uploadsRoot = cms_uploads_root();
     $subdir = trim(str_replace(['\\', '..'], ['/', ''], $subdir), '/');
     if ($subdir === '') {
         $subdir = 'about/videos';

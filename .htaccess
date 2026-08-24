@@ -6,6 +6,8 @@
   AddType font/woff .woff
   AddType application/font-woff2 .woff2
   AddType application/font-woff .woff
+  AddType video/mp4 .mp4
+  AddType video/webm .webm
 </IfModule>
 
 <IfModule mod_headers.c>

@@ -194,6 +194,135 @@
     xhr.send(formData);
   };
 
+  window.cmsMediaTarget = { textId: "", previewId: "", kind: "image" };
+
+  function formatMediaSize(bytes) {
+    if (!bytes || bytes < 1024) return "";
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  window.cmsOpenMediaPicker = function cmsOpenMediaPicker(textId, previewId, opts) {
+    opts = opts || {};
+    const kind = opts.kind || "image";
+    const subdir = opts.subdir || "";
+    window.cmsMediaTarget = { textId: textId, previewId: previewId, kind: kind };
+
+    const modal = document.getElementById("cms-media-modal");
+    const grid = document.getElementById("cms-media-grid");
+    const status = document.getElementById("cms-media-status");
+    const title = document.getElementById("cms-media-modal-title");
+    if (!modal || !grid || !status) return;
+
+    if (title) {
+      title.textContent =
+        kind === "video" ? "انتخاب ویدیو از سرور" : "انتخاب تصویر از سرور";
+    }
+    modal.hidden = false;
+    grid.innerHTML = "";
+    status.textContent = "در حال بارگذاری…";
+
+    const params = new URLSearchParams({ kind: kind });
+    if (subdir) params.set("subdir", subdir);
+
+    fetch("media-list.php?" + params.toString(), { credentials: "same-origin" })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (data) {
+        const items = data.items || [];
+        if (!items.length) {
+          status.textContent =
+            kind === "video"
+              ? "هنوز ویدیویی در این پوشه نیست."
+              : "هنوز تصویری در uploads نیست.";
+          return;
+        }
+        status.textContent =
+          items.length +
+          (kind === "video" ? " ویدیو" : " تصویر") +
+          " — یکی را انتخاب کنید";
+        items.forEach(function (it) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className =
+            "cms-media-item" + (kind === "video" ? " cms-media-item--video" : "");
+          btn.title = it.name;
+          const sizeLabel = formatMediaSize(it.size);
+          if (kind === "video") {
+            btn.innerHTML =
+              '<video class="cms-media-item__video" muted preload="metadata" playsinline src="' +
+              it.url +
+              '"></video><span>' +
+              it.name +
+              (sizeLabel ? " · " + sizeLabel : "") +
+              "</span>";
+          } else {
+            btn.innerHTML =
+              '<img src="' +
+              it.url +
+              '" alt=""><span>' +
+              it.name +
+              "</span>";
+          }
+          btn.onclick = function () {
+            cmsPickMedia(it.path, it.url, kind);
+          };
+          grid.appendChild(btn);
+        });
+      })
+      .catch(function () {
+        status.textContent =
+          kind === "video"
+            ? "بارگذاری لیست ویدیوها ناموفق بود"
+            : "بارگذاری لیست تصاویر ناموفق بود";
+      });
+  };
+
+  window.cmsPickMedia = function cmsPickMedia(path, url, kind) {
+    kind = kind || window.cmsMediaTarget.kind || "image";
+    const text = document.getElementById(window.cmsMediaTarget.textId);
+    const previewId = window.cmsMediaTarget.previewId;
+
+    if (text) {
+      text.value = path;
+      delete text.dataset.pendingUpload;
+    }
+
+    if (kind === "video") {
+      ensureVideoPreview(previewId, url + "?v=" + encodeURIComponent(path));
+    } else {
+      const img = document.getElementById(previewId);
+      const empty = document.getElementById(previewId + "-empty");
+      if (img) {
+        if (img._cmsObjectUrl) {
+          URL.revokeObjectURL(img._cmsObjectUrl);
+          img._cmsObjectUrl = null;
+        }
+        img.style.display = "block";
+        img.classList.remove("cms-image-preview--empty");
+        img.src = url + "?v=" + encodeURIComponent(path);
+      }
+      if (empty) empty.style.display = "none";
+    }
+
+    cmsCloseMediaPicker();
+  };
+
+  window.cmsCloseMediaPicker = function cmsCloseMediaPicker() {
+    const modal = document.getElementById("cms-media-modal");
+    if (modal) modal.hidden = true;
+  };
+
+  document.addEventListener("DOMContentLoaded", function () {
+    const modal = document.getElementById("cms-media-modal");
+    if (modal) {
+      modal.addEventListener("click", function (e) {
+        if (e.target === modal) cmsCloseMediaPicker();
+      });
+    }
+  });
+
   window.cmsOnImageFileSelected = function cmsOnImageFileSelected(
     input,
     previewId,

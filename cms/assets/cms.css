@@ -1109,6 +1109,15 @@ textarea.cms-input {
   background: #111;
 }
 
+.cms-media-item--video .cms-media-item__video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 7px;
+  background: #111;
+  pointer-events: none;
+}
+
 .cms-media-item span {
   overflow: hidden;
   text-overflow: ellipsis;

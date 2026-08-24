@@ -653,6 +653,7 @@ try {
             'video_poster' => 'VARCHAR(512) NULL AFTER video_path',
             'detail_lead_image' => 'VARCHAR(512) NULL AFTER video_poster',
             'shop_display_image' => 'VARCHAR(512) NULL AFTER detail_lead_image',
+            'video_path_low' => 'VARCHAR(512) NULL AFTER video_poster',
         ] as $col => $definition
     ) {
         $exists = $pdo->query('SHOW COLUMNS FROM products LIKE ' . $pdo->quote($col))->fetchAll();
@@ -660,6 +661,24 @@ try {
             $pdo->exec("ALTER TABLE products ADD COLUMN {$col} {$definition}");
             $log[] = "Added products.{$col}";
         }
+    }
+
+    $aboutLowExists = $pdo->query('SHOW COLUMNS FROM about_exhibitions LIKE ' . $pdo->quote('video_path_low'))->fetchAll();
+    if (count($aboutLowExists) === 0) {
+        $pdo->exec('ALTER TABLE about_exhibitions ADD COLUMN video_path_low VARCHAR(512) NULL AFTER video_path');
+        $log[] = 'Added about_exhibitions.video_path_low';
+    }
+
+    require_once __DIR__ . '/lib/uploads.php';
+    $legacyMove = cms_migrate_legacy_cms_uploads();
+    if ($legacyMove['moved'] > 0) {
+        $log[] = 'Moved ' . $legacyMove['moved'] . ' legacy file(s) from cms/uploads/ to uploads/';
+    }
+    if ($legacyMove['skipped'] > 0) {
+        $log[] = 'Skipped ' . $legacyMove['skipped'] . ' legacy file(s) already present in uploads/';
+    }
+    foreach ($legacyMove['errors'] as $moveError) {
+        $log[] = 'Legacy upload move: ' . $moveError;
     }
 } catch (Throwable $e) {
     $ok = false;

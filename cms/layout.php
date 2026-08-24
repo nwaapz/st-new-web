@@ -66,7 +66,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=17">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=18">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';
@@ -151,46 +151,13 @@ function cms_layout_end(): void
 {
     echo '</main></div>';
     echo '<div id="cms-media-modal" class="cms-media-modal" hidden>';
-    echo '<div class="cms-media-modal__panel" role="dialog" aria-modal="true" aria-label="تصاویر سرور">';
-    echo '<div class="cms-media-modal__head"><strong>انتخاب از تصاویر سرور</strong>';
+    echo '<div class="cms-media-modal__panel" role="dialog" aria-modal="true" aria-label="انتخاب از سرور">';
+    echo '<div class="cms-media-modal__head"><strong id="cms-media-modal-title">انتخاب از سرور</strong>';
     echo '<button type="button" class="cms-btn cms-btn--ghost" onclick="cmsCloseMediaPicker()">بستن</button></div>';
     echo '<p class="cms-muted" id="cms-media-status">در حال بارگذاری…</p>';
     echo '<div class="cms-media-grid" id="cms-media-grid"></div>';
     echo '</div></div>';
-    echo '<script src="assets/cms-upload.js?v=1"></script>';
-    echo '<script>';
-    echo 'var cmsMediaTarget={textId:"",previewId:""};';
-    echo 'function cmsOpenMediaPicker(textId,previewId){';
-    echo 'cmsMediaTarget={textId:textId,previewId:previewId};';
-    echo 'var m=document.getElementById("cms-media-modal");';
-    echo 'var g=document.getElementById("cms-media-grid");';
-    echo 'var s=document.getElementById("cms-media-status");';
-    echo 'm.hidden=false;g.innerHTML="";s.textContent="در حال بارگذاری…";';
-    echo 'fetch("media-list.php",{credentials:"same-origin"}).then(function(r){return r.json()}).then(function(data){';
-    echo 'var items=data.items||[];';
-    echo 'if(!items.length){s.textContent="هنوز تصویری در uploads نیست.";return;}';
-    echo 's.textContent=items.length+" تصویر — یکی را انتخاب کنید";';
-    echo 'items.forEach(function(it){';
-    echo 'var b=document.createElement("button");b.type="button";b.className="cms-media-item";';
-    echo 'b.title=it.name;b.innerHTML="<img src=\\""+it.url+"\\" alt=\\"\\"><span>"+it.name+"</span>";';
-    echo 'b.onclick=function(){cmsPickMedia(it.path,it.url)};';
-    echo 'g.appendChild(b);';
-    echo '});';
-    echo '}).catch(function(){s.textContent="بارگذاری لیست تصاویر ناموفق بود";});';
-    echo '}';
-    echo 'function cmsPickMedia(path,url){';
-    echo 'var text=document.getElementById(cmsMediaTarget.textId);';
-    echo 'var img=document.getElementById(cmsMediaTarget.previewId);';
-    echo 'var empty=document.getElementById(cmsMediaTarget.previewId+"-empty");';
-    echo 'if(text){text.value=path;delete text.dataset.pendingUpload;}';
-    echo 'if(img){if(img._cmsObjectUrl){URL.revokeObjectURL(img._cmsObjectUrl);img._cmsObjectUrl=null;}';
-    echo 'img.style.display="block";img.classList.remove("cms-image-preview--empty");img.src=url+"?v="+encodeURIComponent(path);}';
-    echo 'if(empty)empty.style.display="none";';
-    echo 'cmsCloseMediaPicker();';
-    echo '}';
-    echo 'function cmsCloseMediaPicker(){document.getElementById("cms-media-modal").hidden=true;}';
-    echo 'document.getElementById("cms-media-modal").addEventListener("click",function(e){if(e.target===this)cmsCloseMediaPicker();});';
-    echo '</script>';
+    echo '<script src="assets/cms-upload.js?v=2"></script>';
     echo '</body></html>';
 }
 
@@ -225,7 +192,7 @@ function cms_image_field(string $name, string $label, string $value): void
     echo '<input id="' . cms_h($textId) . '" class="cms-input" type="text" name="' . cms_h($name) . '" value="' . cms_h($value) . '" dir="ltr" placeholder="/uploads/...">';
     echo '<div class="cms-btn-row" style="margin-top:0">';
     echo '<label class="cms-file-pick" for="' . cms_h($fileId) . '">آپلود از رایانه</label>';
-    echo '<button type="button" class="cms-btn cms-btn--secondary" onclick="cmsOpenMediaPicker(\'' . cms_h($textId) . '\',\'' . cms_h($previewId) . '\')">انتخاب از سرور</button>';
+    echo '<button type="button" class="cms-btn cms-btn--secondary" onclick="cmsOpenMediaPicker(\'' . cms_h($textId) . '\',\'' . cms_h($previewId) . '\',{kind:\'image\'})">انتخاب از سرور</button>';
     echo '</div>';
     echo '<input id="' . cms_h($fileId) . '" class="cms-file-input" type="file" name="' . cms_h($name) . '_file" accept="image/jpeg,image/png,image/webp,image/gif" '
         . 'data-cms-upload="image" data-cms-text-id="' . cms_h($textId) . '" data-cms-preview-id="' . cms_h($previewId) . '" '
@@ -253,7 +220,7 @@ function cms_handle_optional_upload(string $fieldName, string $existingPath): st
     return cms_store_uploaded_image($_FILES[$fileKey]);
 }
 
-function cms_video_field(string $name, string $label, string $value, string $subdir = 'about/videos'): void
+function cms_video_field(string $name, string $label, string $value, string $subdir = 'about/videos', string $helpNote = ''): void
 {
     $textId = 'text-' . preg_replace('/[^a-zA-Z0-9_-]/', '', $name);
     $fileId = 'file-' . preg_replace('/[^a-zA-Z0-9_-]/', '', $name);
@@ -261,15 +228,17 @@ function cms_video_field(string $name, string $label, string $value, string $sub
     $uploadMax = (string) ini_get('upload_max_filesize');
     $postMax = (string) ini_get('post_max_size');
     $src = $value !== '' ? cms_asset_url($value) : '';
+    $pickerArgs = '{kind:\'video\',subdir:\'' . cms_h($subdir) . '\'}';
 
     echo '<div class="cms-field">';
     echo '<span class="cms-label">' . cms_h($label) . '</span>';
     if ($value !== '') {
         echo '<video id="' . cms_h($previewId) . '" class="cms-image-preview" src="' . cms_h($src) . '" controls preload="metadata" style="max-width:min(100%,420px);height:auto;background:#111"></video>';
     }
-    echo '<input id="' . cms_h($textId) . '" class="cms-input" type="text" name="' . cms_h($name) . '" value="' . cms_h($value) . '" dir="ltr" placeholder="/uploads/about/videos/...">';
+    echo '<input id="' . cms_h($textId) . '" class="cms-input" type="text" name="' . cms_h($name) . '" value="' . cms_h($value) . '" dir="ltr" placeholder="/uploads/' . cms_h($subdir) . '/...">';
     echo '<div class="cms-btn-row" style="margin-top:.4rem">';
     echo '<label class="cms-file-pick" for="' . cms_h($fileId) . '">آپلود ویدیو از رایانه</label>';
+    echo '<button type="button" class="cms-btn cms-btn--secondary" onclick="cmsOpenMediaPicker(\'' . cms_h($textId) . '\',\'' . cms_h($previewId) . '\',' . $pickerArgs . ')">انتخاب از سرور</button>';
     echo '</div>';
     echo '<input id="' . cms_h($fileId) . '" class="cms-file-input" type="file" name="' . cms_h($name) . '_file" accept="video/mp4,video/webm" '
         . 'data-cms-upload="video" data-cms-text-id="' . cms_h($textId) . '" data-cms-preview-id="' . cms_h($previewId) . '" data-cms-upload-subdir="' . cms_h($subdir) . '" '
@@ -277,7 +246,11 @@ function cms_video_field(string $name, string $label, string $value, string $sub
         . 'onchange="cmsOnVideoFileSelected(this,\'' . cms_h($previewId) . '\',\'' . cms_h($textId) . '\')">';
     echo '<div class="cms-upload-progress" hidden><div class="cms-upload-progress__track"><span class="cms-upload-progress__bar"></span></div><span class="cms-upload-progress__text">۰٪</span></div>';
     echo '<span class="cms-muted" data-file-label-for="' . cms_h($fileId) . '"></span>';
-    echo '<p class="cms-muted" style="margin:.45rem 0 0">MP4 یا WebM، حداکثر ۸۰ مگابایت. فیلم غرفه را فشرده کنید؛ فایل خام ۴K نفرستید. حد فعلی PHP: upload_max_filesize=' . cms_h($uploadMax) . ' و post_max_size=' . cms_h($postMax) . ' — اگر آپلود رد شد این دو مقدار را در cPanel افزایش دهید.</p>';
+    if ($helpNote !== '') {
+        echo '<p class="cms-muted" style="margin:.45rem 0 0">' . cms_h($helpNote) . '</p>';
+    } else {
+        echo '<p class="cms-muted" style="margin:.45rem 0 0">MP4 یا WebM، حداکثر ۸۰ مگابایت. فیلم را فشرده کنید؛ فایل خام ۴K نفرستید. حد فعلی PHP: upload_max_filesize=' . cms_h($uploadMax) . ' و post_max_size=' . cms_h($postMax) . ' — اگر آپلود رد شد این دو مقدار را در cPanel افزایش دهید.</p>';
+    }
     echo '</div>';
 }
 

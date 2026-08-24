@@ -26,6 +26,7 @@ function product_api_ensure_schema(PDO $pdo): void
             'video_poster' => 'VARCHAR(512) NULL AFTER video_path',
             'detail_lead_image' => 'VARCHAR(512) NULL AFTER video_poster',
             'shop_display_image' => 'VARCHAR(512) NULL AFTER detail_lead_image',
+            'video_path_low' => 'VARCHAR(512) NULL AFTER video_poster',
         ] as $col => $definition
     ) {
         $exists = $pdo->query('SHOW COLUMNS FROM products LIKE ' . $pdo->quote($col))->fetchAll();
@@ -86,7 +87,7 @@ try {
     $primaryFactorySql = cms_car_model_primary_factory_id_sql('m');
     $stmt = $pdo->prepare(
         'SELECT p.id, p.category_id, p.car_model_id, p.name, p.slug, p.description,
-                p.price_text, p.pack_size, p.banner, p.image, p.video_path, p.video_poster,
+                p.price_text, p.pack_size, p.banner, p.image, p.video_path, p.video_path_low, p.video_poster,
                 p.detail_lead_image, p.shop_display_image, p.sort_order,
                 p.dim_length, p.dim_width, p.dim_height, p.dim_weight,
                 c.name AS category_name, c.slug AS category_slug,
