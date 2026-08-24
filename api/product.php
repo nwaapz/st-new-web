@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/_common.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 
 function product_api_ensure_schema(PDO $pdo): void
 {
@@ -66,6 +67,7 @@ try {
     $pdo = cms_pdo();
     product_api_ensure_schema($pdo);
     cms_ensure_car_model_factories_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
     $slug = isset($_GET['slug']) ? trim((string) $_GET['slug']) : '';
     $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 
@@ -83,19 +85,23 @@ try {
         $params[] = $id;
     }
 
-    $factoryNamesSql = cms_car_model_factory_names_sql('m');
-    $primaryFactorySql = cms_car_model_primary_factory_id_sql('m');
+    $modelNamesSql = cms_product_model_names_sql('p');
+    $factoryNamesSql = cms_product_factory_names_sql('p');
+    $primaryModelSql = cms_product_primary_car_model_id_sql('p');
+    $primaryFactorySql = cms_product_primary_factory_id_sql('p');
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.category_id, p.car_model_id, p.name, p.slug, p.description,
+        'SELECT p.id, p.category_id, p.name, p.slug, p.description,
                 p.price_text, p.pack_size, p.banner, p.image, p.video_path, p.video_path_low, p.video_poster,
                 p.detail_lead_image, p.shop_display_image, p.sort_order,
                 p.dim_length, p.dim_width, p.dim_height, p.dim_weight,
                 c.name AS category_name, c.slug AS category_slug,
-                m.name AS model_name, ' . $factoryNamesSql . ' AS factory_name,
+                ' . $modelNamesSql . ' AS model_name,
+                ' . $modelNamesSql . ' AS model_names,
+                ' . $factoryNamesSql . ' AS factory_name,
+                ' . $primaryModelSql . ' AS car_model_id,
                 ' . $primaryFactorySql . ' AS factory_id
          FROM products p
          JOIN categories c ON c.id = p.category_id
-         JOIN car_models m ON m.id = p.car_model_id
          WHERE ' . implode(' AND ', $where) . '
          LIMIT 1'
     );
@@ -131,6 +137,10 @@ try {
     }
 
     $product['images'] = $images;
+    $product['car_model_ids'] = cms_product_load_car_model_ids($pdo, $productId);
+    if ($product['car_model_ids'] !== []) {
+        $product['car_model_id'] = (int) $product['car_model_ids'][0];
+    }
     $product['rating_avg'] = $rating['rating_avg'] !== null
         ? round((float) $rating['rating_avg'], 1)
         : null;

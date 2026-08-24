@@ -5,6 +5,7 @@ require_once __DIR__ . '/_common.php';
 require_once dirname(__DIR__) . '/cms/lib/iran-provinces.php';
 require_once dirname(__DIR__) . '/cms/lib/search-text.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 
 function search_add_place(array &$places, array &$seen, string $code, string $label): void
 {
@@ -28,6 +29,7 @@ function search_add_place(array &$places, array &$seen, string $code, string $la
 try {
     $pdo = cms_pdo();
     cms_ensure_car_model_factories_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
     $q = search_normalize((string) ($_GET['q'] ?? ''));
 
     $empty = [
@@ -48,7 +50,8 @@ try {
     $slugP = search_name_sql('p.slug');
     $nameC = search_name_sql('c.name');
     $nameM = search_name_sql('m.name');
-    $factoryNamesSql = cms_car_model_factory_names_sql('m');
+    $modelNamesSql = cms_product_model_names_sql('p');
+    $factoryNamesSql = cms_product_factory_names_sql('p');
     $primaryFactorySql = cms_car_model_primary_factory_id_sql('m');
 
     $products = [];
@@ -57,9 +60,8 @@ try {
             "SELECT p.id, p.name, p.slug, c.name AS category_name, {$factoryNamesSql} AS factory_name
              FROM products p
              JOIN categories c ON c.id = p.category_id
-             JOIN car_models m ON m.id = p.car_model_id
              WHERE p.published = 1
-               AND ({$nameP} LIKE ? OR {$slugP} LIKE ? OR {$nameC} LIKE ? OR {$factoryNamesSql} LIKE ? OR {$nameM} LIKE ?)
+               AND ({$nameP} LIKE ? OR {$slugP} LIKE ? OR {$nameC} LIKE ? OR {$factoryNamesSql} LIKE ? OR {$modelNamesSql} LIKE ?)
              ORDER BY p.sort_order ASC, p.name ASC
              LIMIT 5"
         );

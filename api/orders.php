@@ -7,6 +7,7 @@ require_once dirname(__DIR__) . '/cms/lib/orders.php';
 require_once dirname(__DIR__) . '/cms/lib/messages.php';
 require_once dirname(__DIR__) . '/cms/lib/branches.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 
 site_auth_prepare_cors();
 
@@ -16,6 +17,7 @@ try {
     orders_ensure_schema($pdo);
     messages_ensure_schema($pdo);
     cms_ensure_car_model_factories_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
 
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
@@ -138,13 +140,15 @@ try {
         }
 
         // Prefer live catalog fields when the product still exists.
-        $factoryNamesSql = cms_car_model_factory_names_sql('m');
+        $factoryNamesSql = cms_product_factory_names_sql('p');
+        $modelNamesSql = cms_product_model_names_sql('p');
         $prodStmt = $pdo->prepare(
             'SELECT p.id, p.name, p.slug, p.price_text, p.image, p.pack_size, p.shop_display_image,
                     COALESCE(NULLIF(p.shop_display_image, \'\'), p.image) AS display_image,
-                    ' . $factoryNamesSql . ' AS factory_name, m.name AS model_name, c.name AS category_name
+                    ' . $factoryNamesSql . ' AS factory_name,
+                    ' . $modelNamesSql . ' AS model_name,
+                    c.name AS category_name
              FROM products p
-             LEFT JOIN car_models m ON m.id = p.car_model_id
              LEFT JOIN categories c ON c.id = p.category_id
              WHERE p.id = ?
              LIMIT 1'

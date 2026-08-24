@@ -4,10 +4,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/car-model-factories.php';
+require_once __DIR__ . '/lib/product-car-models.php';
 
 cms_require_login();
 $pdo = cms_pdo();
 cms_ensure_car_model_factories_schema($pdo);
+cms_ensure_product_car_models_schema($pdo);
 
 $edit = null;
 $editFactoryIds = [];
@@ -80,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $factoryNamesSql = cms_car_model_factory_names_sql('m');
 $items = $pdo->query(
     "SELECT m.*, {$factoryNamesSql} AS factory_name,
-            (SELECT COUNT(*) FROM products p WHERE p.car_model_id = m.id) AS product_count
+            (SELECT COUNT(*) FROM product_car_models pcm WHERE pcm.car_model_id = m.id) AS product_count
      FROM car_models m
      ORDER BY m.sort_order ASC, m.name ASC"
 )->fetchAll();

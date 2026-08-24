@@ -680,6 +680,16 @@ try {
     foreach ($legacyMove['errors'] as $moveError) {
         $log[] = 'Legacy upload move: ' . $moveError;
     }
+
+    require_once __DIR__ . '/lib/product-car-models.php';
+    $pcmExists = $pdo->query("SHOW TABLES LIKE 'product_car_models'")->fetchAll();
+    $legacyCarModelCol = $pdo->query('SHOW COLUMNS FROM products LIKE \'car_model_id\'')->fetchAll();
+    if (count($pcmExists) === 0 || count($legacyCarModelCol) > 0) {
+        cms_ensure_product_car_models_schema($pdo);
+        $log[] = 'Migrated products to multi car-model (product_car_models junction table)';
+    } else {
+        $log[] = 'product_car_models already migrated';
+    }
 } catch (Throwable $e) {
     $ok = false;
     $log[] = 'ERROR: ' . $e->getMessage();
