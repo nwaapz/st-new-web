@@ -483,7 +483,7 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   <?php endif; ?>
 
   <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">ویدیو و نمایش تصاویر</h3>
-  <?php cms_video_field('video_path', 'ویدیو محصول (اسلاید آخر)', (string) ($edit['video_path'] ?? '')); ?>
+  <?php cms_video_field('video_path', 'ویدیو محصول (اسلاید آخر)', (string) ($edit['video_path'] ?? ''), 'products/videos'); ?>
   <div class="cms-grid-2">
     <label class="cms-field"><span class="cms-label">اسلاید اول صفحه محصول</span>
       <select class="cms-select" name="detail_lead_image">

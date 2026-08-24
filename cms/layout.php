@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/lib/uploads.php';
+
 /**
  * @param 'website'|'shop'|'communication'|'advanced'|'' $section
  */
@@ -64,7 +66,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=15">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=17">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';
@@ -155,21 +157,8 @@ function cms_layout_end(): void
     echo '<p class="cms-muted" id="cms-media-status">در حال بارگذاری…</p>';
     echo '<div class="cms-media-grid" id="cms-media-grid"></div>';
     echo '</div></div>';
+    echo '<script src="assets/cms-upload.js?v=1"></script>';
     echo '<script>';
-    echo 'function cmsOnImageFileSelected(input,previewId,textId){';
-    echo 'if(!input.files||!input.files[0])return;';
-    echo 'var f=input.files[0];';
-    echo 'var label=document.querySelector("[data-file-label-for=\\""+input.id+"\\"]");';
-    echo 'if(label)label.textContent="انتخاب شد: "+f.name+" — دکمه ذخیره را بزنید";';
-    echo 'var img=document.getElementById(previewId);';
-    echo 'var empty=document.getElementById(previewId+"-empty");';
-    echo 'if(img){img.style.display="block";img.classList.remove("cms-image-preview--empty");';
-    echo 'if(img._cmsObjectUrl)URL.revokeObjectURL(img._cmsObjectUrl);';
-    echo 'img._cmsObjectUrl=URL.createObjectURL(f);img.src=img._cmsObjectUrl;}';
-    echo 'if(empty)empty.style.display="none";';
-    echo 'var text=document.getElementById(textId);';
-    echo 'if(text)text.dataset.pendingUpload="1";';
-    echo '}';
     echo 'var cmsMediaTarget={textId:"",previewId:""};';
     echo 'function cmsOpenMediaPicker(textId,previewId){';
     echo 'cmsMediaTarget={textId:textId,previewId:previewId};';
@@ -239,36 +228,12 @@ function cms_image_field(string $name, string $label, string $value): void
     echo '<button type="button" class="cms-btn cms-btn--secondary" onclick="cmsOpenMediaPicker(\'' . cms_h($textId) . '\',\'' . cms_h($previewId) . '\')">انتخاب از سرور</button>';
     echo '</div>';
     echo '<input id="' . cms_h($fileId) . '" class="cms-file-input" type="file" name="' . cms_h($name) . '_file" accept="image/jpeg,image/png,image/webp,image/gif" '
+        . 'data-cms-upload="image" data-cms-text-id="' . cms_h($textId) . '" data-cms-preview-id="' . cms_h($previewId) . '" '
         . 'onclick="this.value=null" '
         . 'onchange="cmsOnImageFileSelected(this,\'' . cms_h($previewId) . '\',\'' . cms_h($textId) . '\')">';
+    echo '<div class="cms-upload-progress" hidden><div class="cms-upload-progress__track"><span class="cms-upload-progress__bar"></span></div><span class="cms-upload-progress__text">۰٪</span></div>';
     echo '<span class="cms-muted" data-file-label-for="' . cms_h($fileId) . '"></span>';
     echo '</div></div></div>';
-}
-
-function cms_unique_upload_name(string $uploadsDir, string $originalName, string $ext): string
-{
-    $base = pathinfo($originalName, PATHINFO_FILENAME);
-    // Keep letters (incl. Persian), digits, dot, underscore, dash
-    $safe = preg_replace('/[^\p{L}\p{N}._-]+/u', '-', $base);
-    $safe = trim((string) $safe, '-._');
-    $safe = preg_replace('/-+/', '-', $safe);
-    if ($safe === '' || $safe === null) {
-        $safe = 'image';
-    }
-    if (function_exists('mb_strlen') && mb_strlen($safe) > 80) {
-        $safe = mb_substr($safe, 0, 80);
-    } elseif (strlen($safe) > 80) {
-        $safe = substr($safe, 0, 80);
-    }
-    $safe = rtrim($safe, '-._');
-
-    // Prefer original name; only add unique suffix if that file already exists
-    $name = $safe . $ext;
-    if (!file_exists($uploadsDir . DIRECTORY_SEPARATOR . $name)) {
-        return $name;
-    }
-    // e.g. brake-pad-a1b2c3.jpg  (real name kept as the main part)
-    return $safe . '-' . bin2hex(random_bytes(3)) . $ext;
 }
 
 function cms_handle_optional_upload(string $fieldName, string $existingPath): string
@@ -285,68 +250,10 @@ function cms_handle_optional_upload(string $fieldName, string $existingPath): st
         return $posted;
     }
 
-    $uploadErrors = [
-        UPLOAD_ERR_INI_SIZE => 'حجم فایل از حد مجاز سرور بیشتر است',
-        UPLOAD_ERR_FORM_SIZE => 'حجم فایل خیلی بزرگ است',
-        UPLOAD_ERR_PARTIAL => 'آپلود ناقص بود — دوباره تلاش کنید',
-        UPLOAD_ERR_NO_TMP_DIR => 'پوشه موقت سرور موجود نیست',
-        UPLOAD_ERR_CANT_WRITE => 'نوشتن فایل روی دیسک ممکن نیست',
-        UPLOAD_ERR_EXTENSION => 'افزونه PHP آپلود را مسدود کرد',
-    ];
-    if ($error !== UPLOAD_ERR_OK) {
-        throw new RuntimeException($uploadErrors[$error] ?? ('آپلود ناموفق بود (کد ' . $error . ')'));
-    }
-
-    $file = $_FILES[$fileKey];
-    if (!is_uploaded_file((string) $file['tmp_name'])) {
-        throw new RuntimeException('فایل آپلود معتبر نیست');
-    }
-
-    $mime = '';
-    if (class_exists('finfo')) {
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mime = $finfo->file($file['tmp_name']) ?: '';
-    }
-    if ($mime === '' && function_exists('mime_content_type')) {
-        $mime = (string) mime_content_type($file['tmp_name']);
-    }
-    if ($mime === '' || $mime === 'application/octet-stream') {
-        $extGuess = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
-        $extMap = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp', 'gif' => 'image/gif'];
-        $mime = $extMap[$extGuess] ?? $mime;
-    }
-
-    $map = [
-        'image/jpeg' => '.jpg',
-        'image/png' => '.png',
-        'image/webp' => '.webp',
-        'image/gif' => '.gif',
-    ];
-    if (!isset($map[$mime])) {
-        throw new RuntimeException('فقط JPEG/PNG/WebP/GIF مجاز است (نوع تشخیص‌داده‌شده: ' . ($mime !== '' ? $mime : 'نامشخص') . ')');
-    }
-    if ((int) $file['size'] > 5 * 1024 * 1024) {
-        throw new RuntimeException('حداکثر حجم تصویر ۵ مگابایت است');
-    }
-
-    $uploadsDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads';
-    if (!is_dir($uploadsDir) && !mkdir($uploadsDir, 0755, true) && !is_dir($uploadsDir)) {
-        throw new RuntimeException('ساخت پوشه uploads ممکن نیست — دسترسی نوشتن را بررسی کنید');
-    }
-    if (!is_writable($uploadsDir)) {
-        throw new RuntimeException('پوشه uploads قابل نوشتن نیست');
-    }
-
-    $name = cms_unique_upload_name($uploadsDir, (string) $file['name'], $map[$mime]);
-    $dest = $uploadsDir . DIRECTORY_SEPARATOR . $name;
-    if (!move_uploaded_file($file['tmp_name'], $dest)) {
-        throw new RuntimeException('ذخیره فایل ناموفق بود');
-    }
-
-    return '/uploads/' . $name;
+    return cms_store_uploaded_image($_FILES[$fileKey]);
 }
 
-function cms_video_field(string $name, string $label, string $value): void
+function cms_video_field(string $name, string $label, string $value, string $subdir = 'about/videos'): void
 {
     $textId = 'text-' . preg_replace('/[^a-zA-Z0-9_-]/', '', $name);
     $fileId = 'file-' . preg_replace('/[^a-zA-Z0-9_-]/', '', $name);
@@ -364,7 +271,12 @@ function cms_video_field(string $name, string $label, string $value): void
     echo '<div class="cms-btn-row" style="margin-top:.4rem">';
     echo '<label class="cms-file-pick" for="' . cms_h($fileId) . '">آپلود ویدیو از رایانه</label>';
     echo '</div>';
-    echo '<input id="' . cms_h($fileId) . '" class="cms-file-input" type="file" name="' . cms_h($name) . '_file" accept="video/mp4,video/webm">';
+    echo '<input id="' . cms_h($fileId) . '" class="cms-file-input" type="file" name="' . cms_h($name) . '_file" accept="video/mp4,video/webm" '
+        . 'data-cms-upload="video" data-cms-text-id="' . cms_h($textId) . '" data-cms-preview-id="' . cms_h($previewId) . '" data-cms-upload-subdir="' . cms_h($subdir) . '" '
+        . 'onclick="this.value=null" '
+        . 'onchange="cmsOnVideoFileSelected(this,\'' . cms_h($previewId) . '\',\'' . cms_h($textId) . '\')">';
+    echo '<div class="cms-upload-progress" hidden><div class="cms-upload-progress__track"><span class="cms-upload-progress__bar"></span></div><span class="cms-upload-progress__text">۰٪</span></div>';
+    echo '<span class="cms-muted" data-file-label-for="' . cms_h($fileId) . '"></span>';
     echo '<p class="cms-muted" style="margin:.45rem 0 0">MP4 یا WebM، حداکثر ۸۰ مگابایت. فیلم غرفه را فشرده کنید؛ فایل خام ۴K نفرستید. حد فعلی PHP: upload_max_filesize=' . cms_h($uploadMax) . ' و post_max_size=' . cms_h($postMax) . ' — اگر آپلود رد شد این دو مقدار را در cPanel افزایش دهید.</p>';
     echo '</div>';
 }
@@ -383,67 +295,6 @@ function cms_handle_optional_video_upload(string $fieldName, string $existingPat
         return $posted;
     }
 
-    $uploadErrors = [
-        UPLOAD_ERR_INI_SIZE => 'حجم ویدیو از حد مجاز سرور (upload_max_filesize) بیشتر است — در cPanel آن را افزایش دهید',
-        UPLOAD_ERR_FORM_SIZE => 'حجم ویدیو خیلی بزرگ است',
-        UPLOAD_ERR_PARTIAL => 'آپلود ناقص بود — دوباره تلاش کنید',
-        UPLOAD_ERR_NO_TMP_DIR => 'پوشه موقت سرور موجود نیست',
-        UPLOAD_ERR_CANT_WRITE => 'نوشتن فایل روی دیسک ممکن نیست',
-        UPLOAD_ERR_EXTENSION => 'افزونه PHP آپلود را مسدود کرد',
-    ];
-    if ($error !== UPLOAD_ERR_OK) {
-        throw new RuntimeException($uploadErrors[$error] ?? ('آپلود ویدیو ناموفق بود (کد ' . $error . ')'));
-    }
-
-    $file = $_FILES[$fileKey];
-    if (!is_uploaded_file((string) $file['tmp_name'])) {
-        throw new RuntimeException('فایل ویدیو معتبر نیست');
-    }
-
-    $mime = '';
-    if (class_exists('finfo')) {
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mime = $finfo->file($file['tmp_name']) ?: '';
-    }
-    if ($mime === '' && function_exists('mime_content_type')) {
-        $mime = (string) mime_content_type($file['tmp_name']);
-    }
-    if ($mime === '' || $mime === 'application/octet-stream') {
-        $extGuess = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
-        $extMap = ['mp4' => 'video/mp4', 'webm' => 'video/webm'];
-        $mime = $extMap[$extGuess] ?? $mime;
-    }
-
-    $map = [
-        'video/mp4' => '.mp4',
-        'video/webm' => '.webm',
-    ];
-    if (!isset($map[$mime])) {
-        throw new RuntimeException('فقط MP4 یا WebM مجاز است (نوع تشخیص‌داده‌شده: ' . ($mime !== '' ? $mime : 'نامشخص') . ')');
-    }
-    if ((int) $file['size'] > 80 * 1024 * 1024) {
-        throw new RuntimeException('حداکثر حجم ویدیو ۸۰ مگابایت است — فیلم را فشرده کنید');
-    }
-
-    $uploadsRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads';
-    $subdir = trim(str_replace(['\\', '..'], ['/', ''], $subdir), '/');
-    if ($subdir === '') {
-        $subdir = 'about/videos';
-    }
-    $uploadsDir = $uploadsRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $subdir);
-    if (!is_dir($uploadsDir) && !mkdir($uploadsDir, 0755, true) && !is_dir($uploadsDir)) {
-        throw new RuntimeException('ساخت پوشه uploads/' . $subdir . ' ممکن نیست');
-    }
-    if (!is_writable($uploadsDir)) {
-        throw new RuntimeException('پوشه uploads/' . $subdir . ' قابل نوشتن نیست');
-    }
-
-    $name = cms_unique_upload_name($uploadsDir, (string) $file['name'], $map[$mime]);
-    $dest = $uploadsDir . DIRECTORY_SEPARATOR . $name;
-    if (!move_uploaded_file($file['tmp_name'], $dest)) {
-        throw new RuntimeException('ذخیره ویدیو ناموفق بود');
-    }
-
-    return '/uploads/' . $subdir . '/' . $name;
+    return cms_store_uploaded_video($_FILES[$fileKey], $subdir);
 }
 

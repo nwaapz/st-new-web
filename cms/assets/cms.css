@@ -2162,3 +2162,94 @@ a.cms-kpi:hover {
   font-size: 0.82rem;
   line-height: 1.5;
 }
+
+.cms-upload-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.45rem;
+  width: 100%;
+  max-width: 22rem;
+}
+
+.cms-upload-progress[hidden] {
+  display: none !important;
+}
+
+.cms-upload-progress__track {
+  flex: 1 1 auto;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.cms-upload-progress__track--lg {
+  height: 0.55rem;
+}
+
+.cms-upload-progress__bar {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  transition: width 0.15s ease-out;
+}
+
+.cms-upload-progress.is-error .cms-upload-progress__bar {
+  background: linear-gradient(90deg, #dc2626, #f87171);
+}
+
+.cms-upload-progress__text {
+  flex: 0 0 auto;
+  min-width: 3.25rem;
+  color: var(--cms-text-soft);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  direction: ltr;
+}
+
+.cms-upload-progress.is-error .cms-upload-progress__text {
+  color: #fca5a5;
+  min-width: 0;
+  max-width: 14rem;
+  text-align: right;
+  direction: rtl;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cms-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.cms-upload-overlay[hidden] {
+  display: none !important;
+}
+
+.cms-upload-overlay__panel {
+  width: min(100%, 22rem);
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--cms-line);
+  border-radius: 10px;
+  background: var(--cms-panel);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.cms-upload-overlay__text {
+  margin: 0.65rem 0 0;
+  color: var(--cms-text-soft);
+  font-size: 0.88rem;
+  text-align: center;
+}
