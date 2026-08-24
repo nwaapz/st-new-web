@@ -2,7 +2,7 @@
 -- Import in phpMyAdmin, then open /cms/install.php once.
 --
 -- Two independent roots for products:
---   1) Vehicle path: Factory → Car model
+--   1) Vehicle path: Car model ↔ up to 2 factories (car_model_factories)
 --   2) Product category (standalone)
 -- A product links to BOTH a car_model and a category.
 
@@ -34,7 +34,6 @@ CREATE TABLE IF NOT EXISTS factories (
 
 CREATE TABLE IF NOT EXISTS car_models (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  factory_id INT UNSIGNED NOT NULL,
   name VARCHAR(191) NOT NULL,
   slug VARCHAR(191) NOT NULL,
   description TEXT NULL,
@@ -44,9 +43,17 @@ CREATE TABLE IF NOT EXISTS car_models (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_model_factory_slug (factory_id, slug),
-  KEY idx_model_factory (factory_id),
-  CONSTRAINT fk_model_factory FOREIGN KEY (factory_id) REFERENCES factories (id) ON DELETE CASCADE
+  UNIQUE KEY uq_model_slug (slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS car_model_factories (
+  car_model_id INT UNSIGNED NOT NULL,
+  factory_id INT UNSIGNED NOT NULL,
+  sort_order TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (car_model_id, factory_id),
+  KEY idx_cmf_factory (factory_id),
+  CONSTRAINT fk_cmf_model FOREIGN KEY (car_model_id) REFERENCES car_models (id) ON DELETE CASCADE,
+  CONSTRAINT fk_cmf_factory FOREIGN KEY (factory_id) REFERENCES factories (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Standalone product categories (NOT under factory/model)
@@ -75,6 +82,10 @@ CREATE TABLE IF NOT EXISTS products (
   pack_size INT UNSIGNED NULL,
   banner ENUM('none','new','off') NOT NULL DEFAULT 'none',
   image VARCHAR(512) NULL,
+  video_path VARCHAR(512) NULL,
+  video_poster VARCHAR(512) NULL,
+  detail_lead_image VARCHAR(512) NULL,
+  shop_display_image VARCHAR(512) NULL,
   dim_length VARCHAR(64) NULL,
   dim_width VARCHAR(64) NULL,
   dim_height VARCHAR(64) NULL,

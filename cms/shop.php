@@ -87,7 +87,7 @@ $introDefaults = cms_page_intro_defaults()['shop'];
 cms_layout_start('فروشگاه', cms_current_username(), 'shop');
 ?>
 <h1 style="margin-top:0">فروشگاه</h1>
-<p class="cms-muted">دو ریشه مستقل: <strong>کارخانه ← مدل</strong> و <strong>دسته محصول</strong>. هر محصول به هر دو وصل می‌شود.</p>
+<p class="cms-muted">دو ریشه مستقل: <strong>مدل خودرو (۱–۲ کارخانه)</strong> و <strong>دسته محصول</strong>. هر محصول به هر دو وصل می‌شود.</p>
 
 <form class="cms-panel" method="post" style="margin-bottom:1.25rem">
   <h2 style="margin-top:0">متن هدر صفحه محصولات</h2>

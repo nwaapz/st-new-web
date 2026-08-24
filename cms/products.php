@@ -3,9 +3,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/car-model-factories.php';
 
 cms_require_login();
 $pdo = cms_pdo();
+cms_ensure_car_model_factories_schema($pdo);
 
 const PRODUCT_GALLERY_MAX = 12;
 
@@ -24,6 +26,19 @@ function product_ensure_detail_schema(PDO $pdo): void
     $packExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'pack_size'")->fetchAll();
     if (count($packExists) === 0) {
         $pdo->exec('ALTER TABLE products ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
+    }
+    foreach (
+        [
+            'video_path' => 'VARCHAR(512) NULL AFTER image',
+            'video_poster' => 'VARCHAR(512) NULL AFTER video_path',
+            'detail_lead_image' => 'VARCHAR(512) NULL AFTER video_poster',
+            'shop_display_image' => 'VARCHAR(512) NULL AFTER detail_lead_image',
+        ] as $col => $definition
+    ) {
+        $exists = $pdo->query('SHOW COLUMNS FROM products LIKE ' . $pdo->quote($col))->fetchAll();
+        if (count($exists) === 0) {
+            $pdo->exec("ALTER TABLE products ADD COLUMN {$col} {$definition}");
+        }
     }
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS product_images (
@@ -105,6 +120,53 @@ function product_replace_gallery(PDO $pdo, int $productId, array $slides): void
     }
 }
 
+function product_normalize_image_picker(string $value): ?string
+{
+    $value = trim($value);
+    if ($value === '' || $value === '__cover__') {
+        return null;
+    }
+    return $value;
+}
+
+/** @return list<array{value: string, label: string}> */
+function product_image_picker_options(string $coverImage, array $gallery): array
+{
+    $options = [
+        ['value' => '', 'label' => 'تصویر اصلی (پیش‌فرض)'],
+    ];
+    $seen = [''];
+    if ($coverImage !== '') {
+        $options[] = [
+            'value' => $coverImage,
+            'label' => 'تصویر اصلی: ' . basename($coverImage),
+        ];
+        $seen[] = $coverImage;
+    }
+    foreach ($gallery as $index => $slide) {
+        $path = trim((string) ($slide['image'] ?? ''));
+        if ($path === '' || in_array($path, $seen, true)) {
+            continue;
+        }
+        $seen[] = $path;
+        $options[] = [
+            'value' => $path,
+            'label' => 'گالری ' . ($index + 1) . ': ' . basename($path),
+        ];
+    }
+    return $options;
+}
+
+function product_list_thumb_image(array $item): ?string
+{
+    $shop = trim((string) ($item['shop_display_image'] ?? ''));
+    if ($shop !== '') {
+        return $shop;
+    }
+    $cover = trim((string) ($item['image'] ?? ''));
+    return $cover !== '' ? $cover : null;
+}
+
 product_ensure_detail_schema($pdo);
 
 $edit = null;
@@ -115,11 +177,11 @@ $categories = $pdo->query(
     'SELECT id, name FROM categories ORDER BY sort_order ASC, name ASC'
 )->fetchAll();
 
+$factoryNamesSql = cms_car_model_factory_names_sql('m');
 $models = $pdo->query(
-    'SELECT m.id, m.name, f.name AS factory_name
+    "SELECT m.id, m.name, {$factoryNamesSql} AS factory_name
      FROM car_models m
-     JOIN factories f ON f.id = m.factory_id
-     ORDER BY f.sort_order ASC, m.sort_order ASC, m.name ASC'
+     ORDER BY m.sort_order ASC, m.name ASC"
 )->fetchAll();
 
 if (isset($_GET['edit'])) {
@@ -164,6 +226,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $banner = 'none';
         }
         $image = cms_handle_optional_upload('image', (string) ($_POST['image'] ?? ''));
+        $videoPath = cms_handle_optional_video_upload(
+            'video_path',
+            (string) ($_POST['video_path'] ?? ''),
+            'products/videos'
+        );
+        $detailLeadImage = product_normalize_image_picker((string) ($_POST['detail_lead_image'] ?? ''));
+        $shopDisplayImage = product_normalize_image_picker((string) ($_POST['shop_display_image'] ?? ''));
+        $videoPoster = product_normalize_image_picker((string) ($_POST['video_poster'] ?? ''));
         $dimLength = trim((string) ($_POST['dim_length'] ?? ''));
         $dimWidth = trim((string) ($_POST['dim_width'] ?? ''));
         $dimHeight = trim((string) ($_POST['dim_height'] ?? ''));
@@ -199,6 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id > 0) {
             $stmt = $pdo->prepare(
                 'UPDATE products SET category_id=?, car_model_id=?, name=?, slug=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
+                 video_path=?, video_poster=?, detail_lead_image=?, shop_display_image=?,
                  dim_length=?, dim_width=?, dim_height=?, dim_weight=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
@@ -208,6 +279,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $packSize,
                 $banner,
                 $image !== '' ? $image : null,
+                $videoPath !== '' ? $videoPath : null,
+                $videoPoster,
+                $detailLeadImage,
+                $shopDisplayImage,
                 $dimLength !== '' ? $dimLength : null,
                 $dimWidth !== '' ? $dimWidth : null,
                 $dimHeight !== '' ? $dimHeight : null,
@@ -218,8 +293,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $stmt = $pdo->prepare(
                 'INSERT INTO products (category_id, car_model_id, name, slug, description, price_text, pack_size, banner, image,
+                 video_path, video_poster, detail_lead_image, shop_display_image,
                  dim_length, dim_width, dim_height, dim_weight, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $categoryId, $carModelId, $name, $slug,
@@ -228,6 +304,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $packSize,
                 $banner,
                 $image !== '' ? $image : null,
+                $videoPath !== '' ? $videoPath : null,
+                $videoPoster,
+                $detailLeadImage,
+                $shopDisplayImage,
                 $dimLength !== '' ? $dimLength : null,
                 $dimWidth !== '' ? $dimWidth : null,
                 $dimHeight !== '' ? $dimHeight : null,
@@ -271,15 +351,22 @@ if ($showForm && isset($_GET['gallery_extra']) && $edit) {
 }
 
 $items = $pdo->query(
-    'SELECT p.*, c.name AS category_name, m.name AS model_name, f.name AS factory_name
+    "SELECT p.*, c.name AS category_name, m.name AS model_name, {$factoryNamesSql} AS factory_name
      FROM products p
      JOIN categories c ON c.id = p.category_id
      JOIN car_models m ON m.id = p.car_model_id
-     JOIN factories f ON f.id = m.factory_id
-     ORDER BY p.sort_order ASC, p.name ASC'
+     ORDER BY p.sort_order ASC, p.name ASC"
 )->fetchAll();
 
 $bannerLabels = ['none' => 'بدون بنر', 'new' => 'NEW', 'off' => 'OFF'];
+
+$imagePickerOptions = product_image_picker_options(
+    (string) ($edit['image'] ?? ''),
+    $gallery
+);
+$selectedDetailLead = (string) ($edit['detail_lead_image'] ?? '');
+$selectedShopImage = (string) ($edit['shop_display_image'] ?? '');
+$selectedVideoPoster = (string) ($edit['video_poster'] ?? '');
 
 cms_layout_start('محصولات', cms_current_username(), 'shop');
 ?>
@@ -395,6 +482,34 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
     </button>
   <?php endif; ?>
 
+  <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">ویدیو و نمایش تصاویر</h3>
+  <?php cms_video_field('video_path', 'ویدیو محصول (اسلاید آخر)', (string) ($edit['video_path'] ?? '')); ?>
+  <div class="cms-grid-2">
+    <label class="cms-field"><span class="cms-label">اسلاید اول صفحه محصول</span>
+      <select class="cms-select" name="detail_lead_image">
+        <?php foreach ($imagePickerOptions as $opt): ?>
+          <option value="<?= cms_h($opt['value']) ?>" <?= $selectedDetailLead === $opt['value'] ? 'selected' : '' ?>><?= cms_h($opt['label']) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </label>
+    <label class="cms-field"><span class="cms-label">تصویر فروشگاه و کارت‌ها</span>
+      <select class="cms-select" name="shop_display_image">
+        <?php foreach ($imagePickerOptions as $opt): ?>
+          <option value="<?= cms_h($opt['value']) ?>" <?= $selectedShopImage === $opt['value'] ? 'selected' : '' ?>><?= cms_h($opt['label']) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </label>
+  </div>
+  <label class="cms-field"><span class="cms-label">پوستر ویدیو (قبل از پخش)</span>
+    <select class="cms-select" name="video_poster">
+      <option value="" <?= $selectedVideoPoster === '' ? 'selected' : '' ?>>همان اسلاید اول (پیش‌فرض)</option>
+      <?php foreach ($imagePickerOptions as $opt): ?>
+        <?php if ($opt['value'] === '') continue; ?>
+        <option value="<?= cms_h($opt['value']) ?>" <?= $selectedVideoPoster === $opt['value'] ? 'selected' : '' ?>><?= cms_h($opt['label']) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </label>
+
   <label class="cms-field" style="margin-top:1rem"><span class="cms-label">ترتیب</span>
     <input class="cms-input" type="number" name="sort_order" value="<?= (int) ($edit['sort_order'] ?? 0) ?>">
   </label>
@@ -417,7 +532,7 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
     <tbody>
     <?php foreach ($items as $item): ?>
       <tr>
-        <td><div class="cms-list-name"><?php cms_list_thumb($item['image'] ?? null); ?><span><?= cms_h($item['name']) ?></span></div></td>
+        <td><div class="cms-list-name"><?php cms_list_thumb(product_list_thumb_image($item)); ?><span><?= cms_h($item['name']) ?></span></div></td>
         <td><?= cms_h($item['factory_name'] . ' / ' . $item['model_name']) ?></td>
         <td><?= cms_h($item['category_name']) ?></td>
         <td><?= cms_h($bannerLabels[$item['banner']] ?? $item['banner']) ?></td>

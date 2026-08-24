@@ -369,7 +369,7 @@ function cms_video_field(string $name, string $label, string $value): void
     echo '</div>';
 }
 
-function cms_handle_optional_video_upload(string $fieldName, string $existingPath): string
+function cms_handle_optional_video_upload(string $fieldName, string $existingPath, string $subdir = 'about/videos'): string
 {
     $fileKey = $fieldName . '_file';
     $hasFile = isset($_FILES[$fileKey]) && is_array($_FILES[$fileKey]);
@@ -426,12 +426,16 @@ function cms_handle_optional_video_upload(string $fieldName, string $existingPat
     }
 
     $uploadsRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads';
-    $uploadsDir = $uploadsRoot . DIRECTORY_SEPARATOR . 'about' . DIRECTORY_SEPARATOR . 'videos';
+    $subdir = trim(str_replace(['\\', '..'], ['/', ''], $subdir), '/');
+    if ($subdir === '') {
+        $subdir = 'about/videos';
+    }
+    $uploadsDir = $uploadsRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $subdir);
     if (!is_dir($uploadsDir) && !mkdir($uploadsDir, 0755, true) && !is_dir($uploadsDir)) {
-        throw new RuntimeException('ساخت پوشه uploads/about/videos ممکن نیست');
+        throw new RuntimeException('ساخت پوشه uploads/' . $subdir . ' ممکن نیست');
     }
     if (!is_writable($uploadsDir)) {
-        throw new RuntimeException('پوشه uploads/about/videos قابل نوشتن نیست');
+        throw new RuntimeException('پوشه uploads/' . $subdir . ' قابل نوشتن نیست');
     }
 
     $name = cms_unique_upload_name($uploadsDir, (string) $file['name'], $map[$mime]);
@@ -440,6 +444,6 @@ function cms_handle_optional_video_upload(string $fieldName, string $existingPat
         throw new RuntimeException('ذخیره ویدیو ناموفق بود');
     }
 
-    return '/uploads/about/videos/' . $name;
+    return '/uploads/' . $subdir . '/' . $name;
 }
 

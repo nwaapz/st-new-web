@@ -636,6 +636,31 @@ try {
     } else {
         $log[] = 'about_exhibition_slides already exists';
     }
+
+    require_once __DIR__ . '/lib/car-model-factories.php';
+    $cmfExists = $pdo->query("SHOW TABLES LIKE 'car_model_factories'")->fetchAll();
+    $legacyFactoryCol = $pdo->query('SHOW COLUMNS FROM car_models LIKE \'factory_id\'')->fetchAll();
+    if (count($cmfExists) === 0 || count($legacyFactoryCol) > 0) {
+        cms_ensure_car_model_factories_schema($pdo);
+        $log[] = 'Migrated car models to multi-factory (car_model_factories junction table)';
+    } else {
+        $log[] = 'car_model_factories already migrated';
+    }
+
+    foreach (
+        [
+            'video_path' => 'VARCHAR(512) NULL AFTER image',
+            'video_poster' => 'VARCHAR(512) NULL AFTER video_path',
+            'detail_lead_image' => 'VARCHAR(512) NULL AFTER video_poster',
+            'shop_display_image' => 'VARCHAR(512) NULL AFTER detail_lead_image',
+        ] as $col => $definition
+    ) {
+        $exists = $pdo->query('SHOW COLUMNS FROM products LIKE ' . $pdo->quote($col))->fetchAll();
+        if (count($exists) === 0) {
+            $pdo->exec("ALTER TABLE products ADD COLUMN {$col} {$definition}");
+            $log[] = "Added products.{$col}";
+        }
+    }
 } catch (Throwable $e) {
     $ok = false;
     $log[] = 'ERROR: ' . $e->getMessage();

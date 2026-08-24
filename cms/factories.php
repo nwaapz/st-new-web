@@ -66,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $items = $pdo->query(
-    'SELECT f.*, (SELECT COUNT(*) FROM car_models m WHERE m.factory_id = f.id) AS model_count
+    'SELECT f.*, (SELECT COUNT(DISTINCT cmf.car_model_id) FROM car_model_factories cmf WHERE cmf.factory_id = f.id) AS model_count
      FROM factories f ORDER BY f.sort_order ASC, f.name ASC'
 )->fetchAll();
 
