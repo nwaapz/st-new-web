@@ -98,6 +98,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
         'mechanic-view.php' => 'customerclub.php',
         'rewards.php' => 'hero.php',
         'home-backgrounds.php' => 'hero.php',
+        'home-pattern.php' => 'hero.php',
         'hero-mobile.php' => 'hero.php',
     ];
 
@@ -112,6 +113,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'hero-mobile.php' => 'هیرو موبایل',
             'rewards.php' => 'جوایز',
             'home-backgrounds.php' => 'پس‌زمینه و متن',
+            'home-pattern.php' => 'الگوی تکرارشونده',
         ],
     ];
     $nestedParent = $subNavAliases[$script] ?? $script;

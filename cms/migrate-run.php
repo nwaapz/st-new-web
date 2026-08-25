@@ -728,6 +728,13 @@ try {
     } else {
         $log[] = 'categories.skip_image_auto_frame already exists';
     }
+
+    require_once __DIR__ . '/lib/home-pattern.php';
+    $hadPattern = cms_setting_get(HOME_PATTERN_SETTING_KEY, '') !== '';
+    home_pattern_seed_if_missing();
+    $log[] = $hadPattern
+        ? 'home_pattern_config already exists'
+        : 'Seeded default home_pattern_config';
 } catch (Throwable $e) {
     $ok = false;
     $log[] = 'ERROR: ' . $e->getMessage();

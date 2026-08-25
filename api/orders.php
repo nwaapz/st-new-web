@@ -148,7 +148,7 @@ try {
         $modelNamesSql = cms_product_model_names_sql('p');
         $prodStmt = $pdo->prepare(
             'SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.pack_size, p.shop_display_image,
-                    COALESCE(NULLIF(p.shop_display_image, \'\'), p.image) AS display_image,
+                    COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
                     ' . $factoryNamesSql . ' AS factory_name,
                     ' . $modelNamesSql . ' AS model_name,
                     c.name AS category_name

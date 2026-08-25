@@ -60,6 +60,10 @@ try {
 
     $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : 0;
 
+    $page = isset($_GET['page']) ? max(1, (int) $_GET['page']) : 1;
+    $perPage = isset($_GET['per_page']) ? max(1, min(50, (int) $_GET['per_page'])) : 10;
+    $usePaginated = isset($_GET['page']) || isset($_GET['per_page']);
+
     $q = search_normalize((string) ($_GET['q'] ?? ''));
 
 
@@ -120,6 +124,8 @@ try {
 
         }
 
+        $usePaginated = false;
+
     }
 
 
@@ -168,23 +174,11 @@ try {
 
         $like = '%' . search_like_escape($q) . '%';
 
-        $modelNamesSql = cms_product_model_names_sql('p');
-
-        $factoryNamesSql = cms_product_factory_names_sql('p');
-
         $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR '
-
-            . search_name_sql('p.slug') . ' LIKE ? OR '
-
-            . search_name_sql('c.name') . ' LIKE ? OR '
-
-            . $factoryNamesSql . ' LIKE ? OR '
-
-            . $modelNamesSql . ' LIKE ? OR '
 
             . search_name_sql('p.visual_id') . ' LIKE ?)';
 
-        array_push($params, $like, $like, $like, $like, $like, $like);
+        array_push($params, $like, $like);
 
     }
 
@@ -204,6 +198,22 @@ try {
 
 
 
+    $whereSql = implode(' AND ', $where);
+
+    $total = 0;
+    $totalPages = 1;
+    if ($usePaginated) {
+        $countSql = 'SELECT COUNT(*) FROM products p ' . $seriesJoin
+            . ' JOIN categories c ON c.id = p.category_id WHERE ' . $whereSql;
+        $countStmt = $pdo->prepare($countSql);
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        if ($page > $totalPages) {
+            $page = $totalPages;
+        }
+    }
+
     $modelNamesSql = cms_product_model_names_sql('p');
 
     $factoryNamesSql = cms_product_factory_names_sql('p');
@@ -216,9 +226,11 @@ try {
 
                    p.price_text, p.pack_size, p.banner, p.image, p.shop_display_image, p.sort_order,
 
-                   COALESCE(NULLIF(p.shop_display_image, \'\'), p.image) AS display_image,
+                   COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
 
                    c.name AS category_name,
+
+                   c.image AS category_image,
 
                    ' . $modelNamesSql . ' AS model_name,
 
@@ -236,13 +248,16 @@ try {
 
             JOIN categories c ON c.id = p.category_id
 
-            WHERE ' . implode(' AND ', $where) . '
+            WHERE ' . $whereSql . '
 
             ORDER BY ' . $orderBy;
 
 
 
-    if ($limit > 0) {
+    if ($usePaginated) {
+        $offset = ($page - 1) * $perPage;
+        $sql .= ' LIMIT ' . $perPage . ' OFFSET ' . (int) $offset;
+    } elseif ($limit > 0) {
 
         $sql .= ' LIMIT ' . min($limit, 500);
 
@@ -298,13 +313,22 @@ try {
 
 
 
-    api_json([
+    $response = [
 
         'call_for_price' => $callForPrice,
 
         'items' => $items,
 
-    ]);
+    ];
+
+    if ($usePaginated) {
+        $response['total'] = $total;
+        $response['page'] = $page;
+        $response['per_page'] = $perPage;
+        $response['total_pages'] = $totalPages;
+    }
+
+    api_json($response);
 
 } catch (Throwable $e) {
 

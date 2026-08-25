@@ -5,6 +5,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/car-model-factories.php';
 require_once __DIR__ . '/lib/product-car-models.php';
+require_once __DIR__ . '/lib/search-text.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -12,6 +13,24 @@ cms_ensure_car_model_factories_schema($pdo);
 cms_ensure_product_car_models_schema($pdo);
 
 const PRODUCT_GALLERY_MAX = 12;
+const PRODUCTS_PAGE_SIZE = 10;
+
+$productsListQs = static function (
+    string $q = '',
+    int $page = 1,
+    array $extra = []
+): string {
+    $params = $extra;
+    if ($q !== '') {
+        $params['q'] = $q;
+    }
+    if ($page > 1) {
+        $params['page'] = (string) $page;
+    }
+    $qs = http_build_query($params);
+
+    return 'products.php' . ($qs !== '' ? '?' . $qs : '');
+};
 
 function product_ensure_detail_schema(PDO $pdo): void
 {
@@ -180,7 +199,11 @@ function product_list_thumb_image(array $item): ?string
         return $shop;
     }
     $cover = trim((string) ($item['image'] ?? ''));
-    return $cover !== '' ? $cover : null;
+    if ($cover !== '') {
+        return $cover;
+    }
+    $category = trim((string) ($item['category_image'] ?? ''));
+    return $category !== '' ? $category : null;
 }
 
 product_ensure_detail_schema($pdo);
@@ -189,6 +212,10 @@ $edit = null;
 $gallery = [];
 $selectedCarModelIds = [];
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
+$searchQ = trim((string) ($_GET['q'] ?? ''));
+$listPage = max(1, (int) ($_GET['page'] ?? 1));
+$listReturnQ = $searchQ;
+$listReturnPage = $listPage;
 
 $categories = $pdo->query(
     'SELECT id, name FROM categories ORDER BY sort_order ASC, name ASC'
@@ -215,15 +242,19 @@ if (isset($_GET['edit'])) {
 }
 
 if (isset($_GET['delete'])) {
+    $deleteQ = trim((string) ($_GET['q'] ?? ''));
+    $deletePage = max(1, (int) ($_GET['page'] ?? 1));
     $stmt = $pdo->prepare('DELETE FROM products WHERE id = ?');
     $stmt->execute([(int) $_GET['delete']]);
     cms_flash('محصول حذف شد');
-    cms_redirect('products.php');
+    cms_redirect($productsListQs($deleteQ, $deletePage));
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int) ($_POST['id'] ?? 0);
     $action = (string) ($_POST['action'] ?? 'save');
+    $returnQ = trim((string) ($_POST['return_q'] ?? ''));
+    $returnPage = max(1, (int) ($_POST['return_page'] ?? 1));
     try {
         $categoryId = (int) ($_POST['category_id'] ?? 0);
         $carModelIds = isset($_POST['car_model_ids']) && is_array($_POST['car_model_ids'])
@@ -391,13 +422,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->commit();
 
         cms_flash($id > 0 ? 'محصول به‌روز شد' : 'محصول اضافه شد');
-        cms_redirect('products.php');
+        cms_redirect($productsListQs($returnQ, $returnPage));
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
         cms_flash($e->getMessage(), 'error');
-        cms_redirect($id > 0 ? 'products.php?edit=' . $id : 'products.php?new=1');
+        if ($id > 0) {
+            cms_redirect($productsListQs($returnQ, $returnPage, ['edit' => (string) $id]));
+        } else {
+            cms_redirect('products.php?new=1');
+        }
     }
 }
 
@@ -408,12 +443,44 @@ if ($showForm && isset($_GET['gallery_extra']) && $edit) {
 
 $productModelNamesSql = cms_product_model_names_sql('p');
 $productFactoryNamesSql = cms_product_factory_names_sql('p');
-$items = $pdo->query(
-    "SELECT p.*, c.name AS category_name, {$productModelNamesSql} AS model_name, {$productFactoryNamesSql} AS factory_name
-     FROM products p
-     JOIN categories c ON c.id = p.category_id
-     ORDER BY p.sort_order ASC, p.name ASC"
-)->fetchAll();
+$items = [];
+$totalRows = 0;
+$totalPages = 1;
+
+if (!$showForm) {
+    $where = ['1=1'];
+    $listParams = [];
+    if ($searchQ !== '') {
+        $nameLike = '%' . search_like_escape(search_normalize($searchQ)) . '%';
+        $idLike = '%' . search_like_escape($searchQ) . '%';
+        $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR COALESCE(p.visual_id, \'\') LIKE ?)';
+        $listParams[] = $nameLike;
+        $listParams[] = $idLike;
+    }
+    $whereSql = implode(' AND ', $where);
+
+    $countStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM products p JOIN categories c ON c.id = p.category_id WHERE {$whereSql}"
+    );
+    $countStmt->execute($listParams);
+    $totalRows = (int) $countStmt->fetchColumn();
+    $totalPages = max(1, (int) ceil($totalRows / PRODUCTS_PAGE_SIZE));
+    if ($listPage > $totalPages) {
+        $listPage = $totalPages;
+    }
+    $offset = ($listPage - 1) * PRODUCTS_PAGE_SIZE;
+
+    $listStmt = $pdo->prepare(
+        "SELECT p.*, c.name AS category_name, c.image AS category_image, {$productModelNamesSql} AS model_name, {$productFactoryNamesSql} AS factory_name
+         FROM products p
+         JOIN categories c ON c.id = p.category_id
+         WHERE {$whereSql}
+         ORDER BY p.sort_order ASC, p.name ASC
+         LIMIT " . PRODUCTS_PAGE_SIZE . ' OFFSET ' . (int) $offset
+    );
+    $listStmt->execute($listParams);
+    $items = $listStmt->fetchAll();
+}
 
 $bannerLabels = ['none' => 'بدون بنر', 'new' => 'NEW', 'off' => 'OFF'];
 
@@ -442,6 +509,8 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   <h2><?= $edit ? 'ویرایش محصول' : 'محصول جدید' ?></h2>
   <input type="hidden" name="id" value="<?= (int) ($edit['id'] ?? 0) ?>">
   <input type="hidden" name="action" id="product-form-action" value="save">
+  <input type="hidden" name="return_q" value="<?= cms_h($listReturnQ) ?>">
+  <input type="hidden" name="return_page" value="<?= (int) $listReturnPage ?>">
 
   <fieldset class="cms-field" style="border:0;padding:0;margin:0 0 1rem">
     <legend class="cms-label" style="padding:0;margin-bottom:.5rem">مدل‌های خودرو (کارخانه / مدل)</legend>
@@ -615,14 +684,31 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   </label>
   <div class="cms-btn-row">
     <button class="cms-btn" type="submit" onclick="document.getElementById('product-form-action').value='save'">ذخیره</button>
-    <a class="cms-btn cms-btn--secondary" href="products.php">بازگشت به لیست</a>
+    <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($listReturnQ, $listReturnPage)) ?>">بازگشت به لیست</a>
   </div>
 </form>
 <?php else: ?>
+<form class="cms-search" method="get" action="products.php">
+  <input class="cms-input" type="search" name="q" value="<?= cms_h($searchQ) ?>" placeholder="جستجو با نام یا شناسه…" autocomplete="off">
+  <button class="cms-btn cms-btn--secondary" type="submit">جستجو</button>
+  <?php if ($searchQ !== ''): ?>
+    <a class="cms-btn cms-btn--ghost" href="products.php">پاک کردن</a>
+  <?php endif; ?>
+</form>
+
 <div class="cms-panel">
   <?php if ($items === []): ?>
-    <p class="cms-empty">هنوز محصولی ثبت نشده. <a href="products.php?new=1">اولین مورد را اضافه کنید</a>.</p>
+    <p class="cms-empty">
+      <?php if ($searchQ !== ''): ?>
+        محصولی با «<?= cms_h($searchQ) ?>» یافت نشد.
+      <?php else: ?>
+        هنوز محصولی ثبت نشده. <a href="products.php?new=1">اولین مورد را اضافه کنید</a>.
+      <?php endif; ?>
+    </p>
   <?php else: ?>
+  <p class="cms-muted" style="margin:0 0 1rem">
+    <?= (int) $totalRows ?> مورد · صفحه <?= (int) $listPage ?> از <?= (int) $totalPages ?>
+  </p>
   <table class="cms-table">
     <thead><tr><th>محصول</th><th>شناسه</th><th>خودرو</th><th>دسته</th><th>بنر</th><th>قیمت</th><th></th></tr></thead>
     <tbody>
@@ -636,14 +722,26 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
         <td><?= cms_h($item['price_text'] ?? '') ?></td>
         <td>
           <div class="cms-btn-row" style="margin-top:0">
-            <a class="cms-btn cms-btn--secondary" href="products.php?edit=<?= (int) $item['id'] ?>">ویرایش</a>
-            <a class="cms-btn cms-btn--ghost" href="products.php?delete=<?= (int) $item['id'] ?>" onclick="return confirm('حذف؟')">حذف</a>
+            <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage, ['edit' => (string) (int) $item['id']])) ?>">ویرایش</a>
+            <a class="cms-btn cms-btn--ghost" href="<?= cms_h($productsListQs($searchQ, $listPage, ['delete' => (string) (int) $item['id']])) ?>" onclick="return confirm('حذف؟')">حذف</a>
           </div>
         </td>
       </tr>
     <?php endforeach; ?>
     </tbody>
   </table>
+
+  <?php if ($totalPages > 1): ?>
+    <nav class="cms-orders-pager" aria-label="صفحه‌بندی محصولات" style="margin-top:1rem">
+      <?php if ($listPage > 1): ?>
+        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage - 1)) ?>">قبلی</a>
+      <?php endif; ?>
+      <span class="cms-muted"><?= (int) $listPage ?> / <?= (int) $totalPages ?></span>
+      <?php if ($listPage < $totalPages): ?>
+        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage + 1)) ?>">بعدی</a>
+      <?php endif; ?>
+    </nav>
+  <?php endif; ?>
   <?php endif; ?>
 </div>
 <?php endif; ?>
