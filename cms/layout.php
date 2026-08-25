@@ -66,7 +66,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=19">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=20">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';
@@ -158,7 +158,7 @@ function cms_layout_end(): void
     echo '<div class="cms-media-grid" id="cms-media-grid"></div>';
     echo '</div></div>';
     echo '<script src="assets/cms-upload.js?v=2"></script>';
-    echo '<script src="assets/cms-check-list-filter.js?v=1"></script>';
+    echo '<script src="assets/cms-check-list-filter.js?v=2"></script>';
     echo '</body></html>';
 }
 

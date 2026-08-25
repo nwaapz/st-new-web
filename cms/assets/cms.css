@@ -409,6 +409,11 @@ textarea.cms-input {
   align-items: flex-start;
 }
 
+.cms-check-list__item[hidden],
+.cms-check-list__item.is-filtered-out {
+  display: none !important;
+}
+
 .cms-check-list-filter {
   display: flex;
   flex-direction: column;
