@@ -409,6 +409,26 @@ textarea.cms-input {
   align-items: flex-start;
 }
 
+.cms-check-list-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cms-check-list-filter__input {
+  width: 100%;
+  margin: 0;
+}
+
+.cms-check-list-filter__empty {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.cms-check-list-filter .cms-check-list {
+  margin-bottom: 0;
+}
+
 /* ——— Buttons ——— */
 .cms-btn {
   border: 0;

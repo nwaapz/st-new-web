@@ -435,14 +435,30 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
     <?php if ($models === []): ?>
       <p class="cms-muted" style="margin:0">هنوز مدلی ثبت نشده. ابتدا از <a href="car-models.php">مدل‌ها</a> اضافه کنید.</p>
     <?php else: ?>
-      <div class="cms-check-list">
-        <?php foreach ($models as $m): ?>
-          <?php $mid = (int) $m['id']; ?>
-          <label class="cms-check cms-check-list__item">
-            <input type="checkbox" name="car_model_ids[]" value="<?= $mid ?>" <?= in_array($mid, $selectedCarModelIds, true) ? 'checked' : '' ?>>
-            <span><?= cms_h(($m['factory_name'] ?? '') . ' / ' . $m['name']) ?></span>
-          </label>
-        <?php endforeach; ?>
+      <div class="cms-check-list-filter" data-cms-check-list-filter>
+        <input
+          type="search"
+          class="cms-input cms-check-list-filter__input"
+          placeholder="جستجو کارخانه یا مدل…"
+          autocomplete="off"
+          aria-label="جستجو مدل خودرو"
+        >
+        <p class="cms-check-list-filter__empty cms-muted" hidden>موردی یافت نشد</p>
+        <div class="cms-check-list">
+          <?php foreach ($models as $m): ?>
+            <?php
+            $mid = (int) $m['id'];
+            $searchHaystack = trim((string) (($m['factory_name'] ?? '') . ' ' . ($m['name'] ?? '')));
+            ?>
+            <label
+              class="cms-check cms-check-list__item"
+              data-cms-check-search="<?= cms_h($searchHaystack) ?>"
+            >
+              <input type="checkbox" name="car_model_ids[]" value="<?= $mid ?>" <?= in_array($mid, $selectedCarModelIds, true) ? 'checked' : '' ?>>
+              <span><?= cms_h(($m['factory_name'] ?? '') . ' / ' . $m['name']) ?></span>
+            </label>
+          <?php endforeach; ?>
+        </div>
       </div>
     <?php endif; ?>
   </fieldset>
