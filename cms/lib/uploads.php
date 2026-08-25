@@ -137,9 +137,8 @@ function cms_store_uploaded_image(array $file, array $options = []): string
     if (!isset($map[$mime])) {
         throw new RuntimeException('فقط JPEG/PNG/WebP/GIF مجاز است (نوع تشخیص‌داده‌شده: ' . ($mime !== '' ? $mime : 'نامشخص') . ')');
     }
-    if ((int) ($file['size'] ?? 0) > 5 * 1024 * 1024) {
-        throw new RuntimeException('حداکثر حجم تصویر ۵ مگابایت است');
-    }
+    // No app-level size cap — images are resized/compressed server-side after upload.
+    // PHP upload_max_filesize / post_max_size still apply.
 
     $uploadsDir = cms_uploads_root();
     if (!is_dir($uploadsDir) && !mkdir($uploadsDir, 0755, true) && !is_dir($uploadsDir)) {

@@ -19,6 +19,39 @@ function cms_image_gd_available(): bool
         && function_exists('imagecopyresampled');
 }
 
+/**
+ * Raise memory_limit if the image is too large to decode safely.
+ * GD needs roughly 5 bytes per pixel for truecolor + alpha.
+ */
+function cms_image_ensure_memory(string $path): void
+{
+    $info = @getimagesize($path);
+    if ($info === false) {
+        return;
+    }
+    $pixels = (int) $info[0] * (int) $info[1];
+    // Source + destination canvases with headroom.
+    $needed = (int) ($pixels * 5 * 2.2) + 64 * 1024 * 1024;
+
+    $currentRaw = (string) ini_get('memory_limit');
+    if ($currentRaw === '-1') {
+        return;
+    }
+    $unit = strtolower(substr($currentRaw, -1));
+    $current = (float) $currentRaw;
+    if ($unit === 'g') {
+        $current *= 1024 * 1024 * 1024;
+    } elseif ($unit === 'm') {
+        $current *= 1024 * 1024;
+    } elseif ($unit === 'k') {
+        $current *= 1024;
+    }
+
+    if ($needed > $current) {
+        @ini_set('memory_limit', (string) ((int) ceil($needed / (1024 * 1024)) + 64) . 'M');
+    }
+}
+
 function cms_image_mime_extension(string $mime): ?string
 {
     $map = [
@@ -182,7 +215,7 @@ function cms_image_save_to_path($img, string $path, string $mime): bool
         case 'image/png':
             imagealphablending($img, false);
             imagesavealpha($img, true);
-            return imagepng($img, $path, 8);
+            return imagepng($img, $path, 9);
         case 'image/gif':
             return imagegif($img, $path);
         default:
@@ -208,6 +241,7 @@ function cms_auto_frame_product_image(string $absolutePath, string $mime): strin
         return $absolutePath;
     }
 
+    cms_image_ensure_memory($absolutePath);
     $src = cms_image_load_gd($absolutePath, $mime);
     if ($src === null || $src === false) {
         return $absolutePath;
@@ -309,6 +343,7 @@ function cms_optimize_stored_image(string $absolutePath, string $mime): string
         return $absolutePath;
     }
 
+    cms_image_ensure_memory($absolutePath);
     $src = cms_image_load_gd($absolutePath, $mime);
     if ($src === null || $src === false) {
         return $absolutePath;
@@ -387,7 +422,7 @@ function cms_optimize_stored_image(string $absolutePath, string $mime): string
             $saved = imagejpeg($dst, $tmpPath, cms_image_optimize_jpeg_quality());
             break;
         case 'image/png':
-            $saved = imagepng($dst, $tmpPath, 8);
+            $saved = imagepng($dst, $tmpPath, 9);
             break;
         case 'image/gif':
             $saved = imagegif($dst, $tmpPath);
