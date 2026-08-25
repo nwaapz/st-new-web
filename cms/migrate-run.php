@@ -712,6 +712,14 @@ try {
     } else {
         $log[] = 'order_items.visual_id already exists';
     }
+
+    $skipFrameCol = $pdo->query("SHOW COLUMNS FROM products LIKE 'skip_image_auto_frame'")->fetchAll();
+    if (count($skipFrameCol) === 0) {
+        $pdo->exec('ALTER TABLE products ADD COLUMN skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0 AFTER shop_display_image');
+        $log[] = 'Added products.skip_image_auto_frame column';
+    } else {
+        $log[] = 'products.skip_image_auto_frame already exists';
+    }
 } catch (Throwable $e) {
     $ok = false;
     $log[] = 'ERROR: ' . $e->getMessage();

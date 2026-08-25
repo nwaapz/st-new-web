@@ -5,6 +5,8 @@ declare(strict_types=1);
  * Shared image/video upload storage for CMS forms and upload.php AJAX.
  */
 
+require_once __DIR__ . '/image-optimize.php';
+
 /** Site-root uploads directory (public/uploads), not cms/uploads. */
 function cms_uploads_root(): string
 {
@@ -100,8 +102,9 @@ function cms_upload_error_message(int $error, string $kind = 'file'): string
     return $kind === 'video' ? ('آپلود ویدیو ناموفق بود (کد ' . $error . ')') : ('آپلود ناموفق بود (کد ' . $error . ')');
 }
 
-/** @param array{name?:string,tmp_name?:string,error?:int,size?:int} $file */
-function cms_store_uploaded_image(array $file): string
+/** @param array{name?:string,tmp_name?:string,error?:int,size?:int} $file
+ *  @param array{auto_frame?:bool} $options */
+function cms_store_uploaded_image(array $file, array $options = []): string
 {
     $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
     if ($error !== UPLOAD_ERR_OK) {
@@ -152,7 +155,17 @@ function cms_store_uploaded_image(array $file): string
         throw new RuntimeException('ذخیره فایل ناموفق بود');
     }
 
-    return '/uploads/' . $name;
+    if (!empty($options['auto_frame'])) {
+        $dest = cms_auto_frame_product_image($dest, $mime);
+        $detected = cms_detect_image_mime($dest);
+        if ($detected !== '') {
+            $mime = $detected;
+        }
+    }
+
+    $dest = cms_optimize_stored_image($dest, $mime);
+
+    return '/uploads/' . str_replace('\\', '/', basename($dest));
 }
 
 /** @param array{name?:string,tmp_name?:string,error?:int,size?:int} $file */

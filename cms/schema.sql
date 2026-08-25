@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS products (
   video_poster VARCHAR(512) NULL,
   detail_lead_image VARCHAR(512) NULL,
   shop_display_image VARCHAR(512) NULL,
+  skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0,
   dim_length VARCHAR(64) NULL,
   dim_width VARCHAR(64) NULL,
   dim_height VARCHAR(64) NULL,

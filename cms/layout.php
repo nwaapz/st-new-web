@@ -204,7 +204,7 @@ function cms_image_field(string $name, string $label, string $value): void
     echo '</div></div></div>';
 }
 
-function cms_handle_optional_upload(string $fieldName, string $existingPath): string
+function cms_handle_optional_upload(string $fieldName, string $existingPath, array $options = []): string
 {
     $fileKey = $fieldName . '_file';
     $hasFile = isset($_FILES[$fileKey]) && is_array($_FILES[$fileKey]);
@@ -218,7 +218,7 @@ function cms_handle_optional_upload(string $fieldName, string $existingPath): st
         return $posted;
     }
 
-    return cms_store_uploaded_image($_FILES[$fileKey]);
+    return cms_store_uploaded_image($_FILES[$fileKey], $options);
 }
 
 function cms_video_field(string $name, string $label, string $value, string $subdir = 'about/videos', string $helpNote = ''): void

@@ -51,6 +51,10 @@ function product_ensure_detail_schema(PDO $pdo): void
     if (count($visualIdx) === 0) {
         $pdo->exec('ALTER TABLE products ADD UNIQUE KEY uq_prod_visual_id (visual_id)');
     }
+    $skipFrameExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'skip_image_auto_frame'")->fetchAll();
+    if (count($skipFrameExists) === 0) {
+        $pdo->exec('ALTER TABLE products ADD COLUMN skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0 AFTER shop_display_image');
+    }
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS product_images (
           id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -92,13 +96,14 @@ function product_load_gallery(PDO $pdo, int $productId): array
     return $slides;
 }
 
-function product_collect_gallery_from_post(int $count): array
+function product_collect_gallery_from_post(int $count, array $uploadOptions = []): array
 {
     $slides = [];
     for ($i = 0; $i < $count; $i++) {
         $image = cms_handle_optional_upload(
             'gallery_image_' . $i,
-            (string) ($_POST['gallery_image_' . $i] ?? '')
+            (string) ($_POST['gallery_image_' . $i] ?? ''),
+            $uploadOptions
         );
         $alt = trim((string) ($_POST['gallery_alt_' . $i] ?? ''));
         if ($image === '') {
@@ -242,7 +247,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!in_array($banner, ['none', 'new', 'off'], true)) {
             $banner = 'none';
         }
-        $image = cms_handle_optional_upload('image', (string) ($_POST['image'] ?? ''));
+        $skipImageAutoFrame = isset($_POST['skip_image_auto_frame']) ? 1 : 0;
+        $imageUploadOptions = ['auto_frame' => $skipImageAutoFrame === 0];
+        $image = cms_handle_optional_upload(
+            'image',
+            (string) ($_POST['image'] ?? ''),
+            $imageUploadOptions
+        );
         $videoPath = cms_handle_optional_video_upload(
             'video_path',
             (string) ($_POST['video_path'] ?? ''),
@@ -266,7 +277,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($galleryCount > PRODUCT_GALLERY_MAX) {
             $galleryCount = PRODUCT_GALLERY_MAX;
         }
-        $collectedGallery = product_collect_gallery_from_post($galleryCount);
+        $collectedGallery = product_collect_gallery_from_post($galleryCount, $imageUploadOptions);
 
         if ($categoryId <= 0 || $name === '') {
             throw new RuntimeException('دسته محصول و نام الزامی است');
@@ -308,7 +319,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id > 0) {
             $stmt = $pdo->prepare(
                 'UPDATE products SET category_id=?, name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
-                 video_path=?, video_path_low=?, video_poster=?, detail_lead_image=?, shop_display_image=?,
+                 video_path=?, video_path_low=?, video_poster=?, detail_lead_image=?, shop_display_image=?, skip_image_auto_frame=?,
                  dim_length=?, dim_width=?, dim_height=?, dim_weight=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
@@ -323,6 +334,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $videoPoster,
                 $detailLeadImage,
                 $shopDisplayImage,
+                $skipImageAutoFrame,
                 $dimLength !== '' ? $dimLength : null,
                 $dimWidth !== '' ? $dimWidth : null,
                 $dimHeight !== '' ? $dimHeight : null,
@@ -333,9 +345,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $stmt = $pdo->prepare(
                 'INSERT INTO products (category_id, name, slug, visual_id, description, price_text, pack_size, banner, image,
-                 video_path, video_path_low, video_poster, detail_lead_image, shop_display_image,
+                 video_path, video_path_low, video_poster, detail_lead_image, shop_display_image, skip_image_auto_frame,
                  dim_length, dim_width, dim_height, dim_weight, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $categoryId, $name, $slug, $visualId,
@@ -349,6 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $videoPoster,
                 $detailLeadImage,
                 $shopDisplayImage,
+                $skipImageAutoFrame,
                 $dimLength !== '' ? $dimLength : null,
                 $dimWidth !== '' ? $dimWidth : null,
                 $dimHeight !== '' ? $dimHeight : null,
@@ -529,6 +542,11 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   </div>
 
   <?php cms_image_field('image', 'تصویر اصلی', (string) ($edit['image'] ?? '')); ?>
+  <label class="cms-check" style="margin:.35rem 0 1rem">
+    <input type="checkbox" name="skip_image_auto_frame" value="1" <?= !empty($edit['skip_image_auto_frame']) ? 'checked' : '' ?>>
+    <span>حفظ قاب‌بندی اصلی تصویر (بدون برش و مرکز کردن خودکار PNG)</span>
+  </label>
+  <p class="cms-muted" style="margin:-0.5rem 0 1rem;font-size:.85rem">به‌طور پیش‌فرض، حاشیه شفاف PNG حذف و محصول در مرکز یک کادر مربع قرار می‌گیرد.</p>
 
   <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">گالری تصاویر</h3>
   <p class="cms-muted" style="margin:0 0 .75rem">تصاویر اضافی صفحه محصول. اسلاید اول از طریق «اسلاید اول» قابل تنظیم است؛ تصویر اصلی همیشه در گالری نمایش داده می‌شود.</p>
