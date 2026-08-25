@@ -720,6 +720,14 @@ try {
     } else {
         $log[] = 'products.skip_image_auto_frame already exists';
     }
+
+    $catSkipFrameCol = $pdo->query("SHOW COLUMNS FROM categories LIKE 'skip_image_auto_frame'")->fetchAll();
+    if (count($catSkipFrameCol) === 0) {
+        $pdo->exec('ALTER TABLE categories ADD COLUMN skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0 AFTER image');
+        $log[] = 'Added categories.skip_image_auto_frame column';
+    } else {
+        $log[] = 'categories.skip_image_auto_frame already exists';
+    }
 } catch (Throwable $e) {
     $ok = false;
     $log[] = 'ERROR: ' . $e->getMessage();

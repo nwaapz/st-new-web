@@ -21,10 +21,11 @@ try {
 
     $kind = trim((string) ($_POST['kind'] ?? 'image'));
     $subdir = trim((string) ($_POST['subdir'] ?? ''));
+    $autoFrame = !isset($_POST['auto_frame']) || (string) $_POST['auto_frame'] !== '0';
 
     $path = $kind === 'video'
         ? cms_store_uploaded_video($_FILES['file'], $subdir !== '' ? $subdir : 'about/videos')
-        : cms_store_uploaded_image($_FILES['file']);
+        : cms_store_uploaded_image($_FILES['file'], ['auto_frame' => $autoFrame]);
 
     echo json_encode([
         'ok' => true,

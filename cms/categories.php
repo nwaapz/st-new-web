@@ -9,6 +9,16 @@ $pdo = cms_pdo();
 $edit = null;
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
 
+function category_ensure_image_schema(PDO $pdo): void
+{
+    $skipFrameExists = $pdo->query("SHOW COLUMNS FROM categories LIKE 'skip_image_auto_frame'")->fetchAll();
+    if (count($skipFrameExists) === 0) {
+        $pdo->exec('ALTER TABLE categories ADD COLUMN skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0 AFTER image');
+    }
+}
+
+category_ensure_image_schema($pdo);
+
 if (isset($_GET['edit'])) {
     $stmt = $pdo->prepare('SELECT * FROM categories WHERE id = ?');
     $stmt->execute([(int) $_GET['edit']]);
@@ -36,7 +46,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $slug = cms_slugify($name);
         }
         $description = trim((string) ($_POST['description'] ?? ''));
-        $image = cms_handle_optional_upload('image', (string) ($_POST['image'] ?? ''));
+        $skipImageAutoFrame = isset($_POST['skip_image_auto_frame']) ? 1 : 0;
+        $imageUploadOptions = ['auto_frame' => $skipImageAutoFrame === 0];
+        $image = cms_handle_optional_upload(
+            'image',
+            (string) ($_POST['image'] ?? ''),
+            $imageUploadOptions
+        );
         $sortOrder = (int) ($_POST['sort_order'] ?? 0);
         $published = isset($_POST['published']) ? 1 : 0;
 
@@ -46,13 +62,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE categories SET name=?, slug=?, description=?, image=?, sort_order=?, published=? WHERE id=?'
+                'UPDATE categories SET name=?, slug=?, description=?, image=?, skip_image_auto_frame=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
                 $name,
                 $slug,
                 $description !== '' ? $description : null,
                 $image !== '' ? $image : null,
+                $skipImageAutoFrame,
                 $sortOrder,
                 $published,
                 $id,
@@ -60,13 +77,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_flash('دسته به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO categories (name, slug, description, image, sort_order, published) VALUES (?,?,?,?,?,?)'
+                'INSERT INTO categories (name, slug, description, image, skip_image_auto_frame, sort_order, published) VALUES (?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name,
                 $slug,
                 $description !== '' ? $description : null,
                 $image !== '' ? $image : null,
+                $skipImageAutoFrame,
                 $sortOrder,
                 $published,
             ]);
@@ -114,6 +132,11 @@ cms_layout_start('دسته‌بندی‌ها', cms_current_username(), 'shop');
     <textarea class="cms-textarea" name="description"><?= cms_h($edit['description'] ?? '') ?></textarea>
   </label>
   <?php cms_image_field('image', 'تصویر', (string) ($edit['image'] ?? '')); ?>
+  <label class="cms-check" style="margin:.35rem 0 1rem">
+    <input type="checkbox" name="skip_image_auto_frame" value="1" <?= !empty($edit['skip_image_auto_frame']) ? 'checked' : '' ?>>
+    <span>حفظ قاب‌بندی اصلی تصویر (بدون برش و مرکز کردن خودکار PNG)</span>
+  </label>
+  <p class="cms-muted" style="margin:-0.5rem 0 1rem;font-size:.85rem">به‌طور پیش‌فرض، حاشیه شفاف PNG حذف و محصول در مرکز یک کادر مربع قرار می‌گیرد. تصویر پس از آپلود برای بارگذاری سریع‌تر در سایت فشرده می‌شود.</p>
   <label class="cms-field"><span class="cms-label">ترتیب</span>
     <input class="cms-input" type="number" name="sort_order" value="<?= (int) ($edit['sort_order'] ?? 0) ?>">
   </label>

@@ -127,11 +127,18 @@
     const textId = opts.textId || input.dataset.cmsTextId || "";
     const previewId = opts.previewId || input.dataset.cmsPreviewId || "";
     const subdir = opts.subdir || input.dataset.cmsUploadSubdir || "";
+    const form = input.closest("form");
+    const skipAutoFrame = form
+      ? form.querySelector('[name="skip_image_auto_frame"]')
+      : null;
 
     const formData = new FormData();
     formData.append("file", file);
     formData.append("kind", kind);
     if (subdir) formData.append("subdir", subdir);
+    if (kind === "image") {
+      formData.append("auto_frame", skipAutoFrame && skipAutoFrame.checked ? "0" : "1");
+    }
 
     window.cmsUploadInProgress += 1;
     setFieldProgress(input, 0, "شروع آپلود…", false);
