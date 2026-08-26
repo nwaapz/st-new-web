@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS categories (
   slug VARCHAR(191) NOT NULL,
   description TEXT NULL,
   image VARCHAR(512) NULL,
+  video_path VARCHAR(512) NULL,
+  video_path_low VARCHAR(512) NULL,
   skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0,
   sort_order INT NOT NULL DEFAULT 0,
   published TINYINT(1) NOT NULL DEFAULT 1,

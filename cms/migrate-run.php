@@ -721,9 +721,24 @@ try {
         $log[] = 'products.skip_image_auto_frame already exists';
     }
 
+    foreach (
+        [
+            'video_path' => 'VARCHAR(512) NULL AFTER image',
+            'video_path_low' => 'VARCHAR(512) NULL AFTER video_path',
+        ] as $col => $definition
+    ) {
+        $exists = $pdo->query('SHOW COLUMNS FROM categories LIKE ' . $pdo->quote($col))->fetchAll();
+        if (count($exists) === 0) {
+            $pdo->exec("ALTER TABLE categories ADD COLUMN {$col} {$definition}");
+            $log[] = "Added categories.{$col} column";
+        } else {
+            $log[] = "categories.{$col} already exists";
+        }
+    }
+
     $catSkipFrameCol = $pdo->query("SHOW COLUMNS FROM categories LIKE 'skip_image_auto_frame'")->fetchAll();
     if (count($catSkipFrameCol) === 0) {
-        $pdo->exec('ALTER TABLE categories ADD COLUMN skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0 AFTER image');
+        $pdo->exec('ALTER TABLE categories ADD COLUMN skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0 AFTER video_path_low');
         $log[] = 'Added categories.skip_image_auto_frame column';
     } else {
         $log[] = 'categories.skip_image_auto_frame already exists';

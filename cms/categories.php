@@ -9,15 +9,26 @@ $pdo = cms_pdo();
 $edit = null;
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
 
-function category_ensure_image_schema(PDO $pdo): void
+function category_ensure_schema(PDO $pdo): void
 {
     $skipFrameExists = $pdo->query("SHOW COLUMNS FROM categories LIKE 'skip_image_auto_frame'")->fetchAll();
     if (count($skipFrameExists) === 0) {
         $pdo->exec('ALTER TABLE categories ADD COLUMN skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0 AFTER image');
     }
+    foreach (
+        [
+            'video_path' => 'VARCHAR(512) NULL AFTER image',
+            'video_path_low' => 'VARCHAR(512) NULL AFTER video_path',
+        ] as $col => $definition
+    ) {
+        $exists = $pdo->query('SHOW COLUMNS FROM categories LIKE ' . $pdo->quote($col))->fetchAll();
+        if (count($exists) === 0) {
+            $pdo->exec("ALTER TABLE categories ADD COLUMN {$col} {$definition}");
+        }
+    }
 }
 
-category_ensure_image_schema($pdo);
+category_ensure_schema($pdo);
 
 if (isset($_GET['edit'])) {
     $stmt = $pdo->prepare('SELECT * FROM categories WHERE id = ?');
@@ -53,6 +64,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (string) ($_POST['image'] ?? ''),
             $imageUploadOptions
         );
+        $videoPath = cms_handle_optional_video_upload(
+            'video_path',
+            (string) ($_POST['video_path'] ?? ''),
+            'categories/videos'
+        );
+        $videoPathLow = cms_handle_optional_video_upload(
+            'video_path_low',
+            (string) ($_POST['video_path_low'] ?? ''),
+            'categories/videos'
+        );
         $sortOrder = (int) ($_POST['sort_order'] ?? 0);
         $published = isset($_POST['published']) ? 1 : 0;
 
@@ -62,13 +83,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE categories SET name=?, slug=?, description=?, image=?, skip_image_auto_frame=?, sort_order=?, published=? WHERE id=?'
+                'UPDATE categories SET name=?, slug=?, description=?, image=?, video_path=?, video_path_low=?, skip_image_auto_frame=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
                 $name,
                 $slug,
                 $description !== '' ? $description : null,
                 $image !== '' ? $image : null,
+                $videoPath !== '' ? $videoPath : null,
+                $videoPathLow !== '' ? $videoPathLow : null,
                 $skipImageAutoFrame,
                 $sortOrder,
                 $published,
@@ -77,13 +100,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_flash('دسته به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO categories (name, slug, description, image, skip_image_auto_frame, sort_order, published) VALUES (?,?,?,?,?,?,?)'
+                'INSERT INTO categories (name, slug, description, image, video_path, video_path_low, skip_image_auto_frame, sort_order, published) VALUES (?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name,
                 $slug,
                 $description !== '' ? $description : null,
                 $image !== '' ? $image : null,
+                $videoPath !== '' ? $videoPath : null,
+                $videoPathLow !== '' ? $videoPathLow : null,
                 $skipImageAutoFrame,
                 $sortOrder,
                 $published,
@@ -137,6 +162,16 @@ cms_layout_start('دسته‌بندی‌ها', cms_current_username(), 'shop');
     <span>حفظ قاب‌بندی اصلی تصویر (بدون برش و مرکز کردن خودکار PNG)</span>
   </label>
   <p class="cms-muted" style="margin:-0.5rem 0 1rem;font-size:.85rem">به‌طور پیش‌فرض، حاشیه شفاف PNG حذف و محصول در مرکز یک کادر مربع قرار می‌گیرد. تصویر پس از آپلود برای بارگذاری سریع‌تر در سایت فشرده می‌شود.</p>
+  <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">ویدیو دسته</h3>
+  <p class="cms-muted" style="margin:-0.25rem 0 .75rem;font-size:.85rem">اگر محصول ویدیوی اختصاصی نداشته باشد، این ویدیو در اسلایدر صفحه محصول نمایش داده می‌شود.</p>
+  <?php cms_video_field('video_path', 'ویدیو دسته (پیش‌فرض محصولات)', (string) ($edit['video_path'] ?? ''), 'categories/videos'); ?>
+  <?php cms_video_field(
+      'video_path_low',
+      'ویدیو کیفیت پایین (اختیاری)',
+      (string) ($edit['video_path_low'] ?? ''),
+      'categories/videos',
+      'نسخه فشرده (مثلاً ۴۸۰p MP4) برای اینترنت کند. اگر خالی باشد فقط ویدیوی اصلی پخش می‌شود.'
+  ); ?>
   <label class="cms-field"><span class="cms-label">ترتیب</span>
     <input class="cms-input" type="number" name="sort_order" value="<?= (int) ($edit['sort_order'] ?? 0) ?>">
   </label>

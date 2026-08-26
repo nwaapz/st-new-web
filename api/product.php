@@ -68,6 +68,17 @@ function product_api_ensure_schema(PDO $pdo): void
           KEY idx_product_reviews_product_status (product_id, status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
+    foreach (
+        [
+            'video_path' => 'VARCHAR(512) NULL AFTER image',
+            'video_path_low' => 'VARCHAR(512) NULL AFTER video_path',
+        ] as $col => $definition
+    ) {
+        $exists = $pdo->query('SHOW COLUMNS FROM categories LIKE ' . $pdo->quote($col))->fetchAll();
+        if (count($exists) === 0) {
+            $pdo->exec("ALTER TABLE categories ADD COLUMN {$col} {$definition}");
+        }
+    }
     $ready = true;
 }
 
@@ -103,6 +114,7 @@ try {
                 p.detail_lead_image, p.shop_display_image, p.sort_order,
                 p.dim_length, p.dim_width, p.dim_height, p.dim_weight,
                 c.name AS category_name, c.slug AS category_slug, c.image AS category_image,
+                c.video_path AS category_video_path, c.video_path_low AS category_video_path_low,
                 COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
                 ' . $modelNamesSql . ' AS model_name,
                 ' . $modelNamesSql . ' AS model_names,
