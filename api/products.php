@@ -12,6 +12,8 @@ require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 
+require_once dirname(__DIR__) . '/cms/lib/shop-search-intent.php';
+
 
 
 try {
@@ -48,6 +50,17 @@ try {
 
     $categoryId = isset($_GET['category_id']) ? (int) $_GET['category_id'] : 0;
 
+    $categoryIds = [];
+    if (isset($_GET['category_ids'])) {
+        foreach (explode(',', (string) $_GET['category_ids']) as $part) {
+            $id = (int) trim($part);
+            if ($id > 0) {
+                $categoryIds[] = $id;
+            }
+        }
+        $categoryIds = array_values(array_unique($categoryIds));
+    }
+
     $carModelId = isset($_GET['car_model_id']) ? (int) $_GET['car_model_id'] : 0;
 
     $factoryId = isset($_GET['factory_id']) ? (int) $_GET['factory_id'] : 0;
@@ -65,6 +78,27 @@ try {
     $usePaginated = isset($_GET['page']) || isset($_GET['per_page']);
 
     $q = search_normalize((string) ($_GET['q'] ?? ''));
+
+    $resolvedIntent = null;
+
+    if ($q !== '' && $relatedTo <= 0) {
+        $intent = shop_search_parse_intent($pdo, $q, [
+            'skip_car' => $carModelId > 0,
+            'skip_factory' => $factoryId > 0,
+            'skip_categories' => $categoryId > 0 || $categoryIds !== [],
+        ]);
+        if ($carModelId <= 0 && !empty($intent['car_model_id'])) {
+            $carModelId = (int) $intent['car_model_id'];
+        }
+        if ($factoryId <= 0 && !empty($intent['factory_id'])) {
+            $factoryId = (int) $intent['factory_id'];
+        }
+        if ($categoryId <= 0 && $categoryIds === [] && !empty($intent['category_ids'])) {
+            $categoryIds = $intent['category_ids'];
+        }
+        $q = search_normalize((string) ($intent['remainder'] ?? ''));
+        $resolvedIntent = shop_search_intent_for_response($intent);
+    }
 
 
 
@@ -138,7 +172,13 @@ try {
 
     }
 
-    if ($categoryId > 0) {
+    if ($categoryIds !== []) {
+        $placeholders = implode(',', array_fill(0, count($categoryIds), '?'));
+        $where[] = 'p.category_id IN (' . $placeholders . ')';
+        foreach ($categoryIds as $catId) {
+            $params[] = $catId;
+        }
+    } elseif ($categoryId > 0) {
 
         $where[] = 'p.category_id = ?';
 
@@ -174,11 +214,17 @@ try {
 
         $like = '%' . search_like_escape($q) . '%';
 
+        $modelNamesSqlForQ = cms_product_model_names_sql('p');
+
         $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR '
 
-            . search_name_sql('p.visual_id') . ' LIKE ?)';
+            . search_name_sql('p.visual_id') . ' LIKE ? OR '
 
-        array_push($params, $like, $like);
+            . search_name_sql('c.name') . ' LIKE ? OR '
+
+            . $modelNamesSqlForQ . ' LIKE ?)';
+
+        array_push($params, $like, $like, $like, $like);
 
     }
 
@@ -326,6 +372,9 @@ try {
         $response['page'] = $page;
         $response['per_page'] = $perPage;
         $response['total_pages'] = $totalPages;
+        if ($resolvedIntent !== null) {
+            $response['resolved_intent'] = $resolvedIntent;
+        }
     }
 
     api_json($response);
