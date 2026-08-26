@@ -67,12 +67,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $videoPath = cms_handle_optional_video_upload(
             'video_path',
             (string) ($_POST['video_path'] ?? ''),
-            'categories/videos'
+            'products/videos'
         );
         $videoPathLow = cms_handle_optional_video_upload(
             'video_path_low',
             (string) ($_POST['video_path_low'] ?? ''),
-            'categories/videos'
+            'products/videos'
         );
         $sortOrder = (int) ($_POST['sort_order'] ?? 0);
         $published = isset($_POST['published']) ? 1 : 0;
@@ -164,12 +164,12 @@ cms_layout_start('دسته‌بندی‌ها', cms_current_username(), 'shop');
   <p class="cms-muted" style="margin:-0.5rem 0 1rem;font-size:.85rem">به‌طور پیش‌فرض، حاشیه شفاف PNG حذف و محصول در مرکز یک کادر مربع قرار می‌گیرد. تصویر پس از آپلود برای بارگذاری سریع‌تر در سایت فشرده می‌شود.</p>
   <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">ویدیو دسته</h3>
   <p class="cms-muted" style="margin:-0.25rem 0 .75rem;font-size:.85rem">اگر محصول ویدیوی اختصاصی نداشته باشد، این ویدیو در اسلایدر صفحه محصول نمایش داده می‌شود.</p>
-  <?php cms_video_field('video_path', 'ویدیو دسته (پیش‌فرض محصولات)', (string) ($edit['video_path'] ?? ''), 'categories/videos'); ?>
+  <?php cms_video_field('video_path', 'ویدیو دسته (پیش‌فرض محصولات)', (string) ($edit['video_path'] ?? ''), 'products/videos'); ?>
   <?php cms_video_field(
       'video_path_low',
       'ویدیو کیفیت پایین (اختیاری)',
       (string) ($edit['video_path_low'] ?? ''),
-      'categories/videos',
+      'products/videos',
       'نسخه فشرده (مثلاً ۴۸۰p MP4) برای اینترنت کند. اگر خالی باشد فقط ویدیوی اصلی پخش می‌شود.'
   ); ?>
   <label class="cms-field"><span class="cms-label">ترتیب</span>
