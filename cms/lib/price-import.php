@@ -727,6 +727,58 @@ function price_import_build_car_category_map(
     return $map;
 }
 
+/**
+ * Up to two product-level categories: main pick plus distinct per-car overrides.
+ *
+ * @param array<int, int> $carCategoryMap car_model_id => category_id
+ * @return list<int>
+ */
+function price_import_collect_product_category_ids(int $mainCategoryId, array $carCategoryMap): array
+{
+    $ids = [];
+    if ($mainCategoryId > 0) {
+        $ids[] = $mainCategoryId;
+    }
+    foreach ($carCategoryMap as $categoryId) {
+        $categoryId = (int) $categoryId;
+        if ($categoryId > 0 && !in_array($categoryId, $ids, true)) {
+            $ids[] = $categoryId;
+        }
+    }
+
+    return array_slice($ids, 0, 2);
+}
+
+/**
+ * Merge import categories into product_categories (preserves existing, caps at 2).
+ *
+ * @param array<int, int> $carCategoryMap
+ */
+function price_import_sync_product_categories(
+    PDO $pdo,
+    int $productId,
+    int $mainCategoryId,
+    array $carCategoryMap
+): void {
+    cms_ensure_product_categories_schema($pdo);
+    $existing = cms_product_load_category_ids($pdo, $productId);
+    $fromImport = price_import_collect_product_category_ids($mainCategoryId, $carCategoryMap);
+
+    $merged = $existing;
+    foreach ($fromImport as $categoryId) {
+        if (!in_array($categoryId, $merged, true)) {
+            $merged[] = $categoryId;
+        }
+    }
+
+    $merged = array_slice($merged, 0, 2);
+    if ($merged === []) {
+        return;
+    }
+
+    cms_product_save_category_ids($pdo, $productId, $merged);
+}
+
 function price_import_suggest_category_id(string $sectionHint, array $categories): ?int
 {
     $hint = search_normalize($sectionHint);
@@ -1098,6 +1150,12 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
         ]);
         if (!$skipCars && $carIds !== []) {
             price_import_merge_car_models($pdo, $productId, $carIds, $carCategoryMap);
+            price_import_sync_product_categories(
+                $pdo,
+                $productId,
+                (int) ($rowInput['category_id'] ?? 0),
+                $carCategoryMap
+            );
         }
         if ($saveAliases && !$skipCars) {
             foreach ($carMatches as $match) {
@@ -1148,7 +1206,11 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
     ]);
     $productId = (int) $pdo->lastInsertId();
 
-    cms_product_save_category_ids($pdo, $productId, [$categoryId]);
+    cms_product_save_category_ids(
+        $pdo,
+        $productId,
+        price_import_collect_product_category_ids($categoryId, $carCategoryMap)
+    );
     cms_product_save_car_model_ids($pdo, $productId, $carIds, $carCategoryMap);
 
     if ($saveAliases) {
