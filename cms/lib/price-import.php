@@ -1090,7 +1090,7 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
 
     if ($existing) {
         $productId = (int) $existing['id'];
-        $stmt = $pdo->prepare('UPDATE products SET price_text = ?, pack_size = ? WHERE id = ?');
+        $stmt = $pdo->prepare('UPDATE products SET price_text = ?, pack_size = ?, published = 1 WHERE id = ?');
         $stmt->execute([
             $priceText !== '' ? $priceText : null,
             $packSize,
@@ -1136,7 +1136,7 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
 
     $stmt = $pdo->prepare(
         'INSERT INTO products (name, slug, visual_id, description, price_text, pack_size, banner, published, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, \'none\', 0, 0)'
+         VALUES (?, ?, ?, ?, ?, ?, \'none\', 1, 0)'
     );
     $stmt->execute([
         $name,

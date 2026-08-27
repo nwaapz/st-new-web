@@ -13,6 +13,54 @@ function cms_product_category_names_sql(string $productAlias = 'p'): string
              WHERE pc.product_id = ' . $productAlias . '.id)';
 }
 
+/**
+ * Card header labels: up to two distinct names from product categories and per-car overrides.
+ *
+ * @param list<int> $productCategoryIds
+ * @param list<array{car_model_id:int,category_id:int}> $carModelCategories
+ */
+function cms_product_resolve_display_category_names(
+    PDO $pdo,
+    array $productCategoryIds,
+    array $carModelCategories
+): string {
+    $orderedIds = [];
+    foreach ($productCategoryIds as $categoryId) {
+        $categoryId = (int) $categoryId;
+        if ($categoryId > 0 && !in_array($categoryId, $orderedIds, true)) {
+            $orderedIds[] = $categoryId;
+        }
+    }
+    foreach ($carModelCategories as $pair) {
+        $categoryId = (int) ($pair['category_id'] ?? 0);
+        if ($categoryId > 0 && !in_array($categoryId, $orderedIds, true)) {
+            $orderedIds[] = $categoryId;
+        }
+    }
+    $orderedIds = array_slice($orderedIds, 0, 2);
+    if ($orderedIds === []) {
+        return '';
+    }
+
+    $placeholders = implode(',', array_fill(0, count($orderedIds), '?'));
+    $stmt = $pdo->prepare("SELECT id, name FROM categories WHERE id IN ({$placeholders})");
+    $stmt->execute($orderedIds);
+    $byId = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $byId[(int) $row['id']] = (string) $row['name'];
+    }
+
+    $names = [];
+    foreach ($orderedIds as $categoryId) {
+        $name = $byId[$categoryId] ?? '';
+        if ($name !== '') {
+            $names[] = $name;
+        }
+    }
+
+    return implode(' · ', $names);
+}
+
 function cms_product_primary_category_id_sql(string $productAlias = 'p'): string
 {
     return '(SELECT pc.category_id
