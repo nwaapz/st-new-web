@@ -12,10 +12,244 @@ const PRICE_IMPORT_COL_ROW = 0;
 const PRICE_IMPORT_COL_CODE = 1;
 const PRICE_IMPORT_COL_NAME = 2;
 const PRICE_IMPORT_COL_SPEC = 3;
+/** Legacy RTL layout; LTR sheets use col 3 (4th from left = نوع خودرو). */
 const PRICE_IMPORT_COL_CARS = 4;
 const PRICE_IMPORT_COL_PRICE = 5;
 const PRICE_IMPORT_COL_WARRANTY = 6;
 const PRICE_IMPORT_COL_PACK = 7;
+
+function price_import_header_matches(string $cell, string $needle): bool
+{
+    $text = search_normalize(price_import_cell_string($cell));
+    $norm = search_normalize($needle);
+    if ($text === '' || $norm === '') {
+        return false;
+    }
+    return $text === $norm || mb_strpos($text, $norm) !== false;
+}
+
+/**
+ * @return array{row:int,code:int,name:int,spec:int,cars:int,price:int,warranty:int,pack:int}
+ */
+function price_import_rtl_column_map(): array
+{
+    return [
+        'row' => PRICE_IMPORT_COL_ROW,
+        'code' => PRICE_IMPORT_COL_CODE,
+        'name' => PRICE_IMPORT_COL_NAME,
+        'spec' => PRICE_IMPORT_COL_SPEC,
+        'cars' => PRICE_IMPORT_COL_CARS,
+        'price' => PRICE_IMPORT_COL_PRICE,
+        'warranty' => PRICE_IMPORT_COL_WARRANTY,
+        'pack' => PRICE_IMPORT_COL_PACK,
+    ];
+}
+
+/**
+ * Standard export: pack/warranty/price/cars on the left, code/row on the right.
+ *
+ * @return array{row:int,code:int,name:int,spec:int,cars:int,price:int,warranty:int,pack:int}
+ */
+function price_import_ltr_column_map(): array
+{
+    return [
+        'pack' => 0,
+        'warranty' => 1,
+        'price' => 2,
+        'cars' => 3,
+        'spec' => 4,
+        'name' => 5,
+        'code' => 6,
+        'row' => 7,
+    ];
+}
+
+function price_import_looks_like_part_spec(string $text): bool
+{
+    if ($text === '') {
+        return false;
+    }
+    return preg_match('/\d\s*PK[-\s]/i', $text) === 1
+        || preg_match('/CR\+PLUS/i', $text) === 1;
+}
+
+function price_import_looks_like_belt_type(string $text): bool
+{
+    return $text !== '' && mb_strpos($text, 'تسمه') !== false;
+}
+
+/**
+ * @return array{row:int,code:int,name:int,spec:int,cars:int,price:int,warranty:int,pack:int}
+ */
+function price_import_detect_column_map(array $rawRows): array
+{
+    $headers = [];
+    foreach (array_slice($rawRows, 0, 15) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        foreach ($row as $idx => $cell) {
+            $text = price_import_cell_string($cell);
+            if ($text === '') {
+                continue;
+            }
+            if (price_import_header_matches($text, 'ردیف')) {
+                $headers['row'] = (int) $idx;
+            }
+            if (price_import_header_matches($text, 'کد کالا')) {
+                $headers['code'] = (int) $idx;
+            }
+            if (price_import_header_matches($text, 'نوع خودرو')) {
+                $headers['cars'] = (int) $idx;
+            }
+            if (price_import_header_matches($text, 'قیمت')) {
+                $headers['price'] = (int) $idx;
+            }
+            if (price_import_header_matches($text, 'گارانتی')) {
+                $headers['warranty'] = (int) $idx;
+            }
+            if (price_import_header_matches($text, 'تعداد') || price_import_header_matches($text, 'کارتن')) {
+                $headers['pack'] = (int) $idx;
+            }
+        }
+    }
+
+    $isLtr = isset($headers['pack'], $headers['row']) && $headers['pack'] < $headers['row'];
+    $isRtl = isset($headers['row'], $headers['code']) && $headers['row'] < $headers['code'];
+    if (!$isLtr && !$isRtl) {
+        foreach (array_slice($rawRows, 0, 3) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $first = price_import_cell_string($row[0] ?? null);
+            if ($first === 'ردیف') {
+                $isRtl = true;
+                break;
+            }
+            if (price_import_header_matches($first, 'تعداد') || price_import_header_matches($first, 'کارتن')) {
+                $isLtr = true;
+                break;
+            }
+        }
+    }
+
+    $cols = $isLtr ? price_import_ltr_column_map() : price_import_rtl_column_map();
+    foreach ($headers as $key => $idx) {
+        if (array_key_exists($key, $cols)) {
+            $cols[$key] = $idx;
+        }
+    }
+
+    return price_import_refine_spec_name_columns($rawRows, $cols);
+}
+
+/**
+ * @param array{row:int,code:int,name:int,spec:int,cars:int,price:int,warranty:int,pack:int} $cols
+ * @return array{row:int,code:int,name:int,spec:int,cars:int,price:int,warranty:int,pack:int}
+ */
+function price_import_refine_spec_name_columns(array $rawRows, array $cols): array
+{
+    foreach ($rawRows as $row) {
+        if (!is_array($row) || !price_import_is_product_row($row, $cols)) {
+            continue;
+        }
+
+        $min = min($cols['cars'], $cols['code']);
+        $max = max($cols['cars'], $cols['code']);
+        for ($idx = $min + 1; $idx < $max; $idx++) {
+            $text = price_import_cell_string($row[$idx] ?? null);
+            if ($text === '') {
+                continue;
+            }
+            if (price_import_looks_like_part_spec($text)) {
+                $cols['spec'] = $idx;
+            } elseif (price_import_looks_like_belt_type($text)) {
+                $cols['name'] = $idx;
+            }
+        }
+        break;
+    }
+
+    return $cols;
+}
+
+/**
+ * @param array{row:int,code:int,name:int,spec:int,cars:int,price:int,warranty:int,pack:int} $cols
+ */
+function price_import_is_header_row(array $row, array $cols): bool
+{
+    foreach ($row as $cell) {
+        if (price_import_header_matches((string) $cell, 'ردیف')) {
+            return true;
+        }
+    }
+    return price_import_cell_string($row[$cols['row']] ?? null) === 'ردیف';
+}
+
+/**
+ * @param array{row:int,code:int,name:int,spec:int,cars:int,price:int,warranty:int,pack:int} $cols
+ */
+function price_import_is_section_row(array $row, array $cols): bool
+{
+    if (price_import_is_header_row($row, $cols)) {
+        return false;
+    }
+    if (price_import_is_product_row($row, $cols)) {
+        return false;
+    }
+
+    foreach ($row as $cell) {
+        $text = price_import_cell_string($cell);
+        if ($text === '' || is_numeric($text)) {
+            continue;
+        }
+        if (
+            mb_strlen($text) >= 8
+            && (
+                mb_strpos($text, 'تسمه') !== false
+                || stripos($text, 'MOLD') !== false
+                || stripos($text, 'EPDM') !== false
+            )
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @param array{row:int,code:int,name:int,spec:int,cars:int,price:int,warranty:int,pack:int} $cols
+ */
+function price_import_is_product_row(array $row, array $cols): bool
+{
+    $code = $row[$cols['code']] ?? null;
+    return $code !== null && $code !== '' && is_numeric($code);
+}
+
+function price_import_section_hint_from_row(array $row): string
+{
+    $best = '';
+    foreach ($row as $cell) {
+        $text = trim(price_import_cell_string($cell));
+        if ($text === '' || is_numeric($text)) {
+            continue;
+        }
+        if (mb_strlen($text) > mb_strlen($best)) {
+            $best = $text;
+        }
+    }
+    return $best;
+}
+
+/** Product title is the part code (4PK-930 CR+PLUS); belt type stays in name_base for category. */
+function price_import_build_name(string $spec, string $nameBase = ''): string
+{
+    if ($spec !== '') {
+        return $spec;
+    }
+    return $nameBase;
+}
 
 function price_import_ensure_schema(PDO $pdo): void
 {
@@ -58,44 +292,6 @@ function price_import_cell_string($value): string
         return (string) (int) $value;
     }
     return trim((string) $value);
-}
-
-function price_import_is_header_row(array $row): bool
-{
-    $first = price_import_cell_string($row[PRICE_IMPORT_COL_ROW] ?? null);
-    return $first === 'ردیف';
-}
-
-function price_import_is_section_row(array $row): bool
-{
-    $a = price_import_cell_string($row[PRICE_IMPORT_COL_ROW] ?? null);
-    $b = $row[PRICE_IMPORT_COL_CODE] ?? null;
-    if ($a === '' || price_import_is_header_row($row)) {
-        return false;
-    }
-    if ($b !== null && $b !== '' && is_numeric($b)) {
-        return false;
-    }
-    return mb_strlen($a) >= 8;
-}
-
-function price_import_is_product_row(array $row): bool
-{
-    $code = $row[PRICE_IMPORT_COL_CODE] ?? null;
-    return $code !== null && $code !== '' && is_numeric($code);
-}
-
-function price_import_build_name(array $row): string
-{
-    $base = price_import_cell_string($row[PRICE_IMPORT_COL_NAME] ?? null);
-    $spec = price_import_cell_string($row[PRICE_IMPORT_COL_SPEC] ?? null);
-    if ($base === '') {
-        return $spec;
-    }
-    if ($spec === '') {
-        return $base;
-    }
-    return $base . ' ' . $spec;
 }
 
 function price_import_rial_to_toman_text($rial): ?string
@@ -187,28 +383,34 @@ function price_import_parse_rows(array $rawRows): array
 {
     $parsed = [];
     $sectionHint = '';
+    $cols = price_import_detect_column_map($rawRows);
 
     foreach ($rawRows as $excelRowIndex => $row) {
-        if (price_import_is_section_row($row)) {
-            $sectionHint = trim(price_import_cell_string($row[PRICE_IMPORT_COL_ROW] ?? null));
+        if (!is_array($row) || price_import_is_header_row($row, $cols)) {
             continue;
         }
-        if (!price_import_is_product_row($row)) {
+        if (price_import_is_section_row($row, $cols)) {
+            $sectionHint = price_import_section_hint_from_row($row);
+            continue;
+        }
+        if (!price_import_is_product_row($row, $cols)) {
             continue;
         }
 
-        $visualId = price_import_cell_string($row[PRICE_IMPORT_COL_CODE] ?? null);
+        $nameBase = price_import_cell_string($row[$cols['name']] ?? null);
+        $spec = price_import_cell_string($row[$cols['spec']] ?? null);
+        $visualId = price_import_cell_string($row[$cols['code']] ?? null);
         $parsed[] = [
             'excel_row' => $excelRowIndex + 1,
             'visual_id' => $visualId,
-            'name_base' => price_import_cell_string($row[PRICE_IMPORT_COL_NAME] ?? null),
-            'spec' => price_import_cell_string($row[PRICE_IMPORT_COL_SPEC] ?? null),
-            'name' => price_import_build_name($row),
-            'cars_raw' => price_import_cell_string($row[PRICE_IMPORT_COL_CARS] ?? null),
-            'price_rial' => $row[PRICE_IMPORT_COL_PRICE] ?? null,
-            'price_text' => price_import_rial_to_toman_text($row[PRICE_IMPORT_COL_PRICE] ?? null),
-            'warranty' => price_import_cell_string($row[PRICE_IMPORT_COL_WARRANTY] ?? null),
-            'pack_size' => price_import_parse_pack_size($row[PRICE_IMPORT_COL_PACK] ?? null),
+            'name_base' => $nameBase,
+            'spec' => $spec,
+            'name' => price_import_build_name($spec, $nameBase),
+            'cars_raw' => price_import_cell_string($row[$cols['cars']] ?? null),
+            'price_rial' => $row[$cols['price']] ?? null,
+            'price_text' => price_import_rial_to_toman_text($row[$cols['price']] ?? null),
+            'warranty' => price_import_cell_string($row[$cols['warranty']] ?? null),
+            'pack_size' => price_import_parse_pack_size($row[$cols['pack']] ?? null),
             'section_hint' => $sectionHint,
         ];
     }
@@ -767,7 +969,8 @@ function price_import_build_preview(PDO $pdo, array $parsedRows): array
         $carMatches = $skipCars
             ? []
             : price_import_parse_car_string((string) ($row['cars_raw'] ?? ''), $carModels, $aliasMap);
-        $suggestedCategoryId = price_import_suggest_category_id((string) ($row['section_hint'] ?? ''), $categories);
+        $suggestedCategoryId = price_import_suggest_category_id((string) ($row['name_base'] ?? ''), $categories)
+            ?? price_import_suggest_category_id((string) ($row['section_hint'] ?? ''), $categories);
 
         $preview = [
             'index' => $index,
