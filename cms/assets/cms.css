@@ -2441,20 +2441,48 @@ a.cms-kpi:hover {
 
 .price-import-car-item {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.55rem 0.75rem;
-  align-items: center;
+  gap: 0.55rem;
   padding: 0.55rem 0.65rem;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.2);
+}
+
+.price-import-car-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  align-items: center;
+}
+
+.price-import-car-item__token {
+  font-weight: 500;
+}
+
+.price-import-car-item__controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.price-import-car-item--extra .price-import-car-item__head {
+  justify-content: space-between;
 }
 
 .price-import-car-item.needs-attention {
   border: 1px solid rgba(248, 81, 73, 0.45);
 }
 
-.price-import-car-item select {
-  min-width: 12rem;
+.price-import-car-select,
+.price-import-category-select {
+  min-width: 0;
+}
+
+.price-import-add-car {
+  margin-top: 0.55rem;
+}
+
+.price-import-remove-car {
+  margin-inline-start: auto;
 }
 
 .price-import-badge {
@@ -2490,7 +2518,7 @@ a.cms-kpi:hover {
     grid-template-columns: 1fr;
   }
 
-  .price-import-car-item {
+  .price-import-car-item__controls {
     grid-template-columns: 1fr;
   }
 }

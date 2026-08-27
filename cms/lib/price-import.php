@@ -6,6 +6,7 @@ require_once __DIR__ . '/search-text.php';
 require_once __DIR__ . '/invoices.php';
 require_once __DIR__ . '/product-car-models.php';
 require_once __DIR__ . '/product-categories.php';
+require_once __DIR__ . '/car-model-factories.php';
 
 const PRICE_IMPORT_COL_ROW = 0;
 const PRICE_IMPORT_COL_CODE = 1;
@@ -434,11 +435,14 @@ function price_import_parse_car_string(string $raw, array $carModels, array $ali
     return $matches;
 }
 
-/** @return list<array{id:int,name:string}> */
+/** @return list<array{id:int,name:string,factory_name?:string}> */
 function price_import_load_car_models(PDO $pdo): array
 {
+    $factoryNamesSql = cms_car_model_factory_names_sql('m');
     return $pdo->query(
-        'SELECT id, name FROM car_models WHERE published = 1 ORDER BY sort_order ASC, name ASC'
+        "SELECT m.id, m.name, {$factoryNamesSql} AS factory_name
+         FROM car_models m
+         ORDER BY m.sort_order ASC, m.name ASC"
     )->fetchAll() ?: [];
 }
 
@@ -446,8 +450,79 @@ function price_import_load_car_models(PDO $pdo): array
 function price_import_load_categories(PDO $pdo): array
 {
     return $pdo->query(
-        'SELECT id, name FROM categories WHERE published = 1 ORDER BY sort_order ASC, name ASC'
+        'SELECT id, name FROM categories ORDER BY sort_order ASC, name ASC'
     )->fetchAll() ?: [];
+}
+
+function price_import_car_model_label(array $model): string
+{
+    $factory = trim((string) ($model['factory_name'] ?? ''));
+    $name = trim((string) ($model['name'] ?? ''));
+    return $factory !== '' ? $factory . ' / ' . $name : $name;
+}
+
+/**
+ * @param array<string, mixed> $input
+ * @return list<array{car_id:int,category_id:int}>
+ */
+function price_import_parse_extra_cars(array $input): array
+{
+    $extra = [];
+    if (!isset($input['extra_cars']) || !is_array($input['extra_cars'])) {
+        return $extra;
+    }
+    foreach ($input['extra_cars'] as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $carId = (int) ($row['car_id'] ?? 0);
+        if ($carId <= 0) {
+            continue;
+        }
+        $extra[] = [
+            'car_id' => $carId,
+            'category_id' => max(0, (int) ($row['category_id'] ?? 0)),
+        ];
+    }
+    return $extra;
+}
+
+/**
+ * @param array<string, int> $carCategoryPick token_norm => category_id
+ * @param list<array{car_id:int,category_id:int}> $extraCars
+ * @return array<int, int> car_model_id => category_id
+ */
+function price_import_build_car_category_map(
+    array $carMatches,
+    array $overrides,
+    array $carCategoryPick,
+    array $extraCars
+): array {
+    $map = [];
+    foreach ($carMatches as $match) {
+        $token = (string) ($match['token'] ?? '');
+        $norm = search_normalize($token);
+        $carId = 0;
+        if (isset($overrides[$norm]) && (int) $overrides[$norm] > 0) {
+            $carId = (int) $overrides[$norm];
+        } elseif (($match['confidence'] ?? '') === 'certain' || ($match['confidence'] ?? '') === 'likely') {
+            $carId = (int) ($match['car_model_id'] ?? 0);
+        }
+        if ($carId > 0 && isset($carCategoryPick[$norm])) {
+            $categoryId = (int) $carCategoryPick[$norm];
+            if ($categoryId > 0) {
+                $map[$carId] = $categoryId;
+            }
+        }
+    }
+    foreach ($extraCars as $extra) {
+        $carId = (int) ($extra['car_id'] ?? 0);
+        $categoryId = (int) ($extra['category_id'] ?? 0);
+        if ($carId > 0 && $categoryId > 0) {
+            $map[$carId] = $categoryId;
+        }
+    }
+    return $map;
 }
 
 function price_import_suggest_category_id(string $sectionHint, array $categories): ?int
@@ -485,8 +560,11 @@ function price_import_suggest_category_id(string $sectionHint, array $categories
     return $bestScore >= 5 ? $bestId : null;
 }
 
-/** @param list<array<string, mixed>> $carMatches */
-function price_import_confirmed_car_ids(array $carMatches, array $overrides = []): array
+/**
+ * @param list<array<string, mixed>> $carMatches
+ * @param list<array{car_id:int,category_id:int}> $extraCars
+ */
+function price_import_confirmed_car_ids(array $carMatches, array $overrides = [], array $extraCars = []): array
 {
     $ids = [];
     foreach ($carMatches as $match) {
@@ -503,6 +581,12 @@ function price_import_confirmed_car_ids(array $carMatches, array $overrides = []
             }
         }
     }
+    foreach ($extraCars as $extra) {
+        $carId = (int) ($extra['car_id'] ?? 0);
+        if ($carId > 0) {
+            $ids[] = $carId;
+        }
+    }
     return array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
 }
 
@@ -511,8 +595,12 @@ function price_import_confirmed_car_ids(array $carMatches, array $overrides = []
  * @param list<array<string, mixed>> $carMatches
  * @return array{ready:bool,issues:list<string>}
  */
-function price_import_row_issues(array $row, array $carMatches, array $overrides = []): array
-{
+function price_import_row_issues(
+    array $row,
+    array $carMatches,
+    array $overrides = [],
+    array $extraCars = []
+): array {
     $issues = [];
     $action = (string) ($row['action'] ?? 'create');
 
@@ -543,7 +631,7 @@ function price_import_row_issues(array $row, array $carMatches, array $overrides
             }
         }
 
-        if (price_import_confirmed_car_ids($carMatches, $overrides) === []) {
+        if (price_import_confirmed_car_ids($carMatches, $overrides, $extraCars) === []) {
             $issues[] = 'حداقل یک خودرو باید انتخاب شود';
         }
     }
@@ -636,10 +724,21 @@ function price_import_unique_slug(PDO $pdo, string $name, int $excludeId = 0): s
     }
 }
 
-function price_import_merge_car_models(PDO $pdo, int $productId, array $newCarModelIds): void
-{
+function price_import_merge_car_models(
+    PDO $pdo,
+    int $productId,
+    array $newCarModelIds,
+    array $newCategoryOverrides = []
+): void {
     $existing = cms_product_load_car_model_ids($pdo, $productId);
     $categoryMap = cms_product_load_car_model_categories($pdo, $productId);
+    foreach ($newCategoryOverrides as $carId => $categoryId) {
+        $carId = (int) $carId;
+        $categoryId = (int) $categoryId;
+        if ($carId > 0 && $categoryId > 0) {
+            $categoryMap[$carId] = $categoryId;
+        }
+    }
     $merged = array_values(array_unique(array_merge($existing, $newCarModelIds)));
     cms_product_save_car_model_ids($pdo, $productId, $merged, $categoryMap);
 }
@@ -657,11 +756,8 @@ function price_import_save_alias(PDO $pdo, string $token, int $carModelId): void
     $stmt->execute([$norm, $carModelId]);
 }
 
-/**
- * @param array<string, mixed> $rowInput
- * @param array<string, int> $carOverrides token_norm => car_model_id
- */
-function price_import_apply_row(PDO $pdo, array $rowInput, array $carOverrides = [], bool $saveAliases = false): array
+/** @param array<string, mixed> $rowInput */
+function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = false): array
 {
     $visualId = trim((string) ($rowInput['visual_id'] ?? ''));
     if ($visualId === '') {
@@ -678,7 +774,10 @@ function price_import_apply_row(PDO $pdo, array $rowInput, array $carOverrides =
     }
 
     $carMatches = is_array($rowInput['car_matches'] ?? null) ? $rowInput['car_matches'] : [];
-    $carIds = price_import_confirmed_car_ids($carMatches, $carOverrides);
+    $carOverrides = is_array($rowInput['car_overrides'] ?? null) ? $rowInput['car_overrides'] : [];
+    $extraCars = is_array($rowInput['extra_cars'] ?? null) ? $rowInput['extra_cars'] : [];
+    $carCategoryMap = is_array($rowInput['car_category_map'] ?? null) ? $rowInput['car_category_map'] : [];
+    $carIds = price_import_confirmed_car_ids($carMatches, $carOverrides, $extraCars);
 
     $action = (string) ($rowInput['action'] ?? 'create');
     $existing = price_import_find_product_by_visual_id($pdo, $visualId);
@@ -692,7 +791,7 @@ function price_import_apply_row(PDO $pdo, array $rowInput, array $carOverrides =
             $productId,
         ]);
         if ($carIds !== []) {
-            price_import_merge_car_models($pdo, $productId, $carIds);
+            price_import_merge_car_models($pdo, $productId, $carIds, $carCategoryMap);
         }
         if ($saveAliases) {
             foreach ($carMatches as $match) {
@@ -744,7 +843,7 @@ function price_import_apply_row(PDO $pdo, array $rowInput, array $carOverrides =
     $productId = (int) $pdo->lastInsertId();
 
     cms_product_save_category_ids($pdo, $productId, [$categoryId]);
-    cms_product_save_car_model_ids($pdo, $productId, $carIds, []);
+    cms_product_save_car_model_ids($pdo, $productId, $carIds, $carCategoryMap);
 
     if ($saveAliases) {
         foreach ($carMatches as $match) {
@@ -782,11 +881,11 @@ function price_import_apply_batch(PDO $pdo, array $rows, array $formRows, bool $
             }
 
             $merged = array_merge($row, $form);
-            $carOverrides = is_array($form['car_overrides'] ?? null) ? $form['car_overrides'] : [];
             $issues = price_import_row_issues(
                 $merged,
                 is_array($merged['car_matches'] ?? null) ? $merged['car_matches'] : [],
-                $carOverrides
+                is_array($merged['car_overrides'] ?? null) ? $merged['car_overrides'] : [],
+                is_array($merged['extra_cars'] ?? null) ? $merged['extra_cars'] : []
             );
             if (!$issues['ready']) {
                 $errors[] = 'ردیف ' . ($merged['visual_id'] ?? '?') . ': ' . implode('؛ ', $issues['issues']);
@@ -795,7 +894,7 @@ function price_import_apply_batch(PDO $pdo, array $rows, array $formRows, bool $
             }
 
             try {
-                $result = price_import_apply_row($pdo, $merged, $carOverrides, $saveAliases);
+                $result = price_import_apply_row($pdo, $merged, $saveAliases);
                 if ($result['action'] === 'create') {
                     $created++;
                 } else {

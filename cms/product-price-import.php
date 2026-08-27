@@ -40,10 +40,30 @@ function price_import_merge_form_row(array $row, array $input): array
     }
     $merged['car_overrides'] = $carOverrides;
 
+    $carCategoryPick = [];
+    if (isset($input['car_category']) && is_array($input['car_category'])) {
+        foreach ($input['car_category'] as $norm => $categoryId) {
+            $categoryId = (int) $categoryId;
+            if ($categoryId > 0) {
+                $carCategoryPick[(string) $norm] = $categoryId;
+            }
+        }
+    }
+
+    $extraCars = price_import_parse_extra_cars($input);
+    $merged['extra_cars'] = $extraCars;
+    $merged['car_category_map'] = price_import_build_car_category_map(
+        is_array($merged['car_matches'] ?? null) ? $merged['car_matches'] : [],
+        $carOverrides,
+        $carCategoryPick,
+        $extraCars
+    );
+
     $issues = price_import_row_issues(
         $merged,
         is_array($merged['car_matches'] ?? null) ? $merged['car_matches'] : [],
-        $carOverrides
+        $carOverrides,
+        $extraCars
     );
     $merged['ready'] = $issues['ready'];
     $merged['issues'] = $issues['issues'];
@@ -145,8 +165,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $session = $_SESSION[PRICE_IMPORT_SESSION_KEY] ?? null;
 $preview = is_array($session) ? ($session['preview'] ?? null) : null;
 $rows = is_array($preview) ? ($preview['rows'] ?? []) : [];
-$categories = is_array($preview) ? ($preview['categories'] ?? price_import_load_categories($pdo)) : price_import_load_categories($pdo);
-$carModels = is_array($preview) ? ($preview['car_models'] ?? price_import_load_car_models($pdo)) : price_import_load_car_models($pdo);
+$categories = price_import_load_categories($pdo);
+$carModels = price_import_load_car_models($pdo);
 $sourceName = is_array($session) ? (string) ($session['source_name'] ?? '') : '';
 
 $readyCount = 0;
@@ -229,7 +249,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         $needsPack = $action === 'create' && (int) ($row['pack_size'] ?? 0) <= 0;
         $needsName = $action === 'create' && trim((string) ($row['name'] ?? '')) === '';
         ?>
-        <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>">
+        <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>" data-row-index="<?= $index ?>">
           <header class="price-import-row-card__head">
             <label class="cms-check" title="اعمال این ردیف">
               <input type="checkbox" name="rows[<?= $index ?>][include]" value="1" <?= !isset($row['include']) || !empty($row['include']) ? 'checked' : '' ?>>
@@ -306,10 +326,13 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
             <div class="price-import-field price-import-field--wide">
               <span class="price-import-field__label">خودروها (از فایل)</span>
-              <div class="price-import-field__hint"><?= cms_h((string) ($row['cars_raw'] ?? '')) ?></div>
+              <div class="price-import-field__hint"><?= cms_h((string) ($row['cars_raw'] ?? '')) ?: '—' ?></div>
               <?php if ($action === 'update'): ?>
                 <div class="price-import-field__hint">برای محصول موجود، خودرو اختیاری است — فقط قیمت به‌روز می‌شود.</div>
               <?php endif; ?>
+              <?php if ($carModels === []): ?>
+                <p class="cms-muted" style="margin:0">هنوز مدلی ثبت نشده. ابتدا از <a href="car-models.php">مدل‌ها</a> اضافه کنید.</p>
+              <?php else: ?>
               <div class="price-import-car-list">
                 <?php foreach (($row['car_matches'] ?? []) as $match):
                   $token = (string) ($match['token'] ?? '');
@@ -331,25 +354,42 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                   ][$confidence] ?? $confidence;
                   ?>
                   <div class="price-import-car-item<?= $needsCarPick ? ' needs-attention' : '' ?>">
-                    <span class="price-import-badge <?= $badgeClass ?>"><?= cms_h($confidenceLabel) ?></span>
-                    <span><?= cms_h($token) ?></span>
-                    <?php if ($confidence === 'certain' || $confidence === 'likely'): ?>
-                      <span class="cms-muted">→ <?= cms_h((string) ($match['car_model_name'] ?? '')) ?></span>
-                    <?php elseif ($needsCarPick): ?>
-                      <select class="cms-input" name="rows[<?= $index ?>][car_pick][<?= cms_h($norm) ?>]">
-                        <option value="">— انتخاب خودرو —</option>
-                        <?php
-                        $options = $match['candidates'] ?? $carModels;
-                      foreach ($options as $opt):
-                          $optId = (int) ($opt['id'] ?? 0);
-                          ?>
-                          <option value="<?= $optId ?>"><?= cms_h((string) ($opt['name'] ?? '')) ?></option>
+                    <div class="price-import-car-item__head">
+                      <span class="price-import-badge <?= $badgeClass ?>"><?= cms_h($confidenceLabel) ?></span>
+                      <span class="price-import-car-item__token"><?= cms_h($token) ?></span>
+                      <?php if ($confidence === 'certain' || $confidence === 'likely'): ?>
+                        <span class="cms-muted">→ <?= cms_h((string) ($match['car_model_name'] ?? '')) ?></span>
+                      <?php endif; ?>
+                    </div>
+                    <div class="price-import-car-item__controls">
+                      <?php if ($needsCarPick): ?>
+                        <select class="cms-input price-import-car-select" name="rows[<?= $index ?>][car_pick][<?= cms_h($norm) ?>]" aria-label="انتخاب خودرو">
+                          <option value="">— انتخاب خودرو —</option>
+                          <?php foreach ($carModels as $opt):
+                              $optId = (int) ($opt['id'] ?? 0);
+                              ?>
+                            <option value="<?= $optId ?>"><?= cms_h(price_import_car_model_label($opt)) ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                      <?php endif; ?>
+                      <select
+                        class="cms-input price-import-category-select"
+                        name="rows[<?= $index ?>][car_category][<?= cms_h($norm) ?>]"
+                        aria-label="دسته این خودرو (اختیاری)"
+                      >
+                        <option value="">پیش‌فرض (دسته محصول)</option>
+                        <?php foreach ($categories as $cat):
+                            $catId = (int) $cat['id'];
+                            ?>
+                          <option value="<?= $catId ?>"><?= cms_h((string) $cat['name']) ?></option>
                         <?php endforeach; ?>
                       </select>
-                    <?php endif; ?>
+                    </div>
                   </div>
                 <?php endforeach; ?>
               </div>
+              <button type="button" class="cms-btn price-import-add-car">افزودن خودرو</button>
+              <?php endif; ?>
             </div>
           </div>
         </article>
@@ -362,19 +402,93 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
       </button>
     </div>
   </form>
+
+  <?php if ($carModels !== []): ?>
+  <template id="price-import-extra-car-template">
+    <div class="price-import-car-item price-import-car-item--extra needs-attention">
+      <div class="price-import-car-item__head">
+        <span class="price-import-badge price-import-badge--likely">دستی</span>
+        <span class="price-import-car-item__token">خودرو اضافه‌شده</span>
+        <button type="button" class="cms-btn price-import-remove-car" aria-label="حذف خودرو">حذف</button>
+      </div>
+      <div class="price-import-car-item__controls">
+        <select class="cms-input price-import-car-select" data-name="rows[__INDEX__][extra_cars][__EXTRA_IDX__][car_id]" aria-label="انتخاب خودرو">
+          <option value="">— انتخاب خودرو —</option>
+          <?php foreach ($carModels as $opt):
+              $optId = (int) ($opt['id'] ?? 0);
+              ?>
+            <option value="<?= $optId ?>"><?= cms_h(price_import_car_model_label($opt)) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <select class="cms-input price-import-category-select" data-name="rows[__INDEX__][extra_cars][__EXTRA_IDX__][category_id]" aria-label="دسته این خودرو (اختیاری)">
+          <option value="">پیش‌فرض (دسته محصول)</option>
+          <?php foreach ($categories as $cat):
+              $catId = (int) $cat['id'];
+              ?>
+            <option value="<?= $catId ?>"><?= cms_h((string) $cat['name']) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+    </div>
+  </template>
+  <?php endif; ?>
+
   <script>
   (function () {
     var toggle = document.getElementById('price-import-show-review');
-    if (!toggle) return;
-    var cards = document.querySelectorAll('.price-import-row-card');
-    function applyFilter() {
-      cards.forEach(function (card) {
-        var needsReview = card.getAttribute('data-ready') !== '1';
-        card.style.display = toggle.checked && !needsReview ? 'none' : '';
+    if (toggle) {
+      var cards = document.querySelectorAll('.price-import-row-card');
+      function applyFilter() {
+        cards.forEach(function (card) {
+          var needsReview = card.getAttribute('data-ready') !== '1';
+          card.style.display = toggle.checked && !needsReview ? 'none' : '';
+        });
+      }
+      toggle.addEventListener('change', applyFilter);
+      applyFilter();
+    }
+
+    var extraTemplate = document.getElementById('price-import-extra-car-template');
+    if (!extraTemplate) return;
+
+    function nextExtraIndex(list) {
+      var maxIdx = -1;
+      list.querySelectorAll('[name*="[extra_cars]"]').forEach(function (el) {
+        var match = el.name.match(/\[extra_cars\]\[(\d+)\]/);
+        if (match) {
+          maxIdx = Math.max(maxIdx, parseInt(match[1], 10));
+        }
+      });
+      return maxIdx + 1;
+    }
+
+    function bindRemove(btn) {
+      btn.addEventListener('click', function () {
+        var item = btn.closest('.price-import-car-item--extra');
+        if (item) item.remove();
       });
     }
-    toggle.addEventListener('change', applyFilter);
-    applyFilter();
+
+    document.querySelectorAll('.price-import-add-car').forEach(function (addBtn) {
+      addBtn.addEventListener('click', function () {
+        var card = addBtn.closest('.price-import-row-card');
+        if (!card) return;
+        var rowIndex = card.getAttribute('data-row-index') || '0';
+        var list = card.querySelector('.price-import-car-list');
+        if (!list) return;
+        var extraIdx = nextExtraIndex(list);
+        var clone = extraTemplate.content.cloneNode(true);
+        clone.querySelectorAll('[data-name]').forEach(function (el) {
+          el.name = el.getAttribute('data-name')
+            .replace('__INDEX__', rowIndex)
+            .replace('__EXTRA_IDX__', String(extraIdx));
+          el.removeAttribute('data-name');
+        });
+        var removeBtn = clone.querySelector('.price-import-remove-car');
+        if (removeBtn) bindRemove(removeBtn);
+        list.appendChild(clone);
+      });
+    });
   })();
   </script>
 <?php endif; ?>
