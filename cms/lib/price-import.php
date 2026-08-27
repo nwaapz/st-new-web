@@ -619,20 +619,22 @@ function price_import_row_issues(
             $issues[] = 'تعداد در کارتن نامعتبر است';
         }
 
-        foreach ($carMatches as $match) {
-            $token = (string) ($match['token'] ?? '');
-            $norm = search_normalize($token);
-            $confidence = (string) ($match['confidence'] ?? 'unmatched');
-            if (isset($overrides[$norm]) && (int) $overrides[$norm] > 0) {
-                continue;
+        if (empty($row['skip_cars'])) {
+            foreach ($carMatches as $match) {
+                $token = (string) ($match['token'] ?? '');
+                $norm = search_normalize($token);
+                $confidence = (string) ($match['confidence'] ?? 'unmatched');
+                if (isset($overrides[$norm]) && (int) $overrides[$norm] > 0) {
+                    continue;
+                }
+                if ($confidence === 'uncertain' || $confidence === 'unmatched') {
+                    $issues[] = 'خودرو نیاز به انتخاب دارد: ' . $token;
+                }
             }
-            if ($confidence === 'uncertain' || $confidence === 'unmatched') {
-                $issues[] = 'خودرو نیاز به انتخاب دارد: ' . $token;
-            }
-        }
 
-        if (price_import_confirmed_car_ids($carMatches, $overrides, $extraCars) === []) {
-            $issues[] = 'حداقل یک خودرو باید انتخاب شود';
+            if (price_import_confirmed_car_ids($carMatches, $overrides, $extraCars) === []) {
+                $issues[] = 'حداقل یک خودرو باید انتخاب شود';
+            }
         }
     }
 
@@ -653,6 +655,22 @@ function price_import_find_product_by_visual_id(PDO $pdo, string $visualId): ?ar
     return $row ?: null;
 }
 
+function price_import_car_names_for_ids(array $carModelIds, array $carModels): string
+{
+    $byId = [];
+    foreach ($carModels as $model) {
+        $byId[(int) $model['id']] = price_import_car_model_label($model);
+    }
+    $names = [];
+    foreach ($carModelIds as $carModelId) {
+        $carModelId = (int) $carModelId;
+        if ($carModelId > 0 && isset($byId[$carModelId])) {
+            $names[] = $byId[$carModelId];
+        }
+    }
+    return implode(' · ', $names);
+}
+
 /** @param list<array<string, mixed>> $parsedRows */
 function price_import_build_preview(PDO $pdo, array $parsedRows): array
 {
@@ -665,10 +683,28 @@ function price_import_build_preview(PDO $pdo, array $parsedRows): array
     $aliasMap = price_import_load_alias_map($pdo);
     $previewRows = [];
 
-    foreach ($parsedRows as $index => $row) {
+    $existingProductIds = [];
+    $existingByVisualId = [];
+    foreach ($parsedRows as $row) {
         $visualId = (string) ($row['visual_id'] ?? '');
         $existing = price_import_find_product_by_visual_id($pdo, $visualId);
-        $carMatches = price_import_parse_car_string((string) ($row['cars_raw'] ?? ''), $carModels, $aliasMap);
+        if ($existing) {
+            $productId = (int) $existing['id'];
+            $existingProductIds[] = $productId;
+            $existingByVisualId[$visualId] = $existing;
+        }
+    }
+    $existingCarIdsMap = cms_product_load_car_model_ids_map($pdo, $existingProductIds);
+
+    foreach ($parsedRows as $index => $row) {
+        $visualId = (string) ($row['visual_id'] ?? '');
+        $existing = $existingByVisualId[$visualId] ?? null;
+        $existingProductId = $existing ? (int) $existing['id'] : null;
+        $existingCarIds = $existingProductId !== null ? ($existingCarIdsMap[$existingProductId] ?? []) : [];
+        $skipCars = $existing !== null && $existingCarIds !== [];
+        $carMatches = $skipCars
+            ? []
+            : price_import_parse_car_string((string) ($row['cars_raw'] ?? ''), $carModels, $aliasMap);
         $suggestedCategoryId = price_import_suggest_category_id((string) ($row['section_hint'] ?? ''), $categories);
 
         $preview = [
@@ -685,12 +721,15 @@ function price_import_build_preview(PDO $pdo, array $parsedRows): array
             'warranty' => (string) ($row['warranty'] ?? ''),
             'section_hint' => (string) ($row['section_hint'] ?? ''),
             'action' => $existing ? 'update' : 'create',
-            'existing_product_id' => $existing ? (int) $existing['id'] : null,
+            'existing_product_id' => $existingProductId,
             'existing_name' => $existing ? (string) $existing['name'] : null,
             'existing_price_text' => $existing ? (string) ($existing['price_text'] ?? '') : null,
             'existing_pack_size' => $existing ? ($existing['pack_size'] !== null ? (int) $existing['pack_size'] : null) : null,
             'category_id' => $existing ? null : $suggestedCategoryId,
             'category_suggested_id' => $suggestedCategoryId,
+            'skip_cars' => $skipCars,
+            'existing_car_ids' => $skipCars ? $existingCarIds : [],
+            'existing_car_names' => $skipCars ? price_import_car_names_for_ids($existingCarIds, $carModels) : '',
             'car_matches' => $carMatches,
             'include' => true,
         ];
@@ -773,11 +812,12 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
         $packSize = null;
     }
 
+    $skipCars = !empty($rowInput['skip_cars']);
     $carMatches = is_array($rowInput['car_matches'] ?? null) ? $rowInput['car_matches'] : [];
     $carOverrides = is_array($rowInput['car_overrides'] ?? null) ? $rowInput['car_overrides'] : [];
     $extraCars = is_array($rowInput['extra_cars'] ?? null) ? $rowInput['extra_cars'] : [];
     $carCategoryMap = is_array($rowInput['car_category_map'] ?? null) ? $rowInput['car_category_map'] : [];
-    $carIds = price_import_confirmed_car_ids($carMatches, $carOverrides, $extraCars);
+    $carIds = $skipCars ? [] : price_import_confirmed_car_ids($carMatches, $carOverrides, $extraCars);
 
     $action = (string) ($rowInput['action'] ?? 'create');
     $existing = price_import_find_product_by_visual_id($pdo, $visualId);
@@ -790,10 +830,10 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
             $packSize,
             $productId,
         ]);
-        if ($carIds !== []) {
+        if (!$skipCars && $carIds !== []) {
             price_import_merge_car_models($pdo, $productId, $carIds, $carCategoryMap);
         }
-        if ($saveAliases) {
+        if ($saveAliases && !$skipCars) {
             foreach ($carMatches as $match) {
                 $token = (string) ($match['token'] ?? '');
                 $norm = search_normalize($token);
@@ -860,20 +900,82 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
 }
 
 /**
+ * @param list<int> $indicesToRemove
+ * @return array<string, mixed>
+ */
+function price_import_session_remove_rows(array $session, array $indicesToRemove): array
+{
+    $remove = array_flip(array_map('intval', $indicesToRemove));
+    $parsed = is_array($session['parsed'] ?? null) ? $session['parsed'] : [];
+    $rows = is_array($session['preview']['rows'] ?? null) ? $session['preview']['rows'] : [];
+
+    $newRows = [];
+    foreach ($rows as $row) {
+        $index = (int) ($row['index'] ?? -1);
+        if (!isset($remove[$index])) {
+            $newRows[] = $row;
+        }
+    }
+
+    $newParsed = [];
+    foreach ($parsed as $parsedIndex => $parsedRow) {
+        if (!isset($remove[(int) $parsedIndex])) {
+            $newParsed[$parsedIndex] = $parsedRow;
+        }
+    }
+
+    $session['preview']['rows'] = $newRows;
+    $session['parsed'] = $newParsed;
+
+    return $session;
+}
+
+/**
+ * @param callable(array<string, mixed>, array<string, mixed>): array<string, mixed> $mergeFormRow
+ * @return array<string, mixed>
+ */
+function price_import_session_merge_posted_rows(array $session, array $postedRows, callable $mergeFormRow): array
+{
+    $rows = is_array($session['preview']['rows'] ?? null) ? $session['preview']['rows'] : [];
+    $mergedRows = [];
+    foreach ($rows as $row) {
+        $index = (int) ($row['index'] ?? -1);
+        $input = is_array($postedRows[$index] ?? null) ? $postedRows[$index] : [];
+        $mergedRows[] = $mergeFormRow($row, $input);
+    }
+    $session['preview']['rows'] = $mergedRows;
+
+    return $session;
+}
+
+/**
  * @param list<array<string, mixed>> $rows
  * @param array<int, array<string, mixed>> $formRows keyed by index
+ * @param list<int>|null $onlyIndices
+ * @return array{created:int,updated:int,skipped:int,errors:list<string>,applied_indices:list<int>}
  */
-function price_import_apply_batch(PDO $pdo, array $rows, array $formRows, bool $saveAliases = false): array
-{
+function price_import_apply_batch(
+    PDO $pdo,
+    array $rows,
+    array $formRows,
+    bool $saveAliases = false,
+    ?array $onlyIndices = null
+): array {
     $created = 0;
     $updated = 0;
     $skipped = 0;
     $errors = [];
+    $appliedIndices = [];
+    $onlySet = $onlyIndices !== null ? array_flip(array_map('intval', $onlyIndices)) : null;
 
     $pdo->beginTransaction();
     try {
         foreach ($rows as $row) {
             $index = (int) ($row['index'] ?? -1);
+            if ($onlySet !== null && !isset($onlySet[$index])) {
+                continue;
+            }
+
             $form = $formRows[$index] ?? null;
             if ($form === null || empty($form['include'])) {
                 $skipped++;
@@ -900,6 +1002,7 @@ function price_import_apply_batch(PDO $pdo, array $rows, array $formRows, bool $
                 } else {
                     $updated++;
                 }
+                $appliedIndices[] = $index;
             } catch (Throwable $rowError) {
                 $errors[] = 'ردیف ' . ($merged['visual_id'] ?? '?') . ': ' . $rowError->getMessage();
                 $skipped++;
@@ -917,5 +1020,6 @@ function price_import_apply_batch(PDO $pdo, array $rows, array $formRows, bool $
         'updated' => $updated,
         'skipped' => $skipped,
         'errors' => $errors,
+        'applied_indices' => $appliedIndices,
     ];
 }

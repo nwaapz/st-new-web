@@ -71,8 +71,55 @@ function price_import_merge_form_row(array $row, array $input): array
     return $merged;
 }
 
+function price_import_page_handle_apply(PDO $pdo, array $session, array $postedRows, bool $saveAliases, ?int $onlyIndex): array
+{
+    $session = price_import_session_merge_posted_rows($session, $postedRows, 'price_import_merge_form_row');
+
+    $rows = is_array($session['preview']['rows'] ?? null) ? $session['preview']['rows'] : [];
+    $formRows = [];
+    foreach ($rows as $row) {
+        $index = (int) ($row['index'] ?? -1);
+        if ($onlyIndex !== null) {
+            $row['include'] = $index === $onlyIndex;
+        }
+        $formRows[$index] = $row;
+    }
+
+    $onlyIndices = $onlyIndex !== null ? [$onlyIndex] : null;
+    $result = price_import_apply_batch($pdo, $rows, $formRows, $saveAliases, $onlyIndices);
+
+    if (!empty($result['applied_indices'])) {
+        $session = price_import_session_remove_rows($session, $result['applied_indices']);
+    }
+
+    return [
+        'session' => $session,
+        'result' => $result,
+    ];
+}
+
+function price_import_page_store_session(array $session): int
+{
+    $remaining = count($session['preview']['rows'] ?? []);
+    if ($remaining === 0) {
+        if (!empty($session['stored_path']) && is_file($session['stored_path'])) {
+            @unlink($session['stored_path']);
+        }
+        unset($_SESSION[PRICE_IMPORT_SESSION_KEY]);
+
+        return 0;
+    }
+
+    $_SESSION[PRICE_IMPORT_SESSION_KEY] = $session;
+
+    return $remaining;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
+    $applyOneIndex = isset($_POST['apply_row']) && $_POST['apply_row'] !== ''
+        ? (int) $_POST['apply_row']
+        : null;
 
     try {
         if ($action === 'clear') {
@@ -118,40 +165,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_redirect('product-price-import.php');
         }
 
-        if ($action === 'apply') {
+        if ($action === 'apply' || $applyOneIndex !== null) {
             $session = $_SESSION[PRICE_IMPORT_SESSION_KEY] ?? null;
             if (!is_array($session) || empty($session['preview']['rows'])) {
                 throw new RuntimeException('ابتدا فایل را آپلود کنید');
             }
 
-            $rows = $session['preview']['rows'];
-            $formRows = [];
             $postedRows = $_POST['rows'] ?? [];
             if (!is_array($postedRows)) {
                 throw new RuntimeException('داده فرم نامعتبر است');
             }
 
-            foreach ($rows as $row) {
-                $index = (int) ($row['index'] ?? -1);
-                $input = is_array($postedRows[$index] ?? null) ? $postedRows[$index] : [];
-                $formRows[$index] = price_import_merge_form_row($row, $input);
-            }
-
             $saveAliases = !empty($_POST['save_aliases']);
-            $result = price_import_apply_batch($pdo, $rows, $formRows, $saveAliases);
+            $handled = price_import_page_handle_apply($pdo, $session, $postedRows, $saveAliases, $applyOneIndex);
+            $result = $handled['result'];
+            $remaining = price_import_page_store_session($handled['session']);
+            $appliedCount = count($result['applied_indices']);
 
-            unset($_SESSION[PRICE_IMPORT_SESSION_KEY]);
-            if (!empty($session['stored_path']) && is_file($session['stored_path'])) {
-                @unlink($session['stored_path']);
+            if ($applyOneIndex !== null && $appliedCount === 0) {
+                $message = !empty($result['errors'])
+                    ? (string) $result['errors'][0]
+                    : 'ذخیره این ردیف ناموفق بود — موارد لازم را تکمیل کنید';
+                cms_flash($message, 'error');
+                cms_redirect('product-price-import.php');
             }
 
-            cms_flash(sprintf(
-                'انجام شد: %d ایجاد، %d به‌روزرسانی، %d رد شد%s',
-                $result['created'],
-                $result['updated'],
-                $result['skipped'],
-                !empty($result['errors']) ? ' — ' . count($result['errors']) . ' خطا' : ''
-            ), !empty($result['errors']) && $result['created'] + $result['updated'] === 0 ? 'error' : 'ok');
+            if ($remaining === 0) {
+                cms_flash(sprintf(
+                    'همه ردیف‌ها ذخیره شد — %d ایجاد، %d به‌روزرسانی%s',
+                    $result['created'],
+                    $result['updated'],
+                    !empty($result['errors']) ? ' — ' . count($result['errors']) . ' خطا' : ''
+                ), !empty($result['errors']) ? 'error' : 'ok');
+            } elseif ($applyOneIndex !== null) {
+                cms_flash(sprintf(
+                    '%d ردیف ذخیره شد — %d ردیف باقی مانده%s',
+                    $appliedCount,
+                    $remaining,
+                    !empty($result['errors']) ? ' — ' . implode('؛ ', $result['errors']) : ''
+                ), $appliedCount > 0 ? 'ok' : 'error');
+            } else {
+                cms_flash(sprintf(
+                    'انجام شد: %d ایجاد، %d به‌روزرسانی، %d رد شد — %d ردیف باقی مانده%s',
+                    $result['created'],
+                    $result['updated'],
+                    $result['skipped'],
+                    $remaining,
+                    !empty($result['errors']) ? ' — ' . count($result['errors']) . ' خطا' : ''
+                ), !empty($result['errors']) && $appliedCount === 0 ? 'error' : 'ok');
+            }
             cms_redirect('product-price-import.php');
         }
 
@@ -248,6 +310,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         $needsPrice = trim((string) ($row['price_text'] ?? '')) === '';
         $needsPack = $action === 'create' && (int) ($row['pack_size'] ?? 0) <= 0;
         $needsName = $action === 'create' && trim((string) ($row['name'] ?? '')) === '';
+        $skipCars = !empty($row['skip_cars']);
         ?>
         <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>" data-row-index="<?= $index ?>">
           <header class="price-import-row-card__head">
@@ -269,6 +332,13 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
             <?php else: ?>
               <span class="price-import-badge price-import-badge--warn">نیاز به بررسی</span>
             <?php endif; ?>
+            <button
+              type="submit"
+              name="apply_row"
+              value="<?= $index ?>"
+              class="cms-btn price-import-save-row"
+              <?= $ready ? '' : 'disabled' ?>
+            >ذخیره این ردیف</button>
           </header>
 
           <?php if (!$ready && $issues !== []): ?>
@@ -325,10 +395,17 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
             <?php endif; ?>
 
             <div class="price-import-field price-import-field--wide">
+              <?php if ($skipCars): ?>
+                <span class="price-import-field__label">خودروها</span>
+                <p class="price-import-field__hint price-import-skip-cars-note">خودروها از قبل ثبت شده — فقط قیمت به‌روز می‌شود.</p>
+                <?php if (!empty($row['existing_car_names'])): ?>
+                  <p class="price-import-existing-cars"><?= cms_h((string) $row['existing_car_names']) ?></p>
+                <?php endif; ?>
+              <?php else: ?>
               <span class="price-import-field__label">خودروها (از فایل)</span>
               <div class="price-import-field__hint"><?= cms_h((string) ($row['cars_raw'] ?? '')) ?: '—' ?></div>
               <?php if ($action === 'update'): ?>
-                <div class="price-import-field__hint">برای محصول موجود، خودرو اختیاری است — فقط قیمت به‌روز می‌شود.</div>
+                <div class="price-import-field__hint">برای محصول موجود بدون خودرو، می‌توانید خودرو اضافه کنید — در غیر این صورت فقط قیمت به‌روز می‌شود.</div>
               <?php endif; ?>
               <?php if ($carModels === []): ?>
                 <p class="cms-muted" style="margin:0">هنوز مدلی ثبت نشده. ابتدا از <a href="car-models.php">مدل‌ها</a> اضافه کنید.</p>
@@ -390,6 +467,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
               </div>
               <button type="button" class="cms-btn price-import-add-car">افزودن خودرو</button>
               <?php endif; ?>
+              <?php endif; ?>
             </div>
           </div>
         </article>
@@ -397,8 +475,8 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     </div>
 
     <div class="cms-form__actions">
-      <button class="cms-btn cms-btn--primary" type="submit" <?= $reviewCount > 0 ? 'onclick="return confirm(\'برخی ردیف‌ها هنوز نیاز به بررسی دارند. فقط ردیف‌های آماده اعمال می‌شوند. ادامه؟\')"' : '' ?>>
-        اعمال تغییرات
+      <button class="cms-btn cms-btn--primary" type="submit" name="action" value="apply" <?= $reviewCount > 0 ? 'onclick="return confirm(\'فقط ردیف‌های آماده و تیک‌خورده اعمال می‌شوند. ادامه؟\')"' : '' ?>>
+        اعمال ردیف‌های آماده
       </button>
     </div>
   </form>

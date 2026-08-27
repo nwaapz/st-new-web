@@ -2373,6 +2373,26 @@ a.cms-kpi:hover {
   font-size: 0.85rem;
 }
 
+.price-import-save-row {
+  justify-self: end;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.price-import-save-row:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.price-import-skip-cars-note {
+  color: #7ee787;
+}
+
+.price-import-existing-cars {
+  margin: 0.35rem 0 0;
+  font-size: 0.92rem;
+}
+
 .price-import-row-card__body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
