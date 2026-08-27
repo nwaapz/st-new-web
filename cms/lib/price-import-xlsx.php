@@ -1,31 +1,29 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/price-import-zip-fallback.php';
+
 /**
- * Minimal XLSX reader (ZipArchive + sheet XML). No external dependencies.
+ * Minimal XLSX reader — ZipArchive when available, pure-PHP ZIP fallback otherwise.
  *
  * @return list<list<mixed>> rows as 0-indexed columns A=0 ..
  */
 function price_import_xlsx_read_rows(string $path): array
 {
-    if (!class_exists('ZipArchive')) {
-        throw new RuntimeException('ZipArchive در PHP فعال نیست');
-    }
     if (!is_file($path)) {
         throw new RuntimeException('فایل یافت نشد');
     }
-
-    $zip = new ZipArchive();
-    if ($zip->open($path) !== true) {
-        throw new RuntimeException('فایل Excel قابل خواندن نیست');
+    if (!price_import_xlsx_supported()) {
+        throw new RuntimeException(
+            'خواندن xlsx روی این سرور ممکن نیست. فایل را CSV کنید (Save As → CSV UTF-8) یا در cPanel افزونه zip را فعال کنید.'
+        );
     }
 
-    $sharedStrings = price_import_xlsx_read_shared_strings($zip);
-    $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+    $sharedStrings = price_import_xlsx_read_shared_strings_from_path($path);
+    $sheetXml = price_import_zip_get_contents($path, 'xl/worksheets/sheet1.xml');
     if ($sheetXml === false) {
-        $sheetXml = price_import_xlsx_find_first_sheet($zip);
+        $sheetXml = price_import_xlsx_find_first_sheet_from_path($path);
     }
-    $zip->close();
 
     if ($sheetXml === false || $sheetXml === '') {
         throw new RuntimeException('برگه اول Excel یافت نشد');
@@ -35,9 +33,9 @@ function price_import_xlsx_read_rows(string $path): array
 }
 
 /** @return list<string> */
-function price_import_xlsx_read_shared_strings(ZipArchive $zip): array
+function price_import_xlsx_read_shared_strings_from_path(string $path): array
 {
-    $xml = $zip->getFromName('xl/sharedStrings.xml');
+    $xml = price_import_zip_get_contents($path, 'xl/sharedStrings.xml');
     if ($xml === false || trim($xml) === '') {
         return [];
     }
@@ -63,17 +61,34 @@ function price_import_xlsx_read_shared_strings(ZipArchive $zip): array
     return $strings;
 }
 
-function price_import_xlsx_find_first_sheet(ZipArchive $zip): string|false
+function price_import_xlsx_find_first_sheet_from_path(string $path): string|false
 {
-    for ($i = 0; $i < $zip->numFiles; $i++) {
-        $name = $zip->getNameIndex($i);
-        if ($name !== false && preg_match('#^xl/worksheets/sheet\d+\.xml$#', $name)) {
-            $content = $zip->getFromIndex($i);
+    if (class_exists('ZipArchive')) {
+        $zip = new ZipArchive();
+        if ($zip->open($path) === true) {
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $name = $zip->getNameIndex($i);
+                if ($name !== false && preg_match('#^xl/worksheets/sheet\d+\.xml$#', $name)) {
+                    $content = $zip->getFromIndex($i);
+                    $zip->close();
+                    if ($content !== false) {
+                        return $content;
+                    }
+                }
+            }
+            $zip->close();
+        }
+    }
+
+    foreach (price_import_zip_fallback_list($path) as $name) {
+        if (preg_match('#^xl/worksheets/sheet\d+\.xml$#', $name)) {
+            $content = price_import_zip_fallback_extract($path, $name);
             if ($content !== false) {
                 return $content;
             }
         }
     }
+
     return false;
 }
 

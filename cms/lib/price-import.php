@@ -125,11 +125,63 @@ function price_import_parse_pack_size(mixed $value): ?int
 }
 
 /**
+ * @return list<list<mixed>>
+ */
+function price_import_read_csv_rows(string $path): array
+{
+    $content = file_get_contents($path);
+    if ($content === false) {
+        throw new RuntimeException('خواندن CSV ناموفق بود');
+    }
+    if (str_starts_with($content, "\xEF\xBB\xBF")) {
+        $content = substr($content, 3);
+    }
+
+    $lines = preg_split('/\r\n|\n|\r/', $content) ?: [];
+    $rows = [];
+    foreach ($lines as $line) {
+        if (trim($line) === '') {
+            continue;
+        }
+        $rows[] = price_import_parse_csv_line($line);
+    }
+    return $rows;
+}
+
+/** @return list<mixed> */
+function price_import_parse_csv_line(string $line): array
+{
+    $delimiter = substr_count($line, ';') > substr_count($line, ',') ? ';' : ',';
+    $fh = fopen('php://memory', 'r+');
+    if ($fh === false) {
+        return array_map('trim', explode($delimiter, $line));
+    }
+    fwrite($fh, $line);
+    rewind($fh);
+    $row = fgetcsv($fh, 0, $delimiter);
+    fclose($fh);
+    if (!is_array($row)) {
+        return [];
+    }
+
+    $out = [];
+    foreach ($row as $cell) {
+        $cell = trim((string) $cell);
+        if ($cell !== '' && is_numeric($cell)) {
+            $out[] = str_contains($cell, '.') ? (float) $cell : (int) $cell;
+        } else {
+            $out[] = $cell;
+        }
+    }
+    return $out;
+}
+
+/**
+ * @param list<list<mixed>> $rawRows
  * @return list<array<string, mixed>>
  */
-function price_import_parse_xlsx(string $path): array
+function price_import_parse_rows(array $rawRows): array
 {
-    $rawRows = price_import_xlsx_read_rows($path);
     $parsed = [];
     $sectionHint = '';
 
@@ -159,6 +211,29 @@ function price_import_parse_xlsx(string $path): array
     }
 
     return $parsed;
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function price_import_parse_file(string $path, string $ext): array
+{
+    $ext = strtolower($ext);
+    if ($ext === 'csv') {
+        return price_import_parse_rows(price_import_read_csv_rows($path));
+    }
+    if ($ext === 'xlsx') {
+        return price_import_parse_rows(price_import_xlsx_read_rows($path));
+    }
+    throw new RuntimeException('فرمت فایل پشتیبانی نمی‌شود — .xlsx یا .csv');
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function price_import_parse_xlsx(string $path): array
+{
+    return price_import_parse_file($path, 'xlsx');
 }
 
 /** @return list<string> */

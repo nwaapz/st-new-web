@@ -62,25 +62,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'upload') {
-            if (!isset($_FILES['xlsx']) || !is_array($_FILES['xlsx'])) {
-                throw new RuntimeException('فایل Excel انتخاب نشده است');
+            if (!isset($_FILES['price_file']) || !is_array($_FILES['price_file'])) {
+                throw new RuntimeException('فایل انتخاب نشده است');
             }
-            if ((int) ($_FILES['xlsx']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            if ((int) ($_FILES['price_file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
                 throw new RuntimeException('خطا در آپلود فایل');
             }
 
-            $tmp = (string) ($_FILES['xlsx']['tmp_name'] ?? '');
-            $ext = strtolower(pathinfo((string) ($_FILES['xlsx']['name'] ?? ''), PATHINFO_EXTENSION));
-            if ($ext !== 'xlsx') {
-                throw new RuntimeException('فقط فایل .xlsx پشتیبانی می‌شود');
+            $tmp = (string) ($_FILES['price_file']['tmp_name'] ?? '');
+            $originalName = (string) ($_FILES['price_file']['name'] ?? 'import.xlsx');
+            $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['xlsx', 'csv'], true)) {
+                throw new RuntimeException('فقط .xlsx یا .csv پشتیبانی می‌شود');
             }
 
-            $stored = price_import_temp_dir() . DIRECTORY_SEPARATOR . 'import-' . bin2hex(random_bytes(8)) . '.xlsx';
+            $stored = price_import_temp_dir() . DIRECTORY_SEPARATOR . 'import-' . bin2hex(random_bytes(8)) . '.' . $ext;
             if (!move_uploaded_file($tmp, $stored)) {
                 throw new RuntimeException('ذخیره فایل موقت ناموفق بود');
             }
 
-            $parsed = price_import_parse_xlsx($stored);
+            $parsed = price_import_parse_file($stored, $ext);
             if ($parsed === []) {
                 @unlink($stored);
                 throw new RuntimeException('هیچ ردیف محصولی در فایل یافت نشد');
@@ -88,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $preview = price_import_build_preview($pdo, $parsed);
             $_SESSION[PRICE_IMPORT_SESSION_KEY] = [
-                'source_name' => (string) ($_FILES['xlsx']['name'] ?? 'import.xlsx'),
+                'source_name' => $originalName,
                 'stored_path' => $stored,
                 'parsed' => $parsed,
                 'preview' => $preview,
@@ -162,16 +163,17 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 ?>
 <h1 style="margin-top:0">ورود قیمت از Excel</h1>
 <p class="cms-muted">
-  فایل لیست قیمت را آپلود کنید. اگر داده‌ای مبهم باشد (دسته، خودرو، قیمت)، CMS از شما می‌پرسد.
-  محصولات موجود فقط قیمت و تعداد کارتن به‌روز می‌شوند؛ خودروهای جدید اضافه می‌شوند.
+  فایل لیست قیمت (.xlsx یا .csv) را آپلود کنید. روی cPanel نیازی به ریستارت Apache نیست —
+  اگر xlsx کار نکرد، در Excel «Save As → CSV UTF-8» بزنید.
 </p>
+<p class="cms-muted"><?= cms_h(price_import_xlsx_support_hint()) ?></p>
 
 <div class="cms-card">
   <h2>۱. آپلود فایل</h2>
   <form method="post" enctype="multipart/form-data" class="cms-form">
     <input type="hidden" name="action" value="upload">
-    <label class="cms-label">فایل .xlsx</label>
-    <input class="cms-input" type="file" name="xlsx" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+    <label class="cms-label">فایل .xlsx یا .csv</label>
+    <input class="cms-input" type="file" name="price_file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required>
     <div class="cms-form__actions">
       <button class="cms-btn cms-btn--primary" type="submit">خواندن و پیش‌نمایش</button>
       <?php if ($rows !== []): ?>
