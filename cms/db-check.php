@@ -21,6 +21,7 @@ if (!is_file($configPath)) {
 
 echo "PHP: " . PHP_VERSION . "\n";
 echo (extension_loaded('gd') ? 'OK' : 'FAIL') . ": GD extension " . (extension_loaded('gd') ? 'enabled — image optimization active' : 'MISSING — images are stored UN-optimized! Enable gd in cPanel → Select PHP Version → Extensions') . "\n";
+echo (extension_loaded('zip') ? 'OK' : 'FAIL') . ": Zip extension " . (extension_loaded('zip') ? 'enabled — Excel price import works' : 'MISSING — enable extension=zip in php.ini for ورود قیمت') . "\n";
 echo "upload_max_filesize: " . ini_get('upload_max_filesize') . "\n";
 echo "post_max_size: " . ini_get('post_max_size') . "\n";
 echo "memory_limit: " . ini_get('memory_limit') . "\n\n";

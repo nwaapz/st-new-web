@@ -42,6 +42,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'categories.php' => 'دسته‌بندی‌ها',
             'product-series.php' => 'سری محصولات',
             'products.php' => 'محصولات',
+            'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
             'orders.php' => 'سفارش‌ها',
         ];

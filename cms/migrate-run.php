@@ -3,15 +3,20 @@ declare(strict_types=1);
 
 /**
  * One-click schema upgrade for existing installs.
- * Open once while logged in as admin, then delete this file.
+ * Browser: open once while logged in as admin.
+ * XAMPP CLI: D:\xammp\php\php.exe migrate-run.php
  */
 require_once __DIR__ . '/auth.php';
-require_once __DIR__ . '/layout.php';
 
-cms_require_login();
+$isCli = php_sapi_name() === 'cli';
+
+if (!$isCli) {
+    require_once __DIR__ . '/layout.php';
+    cms_require_login();
+    header('Content-Type: text/html; charset=utf-8');
+}
+
 $pdo = cms_pdo();
-
-header('Content-Type: text/html; charset=utf-8');
 
 $log = [];
 $ok = true;
@@ -765,11 +770,29 @@ try {
     $log[] = $hadPattern
         ? 'home_pattern_config already exists'
         : 'Seeded default home_pattern_config';
+
+    require_once __DIR__ . '/lib/price-import.php';
+    price_import_ensure_schema($pdo);
+    $aliasTable = $pdo->query("SHOW TABLES LIKE 'price_import_car_aliases'")->fetchAll();
+    $log[] = count($aliasTable) > 0
+        ? 'price_import_car_aliases table ready'
+        : 'Created price_import_car_aliases table';
 } catch (Throwable $e) {
     $ok = false;
     $log[] = 'ERROR: ' . $e->getMessage();
 }
 
+if ($isCli) {
+    echo "StarTech CMS migration\n";
+    echo str_repeat('=', 40) . "\n";
+    foreach ($log as $line) {
+        echo $line . "\n";
+    }
+    echo $ok ? "\nOK\n" : "\nFAILED\n";
+    exit($ok ? 0 : 1);
+}
+
+require_once __DIR__ . '/layout.php';
 cms_layout_start('Migration', cms_current_username(), 'shop');
 ?>
 <h1 style="margin-top:0">آپدیت ساختار فروشگاه</h1>
