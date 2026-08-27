@@ -2526,6 +2526,7 @@ a.cms-kpi:hover {
 }
 
 .price-import-badge--ok { background: rgba(46, 160, 67, 0.2); color: #7ee787; }
+.price-import-badge--car-done { background: rgba(46, 160, 67, 0.15); color: #7ee787; }
 .price-import-badge--likely { background: rgba(210, 153, 34, 0.2); color: #f2cc60; }
 .price-import-badge--warn { background: rgba(248, 81, 73, 0.18); color: #ffaba8; }
 

@@ -277,12 +277,13 @@ $carModels = price_import_load_car_models($pdo);
 $sourceName = is_array($session) ? (string) ($session['source_name'] ?? '') : '';
 
 $readyCount = 0;
-$reviewCount = 0;
+$carSetupCount = 0;
 foreach ($rows as $row) {
     if (!empty($row['ready'])) {
         $readyCount++;
-    } else {
-        $reviewCount++;
+    }
+    if (!empty($row['needs_car_setup'])) {
+        $carSetupCount++;
     }
 }
 
@@ -313,8 +314,8 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     <p class="cms-muted">فایل فعلی: <strong><?= cms_h($sourceName) ?></strong>
       — <?= count($rows) ?> ردیف —
       <span class="price-import-badge price-import-badge--ok"><?= $readyCount ?> آماده</span>
-      <?php if ($reviewCount > 0): ?>
-        <span class="price-import-badge price-import-badge--warn"><?= $reviewCount ?> نیاز به بررسی</span>
+      <?php if ($carSetupCount > 0): ?>
+        <span class="price-import-badge price-import-badge--warn"><?= $carSetupCount ?> نیاز به تعریف خودرو</span>
       <?php endif; ?>
     </p>
   <?php endif; ?>
@@ -328,8 +329,8 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     <div class="price-import-summary">
       <span><strong><?= count($rows) ?></strong> ردیف</span>
       <span class="price-import-badge price-import-badge--ok"><?= $readyCount ?> آماده</span>
-      <?php if ($reviewCount > 0): ?>
-        <span class="price-import-badge price-import-badge--warn"><?= $reviewCount ?> نیاز به بررسی</span>
+      <?php if ($carSetupCount > 0): ?>
+        <span class="price-import-badge price-import-badge--warn"><?= $carSetupCount ?> نیاز به تعریف خودرو</span>
       <?php endif; ?>
       <span class="cms-muted">فیلدهای قرمز را تکمیل کنید</span>
     </div>
@@ -340,8 +341,8 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         ذخیره انتخاب‌های خودرو برای ورود بعدی
       </label>
       <label class="cms-check">
-        <input type="checkbox" id="price-import-show-review" checked>
-        فقط ردیف‌های نیازمند بررسی
+        <input type="checkbox" id="price-import-show-car-setup" checked>
+        فقط ردیف‌های نیازمند تعریف خودرو
       </label>
     </div>
 
@@ -356,8 +357,9 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         $needsPack = $action === 'create' && (int) ($row['pack_size'] ?? 0) <= 0;
         $needsName = $action === 'create' && trim((string) ($row['name'] ?? '')) === '';
         $skipCars = !empty($row['skip_cars']);
+        $needsCarSetup = !empty($row['needs_car_setup']);
         ?>
-        <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>" data-row-index="<?= $index ?>">
+        <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>" data-needs-car-setup="<?= $needsCarSetup ? '1' : '0' ?>" data-row-index="<?= $index ?>">
           <header class="price-import-row-card__head">
             <label class="cms-check" title="اعمال این ردیف">
               <input type="checkbox" name="rows[<?= $index ?>][include]" value="1" <?= !isset($row['include']) || !empty($row['include']) ? 'checked' : '' ?>>
@@ -376,6 +378,9 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
               <span class="price-import-badge price-import-badge--ok">آماده</span>
             <?php else: ?>
               <span class="price-import-badge price-import-badge--warn">نیاز به بررسی</span>
+            <?php endif; ?>
+            <?php if ($skipCars): ?>
+              <span class="price-import-badge price-import-badge--car-done">خودرو ثبت شده</span>
             <?php endif; ?>
             <button
               type="submit"
@@ -549,12 +554,12 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
   <script>
   (function () {
-    var toggle = document.getElementById('price-import-show-review');
+    var toggle = document.getElementById('price-import-show-car-setup');
     if (toggle) {
       function applyFilter() {
         document.querySelectorAll('.price-import-row-card').forEach(function (card) {
-          var isReady = card.getAttribute('data-ready') === '1';
-          card.classList.toggle('is-filtered-out', toggle.checked && isReady);
+          var needsCarSetup = card.getAttribute('data-needs-car-setup') === '1';
+          card.classList.toggle('is-filtered-out', toggle.checked && !needsCarSetup);
         });
       }
       toggle.addEventListener('change', applyFilter);

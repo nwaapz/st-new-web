@@ -711,6 +711,7 @@ function price_import_refresh_session_rows(PDO $pdo, array $rows): array
         $skipCars = $productId > 0 && $existingCarIds !== [];
 
         $row['skip_cars'] = $skipCars;
+        $row['needs_car_setup'] = !$skipCars;
         if ($skipCars) {
             $row['existing_car_ids'] = $existingCarIds;
             $row['existing_car_names'] = price_import_car_names_for_ids($existingCarIds, $carModels);
@@ -789,6 +790,7 @@ function price_import_build_preview(PDO $pdo, array $parsedRows): array
             'category_id' => $existing ? null : $suggestedCategoryId,
             'category_suggested_id' => $suggestedCategoryId,
             'skip_cars' => $skipCars,
+            'needs_car_setup' => !$skipCars,
             'existing_car_ids' => $skipCars ? $existingCarIds : [],
             'existing_car_names' => $skipCars ? price_import_car_names_for_ids($existingCarIds, $carModels) : '',
             'car_matches' => $carMatches,
