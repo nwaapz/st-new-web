@@ -161,6 +161,7 @@ foreach ($rows as $row) {
 
 cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 ?>
+<div class="price-import-page">
 <h1 style="margin-top:0">ورود قیمت از Excel</h1>
 <p class="cms-muted">
   فایل لیست قیمت (.xlsx یا .csv) را آپلود کنید. روی cPanel نیازی به ریستارت Apache نیست —
@@ -168,7 +169,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 </p>
 <p class="cms-muted"><?= cms_h(price_import_xlsx_support_hint()) ?></p>
 
-<div class="cms-card">
+<div class="cms-card price-import-upload">
   <h2>۱. آپلود فایل</h2>
   <form method="post" enctype="multipart/form-data" class="cms-form">
     <input type="hidden" name="action" value="upload">
@@ -196,96 +197,120 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
   <form method="post" class="cms-card price-import-preview">
     <input type="hidden" name="action" value="apply">
     <h2>۲. بررسی و تأیید</h2>
-    <p class="cms-muted">ردیف‌های «نیاز به بررسی» را تکمیل کنید. سپس «اعمال تغییرات» را بزنید.</p>
 
-    <label class="cms-check">
-      <input type="checkbox" name="save_aliases" value="1" checked>
-      ذخیره انتخاب‌های خودرو به‌عنوان نام مستعار برای ورود بعدی
-    </label>
+    <div class="price-import-summary">
+      <span><strong><?= count($rows) ?></strong> ردیف</span>
+      <span class="price-import-badge price-import-badge--ok"><?= $readyCount ?> آماده</span>
+      <?php if ($reviewCount > 0): ?>
+        <span class="price-import-badge price-import-badge--warn"><?= $reviewCount ?> نیاز به بررسی</span>
+      <?php endif; ?>
+      <span class="cms-muted">فیلدهای قرمز را تکمیل کنید</span>
+    </div>
 
-    <div class="price-import-table-wrap">
-      <table class="cms-table price-import-table">
-        <thead>
-          <tr>
-            <th>اعمال</th>
-            <th>وضعیت</th>
-            <th>کد</th>
-            <th>نام</th>
-            <th>قیمت</th>
-            <th>کارتن</th>
-            <th>دسته</th>
-            <th>خودروها</th>
-            <th>عمل</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach ($rows as $row):
-            $index = (int) ($row['index'] ?? 0);
-            $ready = !empty($row['ready']);
-            $action = (string) ($row['action'] ?? 'create');
-            ?>
-            <tr class="<?= $ready ? 'price-import-row--ready' : 'price-import-row--review' ?>">
-              <td>
-                <input type="checkbox" name="rows[<?= $index ?>][include]" value="1" <?= !isset($row['include']) || !empty($row['include']) ? 'checked' : '' ?>>
-              </td>
-              <td>
-                <?php if ($ready): ?>
-                  <span class="price-import-badge price-import-badge--ok">آماده</span>
-                <?php else: ?>
-                  <span class="price-import-badge price-import-badge--warn">نیاز به بررسی</span>
-                  <?php if (!empty($row['issues'])): ?>
-                    <ul class="price-import-issues">
-                      <?php foreach ($row['issues'] as $issue): ?>
-                        <li><?= cms_h($issue) ?></li>
-                      <?php endforeach; ?>
-                    </ul>
-                  <?php endif; ?>
+    <div class="price-import-toolbar">
+      <label class="cms-check">
+        <input type="checkbox" name="save_aliases" value="1" checked>
+        ذخیره انتخاب‌های خودرو برای ورود بعدی
+      </label>
+      <label class="cms-check">
+        <input type="checkbox" id="price-import-show-review" checked>
+        فقط ردیف‌های نیازمند بررسی
+      </label>
+    </div>
+
+    <div class="price-import-rows">
+      <?php foreach ($rows as $row):
+        $index = (int) ($row['index'] ?? 0);
+        $ready = !empty($row['ready']);
+        $action = (string) ($row['action'] ?? 'create');
+        $issues = is_array($row['issues'] ?? null) ? $row['issues'] : [];
+        $needsCategory = $action === 'create' && (int) ($row['category_id'] ?? 0) <= 0;
+        $needsPrice = trim((string) ($row['price_text'] ?? '')) === '';
+        $needsPack = $action === 'create' && (int) ($row['pack_size'] ?? 0) <= 0;
+        $needsName = $action === 'create' && trim((string) ($row['name'] ?? '')) === '';
+        ?>
+        <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>">
+          <header class="price-import-row-card__head">
+            <label class="cms-check" title="اعمال این ردیف">
+              <input type="checkbox" name="rows[<?= $index ?>][include]" value="1" <?= !isset($row['include']) || !empty($row['include']) ? 'checked' : '' ?>>
+            </label>
+            <div class="price-import-row-card__title">
+              <strong><?= cms_h((string) ($row['name'] ?? '')) ?></strong>
+              <div class="price-import-row-card__meta">
+                <span dir="ltr">کد <?= cms_h((string) ($row['visual_id'] ?? '')) ?></span>
+                <span><?= $action === 'update' ? 'به‌روزرسانی قیمت' : 'محصول جدید' ?></span>
+                <?php if (!empty($row['section_hint'])): ?>
+                  <span>بخش: <?= cms_h((string) $row['section_hint']) ?></span>
                 <?php endif; ?>
-              </td>
-              <td dir="ltr"><?= cms_h((string) ($row['visual_id'] ?? '')) ?></td>
-              <td>
-                <?php if ($action === 'create'): ?>
-                  <input class="cms-input cms-input--compact" name="rows[<?= $index ?>][name]" value="<?= cms_h((string) ($row['name'] ?? '')) ?>">
-                <?php else: ?>
-                  <?= cms_h((string) ($row['existing_name'] ?? $row['name'] ?? '')) ?>
-                  <input type="hidden" name="rows[<?= $index ?>][name]" value="<?= cms_h((string) ($row['name'] ?? '')) ?>">
-                <?php endif; ?>
-              </td>
-              <td>
-                <input class="cms-input cms-input--compact" name="rows[<?= $index ?>][price_text]" value="<?= cms_h((string) ($row['price_text'] ?? '')) ?>">
-                <?php if ($action === 'update' && !empty($row['existing_price_text'])): ?>
-                  <div class="cms-muted">قبلی: <?= cms_h((string) $row['existing_price_text']) ?></div>
-                <?php endif; ?>
-              </td>
-              <td>
-                <input class="cms-input cms-input--compact" type="number" min="0" name="rows[<?= $index ?>][pack_size]" value="<?= cms_h((string) ($row['pack_size'] ?? '')) ?>">
-                <?php if ($action === 'update' && !empty($row['existing_pack_size'])): ?>
-                  <div class="cms-muted">قبلی: <?= cms_h((string) $row['existing_pack_size']) ?></div>
-                <?php endif; ?>
-              </td>
-              <td>
-                <?php if ($action === 'create'): ?>
-                  <select class="cms-input cms-input--compact" name="rows[<?= $index ?>][category_id]" required>
-                    <option value="">— انتخاب دسته —</option>
-                    <?php foreach ($categories as $cat):
-                      $catId = (int) $cat['id'];
-                      $selected = (int) ($row['category_id'] ?? 0) === $catId ? 'selected' : '';
-                      ?>
-                      <option value="<?= $catId ?>" <?= $selected ?>><?= cms_h((string) $cat['name']) ?></option>
-                    <?php endforeach; ?>
-                  </select>
-                  <?php if (!empty($row['section_hint'])): ?>
-                    <div class="cms-muted">راهنما: <?= cms_h((string) $row['section_hint']) ?></div>
-                  <?php endif; ?>
-                <?php else: ?>
-                  <span class="cms-muted">بدون تغییر</span>
-                <?php endif; ?>
-              </td>
-              <td class="price-import-cars">
-                <div class="cms-muted"><?= cms_h((string) ($row['cars_raw'] ?? '')) ?></div>
-                <?php if ($action === 'update'): ?>
-                  <div class="cms-muted">خودروها اختیاری — فقط قیمت به‌روز می‌شود</div>
-                <?php endif; ?>
+              </div>
+            </div>
+            <?php if ($ready): ?>
+              <span class="price-import-badge price-import-badge--ok">آماده</span>
+            <?php else: ?>
+              <span class="price-import-badge price-import-badge--warn">نیاز به بررسی</span>
+            <?php endif; ?>
+          </header>
+
+          <?php if (!$ready && $issues !== []): ?>
+            <div class="price-import-issues-box">
+              <strong>کارهای لازم:</strong>
+              <ul class="price-import-issues">
+                <?php foreach ($issues as $issue): ?>
+                  <li><?= cms_h($issue) ?></li>
+                <?php endforeach; ?>
+              </ul>
+            </div>
+          <?php endif; ?>
+
+          <div class="price-import-row-card__body">
+            <div class="price-import-field<?= $needsName ? ' needs-attention' : '' ?>">
+              <span class="price-import-field__label">نام محصول</span>
+              <?php if ($action === 'create'): ?>
+                <input class="cms-input" name="rows[<?= $index ?>][name]" value="<?= cms_h((string) ($row['name'] ?? '')) ?>">
+              <?php else: ?>
+                <div><?= cms_h((string) ($row['existing_name'] ?? $row['name'] ?? '')) ?></div>
+                <input type="hidden" name="rows[<?= $index ?>][name]" value="<?= cms_h((string) ($row['name'] ?? '')) ?>">
+              <?php endif; ?>
+            </div>
+
+            <div class="price-import-field<?= $needsPrice ? ' needs-attention' : '' ?>">
+              <span class="price-import-field__label">قیمت (تومان)</span>
+              <input class="cms-input" name="rows[<?= $index ?>][price_text]" value="<?= cms_h((string) ($row['price_text'] ?? '')) ?>">
+              <?php if ($action === 'update' && !empty($row['existing_price_text'])): ?>
+                <span class="price-import-field__hint">قبلی: <?= cms_h((string) $row['existing_price_text']) ?></span>
+              <?php endif; ?>
+            </div>
+
+            <div class="price-import-field<?= $needsPack ? ' needs-attention' : '' ?>">
+              <span class="price-import-field__label">تعداد در کارتن</span>
+              <input class="cms-input" type="number" min="0" name="rows[<?= $index ?>][pack_size]" value="<?= cms_h((string) ($row['pack_size'] ?? '')) ?>">
+              <?php if ($action === 'update' && !empty($row['existing_pack_size'])): ?>
+                <span class="price-import-field__hint">قبلی: <?= cms_h((string) $row['existing_pack_size']) ?></span>
+              <?php endif; ?>
+            </div>
+
+            <?php if ($action === 'create'): ?>
+              <div class="price-import-field<?= $needsCategory ? ' needs-attention' : '' ?>">
+                <span class="price-import-field__label">دسته محصول</span>
+                <select class="cms-input" name="rows[<?= $index ?>][category_id]" required>
+                  <option value="">— انتخاب دسته —</option>
+                  <?php foreach ($categories as $cat):
+                    $catId = (int) $cat['id'];
+                    $selected = (int) ($row['category_id'] ?? 0) === $catId ? 'selected' : '';
+                    ?>
+                    <option value="<?= $catId ?>" <?= $selected ?>><?= cms_h((string) $cat['name']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            <?php endif; ?>
+
+            <div class="price-import-field price-import-field--wide">
+              <span class="price-import-field__label">خودروها (از فایل)</span>
+              <div class="price-import-field__hint"><?= cms_h((string) ($row['cars_raw'] ?? '')) ?></div>
+              <?php if ($action === 'update'): ?>
+                <div class="price-import-field__hint">برای محصول موجود، خودرو اختیاری است — فقط قیمت به‌روز می‌شود.</div>
+              <?php endif; ?>
+              <div class="price-import-car-list">
                 <?php foreach (($row['car_matches'] ?? []) as $match):
                   $token = (string) ($match['token'] ?? '');
                   $norm = search_normalize($token);
@@ -297,15 +322,21 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                   } else {
                       $badgeClass = 'price-import-badge--warn';
                   }
+                  $needsCarPick = ($confidence === 'uncertain' || $confidence === 'unmatched');
+                  $confidenceLabel = [
+                      'certain' => 'قطعی',
+                      'likely' => 'احتمالی',
+                      'uncertain' => 'مبهم',
+                      'unmatched' => 'نامشخص',
+                  ][$confidence] ?? $confidence;
                   ?>
-                  <div class="price-import-car-token">
-                    <span class="price-import-badge <?= $badgeClass ?>"><?= cms_h($confidence) ?></span>
+                  <div class="price-import-car-item<?= $needsCarPick ? ' needs-attention' : '' ?>">
+                    <span class="price-import-badge <?= $badgeClass ?>"><?= cms_h($confidenceLabel) ?></span>
                     <span><?= cms_h($token) ?></span>
                     <?php if ($confidence === 'certain' || $confidence === 'likely'): ?>
                       <span class="cms-muted">→ <?= cms_h((string) ($match['car_model_name'] ?? '')) ?></span>
-                    <?php endif; ?>
-                    <?php if ($confidence === 'uncertain' || $confidence === 'unmatched'): ?>
-                      <select class="cms-input cms-input--compact" name="rows[<?= $index ?>][car_pick][<?= cms_h($norm) ?>]">
+                    <?php elseif ($needsCarPick): ?>
+                      <select class="cms-input" name="rows[<?= $index ?>][car_pick][<?= cms_h($norm) ?>]">
                         <option value="">— انتخاب خودرو —</option>
                         <?php
                         $options = $match['candidates'] ?? $carModels;
@@ -318,12 +349,11 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                     <?php endif; ?>
                   </div>
                 <?php endforeach; ?>
-              </td>
-              <td><?= $action === 'update' ? 'به‌روزرسانی' : 'ایجاد' ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+              </div>
+            </div>
+          </div>
+        </article>
+      <?php endforeach; ?>
     </div>
 
     <div class="cms-form__actions">
@@ -332,20 +362,22 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
       </button>
     </div>
   </form>
+  <script>
+  (function () {
+    var toggle = document.getElementById('price-import-show-review');
+    if (!toggle) return;
+    var cards = document.querySelectorAll('.price-import-row-card');
+    function applyFilter() {
+      cards.forEach(function (card) {
+        var needsReview = card.getAttribute('data-ready') !== '1';
+        card.style.display = toggle.checked && !needsReview ? 'none' : '';
+      });
+    }
+    toggle.addEventListener('change', applyFilter);
+    applyFilter();
+  })();
+  </script>
 <?php endif; ?>
-
-<style>
-.price-import-table-wrap { overflow-x: auto; margin-top: 1rem; }
-.price-import-table { min-width: 1100px; font-size: 0.92rem; }
-.price-import-table .cms-input--compact { min-width: 120px; padding: 0.35rem 0.5rem; font-size: 0.88rem; }
-.price-import-badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.78rem; }
-.price-import-badge--ok { background: rgba(46, 160, 67, 0.2); color: #7ee787; }
-.price-import-badge--likely { background: rgba(210, 153, 34, 0.2); color: #f2cc60; }
-.price-import-badge--warn { background: rgba(248, 81, 73, 0.18); color: #ffaba8; }
-.price-import-row--review td { background: rgba(248, 81, 73, 0.05); }
-.price-import-issues { margin: 0.35rem 0 0; padding-right: 1rem; color: #ffaba8; font-size: 0.82rem; }
-.price-import-car-token { margin-top: 0.35rem; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
-.price-import-cars { min-width: 260px; }
-</style>
+</div>
 
 <?php cms_layout_end(); ?>

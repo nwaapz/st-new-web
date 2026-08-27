@@ -2287,3 +2287,210 @@ a.cms-kpi:hover {
   font-size: 0.88rem;
   text-align: center;
 }
+
+/* ——— Price import ——— */
+.cms-main:has(.price-import-page) {
+  max-width: min(96vw, 1680px);
+}
+
+.cms-card.price-import-upload {
+  width: min(100%, 720px);
+}
+
+.cms-card.price-import-preview {
+  width: 100%;
+  max-width: none;
+}
+
+.price-import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  align-items: center;
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--cms-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.price-import-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.price-import-rows {
+  display: grid;
+  gap: 1rem;
+}
+
+.price-import-row-card {
+  border: 1px solid var(--cms-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.price-import-row-card.is-ready {
+  border-color: rgba(46, 160, 67, 0.35);
+}
+
+.price-import-row-card.needs-review {
+  border-color: rgba(248, 81, 73, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.12);
+}
+
+.price-import-row-card__head {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.75rem 1rem;
+  align-items: start;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--cms-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.price-import-row-card__title {
+  min-width: 0;
+}
+
+.price-import-row-card__title strong {
+  display: block;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.price-import-row-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.35rem;
+  color: var(--cms-text-soft);
+  font-size: 0.85rem;
+}
+
+.price-import-row-card__body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+  padding: 1rem;
+}
+
+.price-import-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.price-import-field--wide {
+  grid-column: 1 / -1;
+}
+
+.price-import-field__label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--cms-text-soft);
+  letter-spacing: 0.02em;
+}
+
+.price-import-field__hint {
+  font-size: 0.8rem;
+  color: var(--cms-text-soft);
+}
+
+.price-import-field.needs-attention .price-import-field__label {
+  color: #ffaba8;
+}
+
+.price-import-field.needs-attention .cms-input,
+.price-import-field.needs-attention select {
+  border-color: rgba(248, 81, 73, 0.65);
+  box-shadow: 0 0 0 1px rgba(248, 81, 73, 0.25);
+}
+
+.price-import-issues-box {
+  margin: 0 1rem 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.price-import-issues-box strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #ffaba8;
+}
+
+.price-import-issues {
+  margin: 0;
+  padding-right: 1.1rem;
+  color: #ffb4ae;
+  font-size: 0.88rem;
+}
+
+.price-import-car-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.price-import-car-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.55rem 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.price-import-car-item.needs-attention {
+  border: 1px solid rgba(248, 81, 73, 0.45);
+}
+
+.price-import-car-item select {
+  min-width: 12rem;
+}
+
+.price-import-badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.price-import-badge--ok { background: rgba(46, 160, 67, 0.2); color: #7ee787; }
+.price-import-badge--likely { background: rgba(210, 153, 34, 0.2); color: #f2cc60; }
+.price-import-badge--warn { background: rgba(248, 81, 73, 0.18); color: #ffaba8; }
+
+.price-import-preview .cms-input,
+.price-import-preview select {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .price-import-row-card__body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .price-import-row-card__head {
+    grid-template-columns: auto 1fr;
+  }
+
+  .price-import-row-card__body {
+    grid-template-columns: 1fr;
+  }
+
+  .price-import-car-item {
+    grid-template-columns: 1fr;
+  }
+}
