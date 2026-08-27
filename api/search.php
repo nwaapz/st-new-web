@@ -6,6 +6,7 @@ require_once dirname(__DIR__) . '/cms/lib/iran-provinces.php';
 require_once dirname(__DIR__) . '/cms/lib/search-text.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
+require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
 
 function search_add_place(array &$places, array &$seen, string $code, string $label): void
 {
@@ -30,6 +31,7 @@ try {
     $pdo = cms_pdo();
     cms_ensure_car_model_factories_schema($pdo);
     cms_ensure_product_car_models_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
     $q = search_normalize((string) ($_GET['q'] ?? ''));
 
     $empty = [
@@ -48,20 +50,21 @@ try {
     $like = '%' . search_like_escape($q) . '%';
     $nameP = search_name_sql('p.name');
     $slugP = search_name_sql('p.slug');
-    $nameC = search_name_sql('c.name');
     $nameM = search_name_sql('m.name');
     $modelNamesSql = cms_product_model_names_sql('p');
     $factoryNamesSql = cms_product_factory_names_sql('p');
+    $categoryNamesSql = cms_product_category_names_sql('p');
     $primaryFactorySql = cms_car_model_primary_factory_id_sql('m');
 
     $products = [];
     try {
         $stmt = $pdo->prepare(
-            "SELECT p.id, p.name, p.slug, p.visual_id, c.name AS category_name, {$factoryNamesSql} AS factory_name
+            "SELECT p.id, p.name, p.slug, p.visual_id, {$categoryNamesSql} AS category_name, {$factoryNamesSql} AS factory_name
              FROM products p
-             JOIN categories c ON c.id = p.category_id
              WHERE p.published = 1
-               AND ({$nameP} LIKE ? OR {$slugP} LIKE ? OR {$nameC} LIKE ? OR {$factoryNamesSql} LIKE ? OR {$modelNamesSql} LIKE ? OR " . search_name_sql('p.visual_id') . " LIKE ?)
+               AND ({$nameP} LIKE ? OR {$slugP} LIKE ? OR "
+            . cms_product_any_category_name_search_sql('p', search_name_sql('c_s.name') . ' LIKE ?')
+            . " OR {$factoryNamesSql} LIKE ? OR {$modelNamesSql} LIKE ? OR " . search_name_sql('p.visual_id') . " LIKE ?)
              ORDER BY p.sort_order ASC, p.name ASC
              LIMIT 5"
         );

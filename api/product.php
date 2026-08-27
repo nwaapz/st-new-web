@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/_common.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
+require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
 
 function product_api_ensure_schema(PDO $pdo): void
 {
@@ -87,6 +88,7 @@ try {
     product_api_ensure_schema($pdo);
     cms_ensure_car_model_factories_schema($pdo);
     cms_ensure_product_car_models_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
     $slug = isset($_GET['slug']) ? trim((string) $_GET['slug']) : '';
     $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 
@@ -108,12 +110,15 @@ try {
     $factoryNamesSql = cms_product_factory_names_sql('p');
     $primaryModelSql = cms_product_primary_car_model_id_sql('p');
     $primaryFactorySql = cms_product_primary_factory_id_sql('p');
+    $primaryCategorySql = cms_product_primary_category_id_sql('p');
+    $categoryNamesSql = cms_product_category_names_sql('p');
+    $primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.category_id, p.name, p.slug, p.visual_id, p.description,
+        'SELECT p.id, ' . $primaryCategorySql . ' AS category_id, p.name, p.slug, p.visual_id, p.description,
                 p.price_text, p.pack_size, p.banner, p.image, p.video_path, p.video_path_low, p.video_poster,
                 p.detail_lead_image, p.shop_display_image, p.sort_order,
                 p.dim_length, p.dim_width, p.dim_height, p.dim_weight,
-                c.name AS category_name, c.slug AS category_slug, c.image AS category_image,
+                ' . $categoryNamesSql . ' AS category_name, c.slug AS category_slug, c.image AS category_image,
                 c.video_path AS category_video_path, c.video_path_low AS category_video_path_low,
                 COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
                 ' . $modelNamesSql . ' AS model_name,
@@ -122,7 +127,7 @@ try {
                 ' . $primaryModelSql . ' AS car_model_id,
                 ' . $primaryFactorySql . ' AS factory_id
          FROM products p
-         JOIN categories c ON c.id = p.category_id
+         ' . $primaryCategoryJoinSql . '
          WHERE ' . implode(' AND ', $where) . '
          LIMIT 1'
     );
@@ -162,6 +167,12 @@ try {
     if ($product['car_model_ids'] !== []) {
         $product['car_model_id'] = (int) $product['car_model_ids'][0];
     }
+    $product['category_ids'] = cms_product_load_category_ids($pdo, $productId);
+    if ($product['category_ids'] !== []) {
+        $product['category_id'] = (int) $product['category_ids'][0];
+    }
+    $carModelCategoriesMap = cms_product_load_car_model_categories_map($pdo, [$productId]);
+    $product['car_model_categories'] = $carModelCategoriesMap[$productId] ?? [];
     $product['rating_avg'] = $rating['rating_avg'] !== null
         ? round((float) $rating['rating_avg'], 1)
         : null;

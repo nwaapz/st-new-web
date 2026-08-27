@@ -22,6 +22,8 @@ try {
 
     if (count($cols) === 0 && count($prodCols) > 0) {
         $log[] = 'Migration already applied (categories have no car_model_id; products have car_model_id).';
+    } elseif (count($cols) === 0 && count($prodCols) === 0) {
+        $log[] = 'Legacy category/car_model_id migration not needed.';
     } else {
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
 
@@ -684,11 +686,24 @@ try {
     require_once __DIR__ . '/lib/product-car-models.php';
     $pcmExists = $pdo->query("SHOW TABLES LIKE 'product_car_models'")->fetchAll();
     $legacyCarModelCol = $pdo->query('SHOW COLUMNS FROM products LIKE \'car_model_id\'')->fetchAll();
-    if (count($pcmExists) === 0 || count($legacyCarModelCol) > 0) {
+    $pcmCategoryCol = count($pcmExists) > 0
+        ? $pdo->query('SHOW COLUMNS FROM product_car_models LIKE \'category_id\'')->fetchAll()
+        : [];
+    if (count($pcmExists) === 0 || count($legacyCarModelCol) > 0 || count($pcmCategoryCol) === 0) {
         cms_ensure_product_car_models_schema($pdo);
-        $log[] = 'Migrated products to multi car-model (product_car_models junction table)';
+        $log[] = 'Migrated products to multi car-model (product_car_models junction table + per-car category)';
     } else {
         $log[] = 'product_car_models already migrated';
+    }
+
+    require_once __DIR__ . '/lib/product-categories.php';
+    $pcatExists = $pdo->query("SHOW TABLES LIKE 'product_categories'")->fetchAll();
+    $legacyCategoryCol = $pdo->query('SHOW COLUMNS FROM products LIKE \'category_id\'')->fetchAll();
+    if (count($pcatExists) === 0 || count($legacyCategoryCol) > 0) {
+        cms_ensure_product_categories_schema($pdo);
+        $log[] = 'Migrated products to multi category (product_categories junction table)';
+    } else {
+        $log[] = 'product_categories already migrated';
     }
 
     $visualCol = $pdo->query("SHOW COLUMNS FROM products LIKE 'visual_id'")->fetchAll();

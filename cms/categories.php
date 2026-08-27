@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/product-categories.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -29,6 +30,7 @@ function category_ensure_schema(PDO $pdo): void
 }
 
 category_ensure_schema($pdo);
+cms_ensure_product_categories_schema($pdo);
 
 if (isset($_GET['edit'])) {
     $stmt = $pdo->prepare('SELECT * FROM categories WHERE id = ?');
@@ -124,7 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $items = $pdo->query(
     'SELECT c.*,
-            (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) AS product_count
+            (SELECT COUNT(*) FROM product_categories pc WHERE pc.category_id = c.id) AS product_count
      FROM categories c
      ORDER BY c.sort_order ASC, c.name ASC'
 )->fetchAll();

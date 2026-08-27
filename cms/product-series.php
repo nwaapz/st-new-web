@@ -4,19 +4,21 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/product-car-models.php';
+require_once __DIR__ . '/lib/product-categories.php';
 
 cms_require_login();
 $pdo = cms_pdo();
 cms_ensure_product_car_models_schema($pdo);
+cms_ensure_product_categories_schema($pdo);
 $edit = null;
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
 $selectedProductIds = [];
 
 $modelNamesSql = cms_product_model_names_sql('p');
+$categoryNamesSql = cms_product_category_names_sql('p');
 $allProducts = $pdo->query(
-    "SELECT p.id, p.name, c.name AS category_name, {$modelNamesSql} AS model_name
+    "SELECT p.id, p.name, {$categoryNamesSql} AS category_name, {$modelNamesSql} AS model_name
      FROM products p
-     JOIN categories c ON c.id = p.category_id
      ORDER BY p.sort_order ASC, p.name ASC"
 )->fetchAll();
 

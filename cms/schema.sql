@@ -4,7 +4,7 @@
 -- Two independent roots for products:
 --   1) Vehicle path: Car model ↔ up to 2 factories (car_model_factories)
 --   2) Product category (standalone)
--- A product links to one or more car_models and one category.
+-- A product links to one or more car_models and one or two categories.
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
@@ -76,7 +76,6 @@ CREATE TABLE IF NOT EXISTS categories (
 
 CREATE TABLE IF NOT EXISTS products (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  category_id INT UNSIGNED NOT NULL,
   name VARCHAR(191) NOT NULL,
   slug VARCHAR(191) NOT NULL,
   visual_id VARCHAR(64) NULL,
@@ -101,19 +100,31 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_prod_slug (slug),
-  UNIQUE KEY uq_prod_visual_id (visual_id),
-  KEY idx_prod_cat (category_id),
-  CONSTRAINT fk_prod_cat FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
+  UNIQUE KEY uq_prod_visual_id (visual_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS product_categories (
+  product_id INT UNSIGNED NOT NULL,
+  category_id INT UNSIGNED NOT NULL,
+  sort_order TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (product_id, category_id),
+  KEY idx_pcat_category (category_id),
+  CONSTRAINT fk_pcat_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE,
+  CONSTRAINT fk_pcat_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS product_car_models (
   product_id INT UNSIGNED NOT NULL,
   car_model_id INT UNSIGNED NOT NULL,
+  -- Optional per-car category override; NULL = use product_categories
+  category_id INT UNSIGNED NULL,
   sort_order INT NOT NULL DEFAULT 0,
   PRIMARY KEY (product_id, car_model_id),
   KEY idx_pcm_model (car_model_id),
+  KEY idx_pcm_category (category_id),
   CONSTRAINT fk_pcm_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE,
-  CONSTRAINT fk_pcm_model FOREIGN KEY (car_model_id) REFERENCES car_models (id) ON DELETE CASCADE
+  CONSTRAINT fk_pcm_model FOREIGN KEY (car_model_id) REFERENCES car_models (id) ON DELETE CASCADE,
+  CONSTRAINT fk_pcm_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS product_images (

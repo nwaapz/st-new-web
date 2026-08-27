@@ -12,6 +12,8 @@ require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 
+require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
+
 require_once dirname(__DIR__) . '/cms/lib/shop-search-intent.php';
 
 
@@ -23,6 +25,8 @@ try {
     cms_ensure_car_model_factories_schema($pdo);
 
     cms_ensure_product_car_models_schema($pdo);
+
+    cms_ensure_product_categories_schema($pdo);
 
     $packExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'pack_size'")->fetchAll();
 
@@ -126,7 +130,7 @@ try {
 
         $src = $pdo->prepare(
 
-            'SELECT category_id FROM products WHERE id = ? AND published = 1'
+            'SELECT id FROM products WHERE id = ? AND published = 1'
 
         );
 
@@ -144,13 +148,11 @@ try {
 
         $params[] = $relatedTo;
 
-        $srcCat = (int) $source['category_id'];
+        $relatedCatSql = cms_product_related_category_filter_sql('p', $relatedTo);
 
-        $where[] = '(p.category_id = ? OR ' . cms_product_related_car_model_filter_sql('p', $relatedTo) . ')';
+        $where[] = '(' . $relatedCatSql . ' OR ' . cms_product_related_car_model_filter_sql('p', $relatedTo) . ')';
 
-        $params[] = $srcCat;
-
-        $orderBy = 'CASE WHEN p.category_id = ' . $srcCat . ' THEN 0 ELSE 1 END ASC, p.sort_order ASC, p.name ASC';
+        $orderBy = 'CASE WHEN ' . $relatedCatSql . ' THEN 0 ELSE 1 END ASC, p.sort_order ASC, p.name ASC';
 
         if ($limit <= 0) {
 
@@ -172,26 +174,34 @@ try {
 
     }
 
-    if ($categoryIds !== []) {
-        $placeholders = implode(',', array_fill(0, count($categoryIds), '?'));
-        $where[] = 'p.category_id IN (' . $placeholders . ')';
+    if ($categoryId > 0) {
+        $categoryIds[] = $categoryId;
+        $categoryIds = array_values(array_unique($categoryIds));
+    }
+    if ($carModelId > 0 && $categoryIds !== []) {
+        // Exact (car, category) pair: per-car override wins, product categories are the fallback.
+        $where[] = cms_product_car_category_pair_filter_sql('p', count($categoryIds));
+        $params[] = $carModelId;
         foreach ($categoryIds as $catId) {
             $params[] = $catId;
         }
-    } elseif ($categoryId > 0) {
-
-        $where[] = 'p.category_id = ?';
-
-        $params[] = $categoryId;
-
-    }
-
-    if ($carModelId > 0) {
-
-        $where[] = cms_product_car_model_filter_sql('p');
-
-        $params[] = $carModelId;
-
+        foreach ($categoryIds as $catId) {
+            $params[] = $catId;
+        }
+    } else {
+        if ($categoryIds !== []) {
+            $where[] = cms_product_effective_category_in_filter_sql('p', count($categoryIds));
+            foreach ($categoryIds as $catId) {
+                $params[] = $catId;
+            }
+            foreach ($categoryIds as $catId) {
+                $params[] = $catId;
+            }
+        }
+        if ($carModelId > 0) {
+            $where[] = cms_product_car_model_filter_sql('p');
+            $params[] = $carModelId;
+        }
     }
 
     if ($factoryId > 0) {
@@ -220,7 +230,7 @@ try {
 
             . search_name_sql('p.visual_id') . ' LIKE ? OR '
 
-            . search_name_sql('c.name') . ' LIKE ? OR '
+            . cms_product_any_category_name_search_sql('p', search_name_sql('c_s.name') . ' LIKE ?') . ' OR '
 
             . $modelNamesSqlForQ . ' LIKE ?)';
 
@@ -250,7 +260,7 @@ try {
     $totalPages = 1;
     if ($usePaginated) {
         $countSql = 'SELECT COUNT(*) FROM products p ' . $seriesJoin
-            . ' JOIN categories c ON c.id = p.category_id WHERE ' . $whereSql;
+            . ' WHERE ' . $whereSql;
         $countStmt = $pdo->prepare($countSql);
         $countStmt->execute($params);
         $total = (int) $countStmt->fetchColumn();
@@ -268,13 +278,19 @@ try {
 
     $primaryFactorySql = cms_product_primary_factory_id_sql('p');
 
-    $sql = 'SELECT p.id, p.category_id, p.name, p.slug, p.visual_id, p.description,
+    $primaryCategorySql = cms_product_primary_category_id_sql('p');
+
+    $categoryNamesSql = cms_product_category_names_sql('p');
+
+    $primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
+
+    $sql = 'SELECT p.id, ' . $primaryCategorySql . ' AS category_id, p.name, p.slug, p.visual_id, p.description,
 
                    p.price_text, p.pack_size, p.banner, p.image, p.shop_display_image, p.sort_order,
 
                    COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
 
-                   c.name AS category_name,
+                   ' . $categoryNamesSql . ' AS category_name,
 
                    c.image AS category_image,
 
@@ -292,7 +308,7 @@ try {
 
             ' . $seriesJoin . '
 
-            JOIN categories c ON c.id = p.category_id
+            ' . $primaryCategoryJoinSql . '
 
             WHERE ' . $whereSql . '
 
@@ -323,6 +339,10 @@ try {
 
     $carModelMap = cms_product_load_car_model_ids_map($pdo, $productIds);
 
+    $categoryMap = cms_product_load_category_ids_map($pdo, $productIds);
+
+    $carModelCategoryMap = cms_product_load_car_model_categories_map($pdo, $productIds);
+
     foreach ($items as &$item) {
 
         $pid = (int) $item['id'];
@@ -334,6 +354,16 @@ try {
             $item['car_model_id'] = (int) $item['car_model_ids'][0];
 
         }
+
+        $item['category_ids'] = $categoryMap[$pid] ?? [];
+
+        if (!empty($item['category_ids'])) {
+
+            $item['category_id'] = (int) $item['category_ids'][0];
+
+        }
+
+        $item['car_model_categories'] = $carModelCategoryMap[$pid] ?? [];
 
     }
 

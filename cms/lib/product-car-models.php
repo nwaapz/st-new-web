@@ -87,8 +87,27 @@ function cms_product_load_car_model_ids(PDO $pdo, int $productId): array
     return $ids;
 }
 
-/** @param list<int|string> $carModelIds */
-function cms_product_save_car_model_ids(PDO $pdo, int $productId, array $carModelIds): void
+/** @return array<int, int|null> car_model_id => category override id (null = product categories) */
+function cms_product_load_car_model_categories(PDO $pdo, int $productId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT car_model_id, category_id FROM product_car_models
+         WHERE product_id = ?
+         ORDER BY sort_order ASC, car_model_id ASC'
+    );
+    $stmt->execute([$productId]);
+    $map = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $map[(int) $row['car_model_id']] = $row['category_id'] !== null ? (int) $row['category_id'] : null;
+    }
+    return $map;
+}
+
+/**
+ * @param list<int|string> $carModelIds
+ * @param array<int|string, int|string> $categoryByModel car_model_id => category override id (0/'' = none)
+ */
+function cms_product_save_car_model_ids(PDO $pdo, int $productId, array $carModelIds, array $categoryByModel = []): void
 {
     $unique = [];
     foreach ($carModelIds as $carModelId) {
@@ -103,10 +122,11 @@ function cms_product_save_car_model_ids(PDO $pdo, int $productId, array $carMode
 
     $pdo->prepare('DELETE FROM product_car_models WHERE product_id = ?')->execute([$productId]);
     $stmt = $pdo->prepare(
-        'INSERT INTO product_car_models (product_id, car_model_id, sort_order) VALUES (?, ?, ?)'
+        'INSERT INTO product_car_models (product_id, car_model_id, category_id, sort_order) VALUES (?, ?, ?, ?)'
     );
     foreach ($unique as $sortOrder => $carModelId) {
-        $stmt->execute([$productId, $carModelId, $sortOrder]);
+        $categoryId = (int) ($categoryByModel[$carModelId] ?? 0);
+        $stmt->execute([$productId, $carModelId, $categoryId > 0 ? $categoryId : null, $sortOrder]);
     }
 }
 
@@ -132,6 +152,35 @@ function cms_product_load_car_model_ids_map(PDO $pdo, array $productIds): array
             $map[$pid] = [];
         }
         $map[$pid][] = (int) $row['car_model_id'];
+    }
+    return $map;
+}
+
+/** @return array<int, list<array{car_model_id: int, category_id: int}>> product_id => per-car category overrides */
+function cms_product_load_car_model_categories_map(PDO $pdo, array $productIds): array
+{
+    $productIds = array_values(array_unique(array_filter(array_map('intval', $productIds), static fn (int $id): bool => $id > 0)));
+    if ($productIds === []) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT product_id, car_model_id, category_id
+         FROM product_car_models
+         WHERE product_id IN ({$placeholders}) AND category_id IS NOT NULL
+         ORDER BY product_id ASC, sort_order ASC, car_model_id ASC"
+    );
+    $stmt->execute($productIds);
+    $map = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $pid = (int) $row['product_id'];
+        if (!isset($map[$pid])) {
+            $map[$pid] = [];
+        }
+        $map[$pid][] = [
+            'car_model_id' => (int) $row['car_model_id'],
+            'category_id' => (int) $row['category_id'],
+        ];
     }
     return $map;
 }
@@ -174,6 +223,20 @@ function cms_ensure_product_car_models_schema(PDO $pdo): void
         }
         $pdo->exec('ALTER TABLE products DROP COLUMN car_model_id');
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+    }
+
+    // Optional per-car category override (falls back to product_categories when NULL).
+    $categoryCol = $pdo->query('SHOW COLUMNS FROM product_car_models LIKE \'category_id\'')->fetchAll();
+    if (count($categoryCol) === 0) {
+        $pdo->exec('ALTER TABLE product_car_models ADD COLUMN category_id INT UNSIGNED NULL AFTER car_model_id');
+        try {
+            $pdo->exec(
+                'ALTER TABLE product_car_models ADD CONSTRAINT fk_pcm_category
+                 FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE SET NULL'
+            );
+        } catch (Throwable $e) {
+            /* exists */
+        }
     }
 
     $ready = true;

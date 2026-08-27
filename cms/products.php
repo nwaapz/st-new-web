@@ -5,12 +5,14 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/car-model-factories.php';
 require_once __DIR__ . '/lib/product-car-models.php';
+require_once __DIR__ . '/lib/product-categories.php';
 require_once __DIR__ . '/lib/search-text.php';
 
 cms_require_login();
 $pdo = cms_pdo();
 cms_ensure_car_model_factories_schema($pdo);
 cms_ensure_product_car_models_schema($pdo);
+cms_ensure_product_categories_schema($pdo);
 
 const PRODUCT_GALLERY_MAX = 12;
 const PRODUCTS_PAGE_SIZE = 10;
@@ -211,6 +213,8 @@ product_ensure_detail_schema($pdo);
 $edit = null;
 $gallery = [];
 $selectedCarModelIds = [];
+$selectedCategoryIds = [];
+$carModelCategoryMap = [];
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
 $searchQ = trim((string) ($_GET['q'] ?? ''));
 $listPage = max(1, (int) ($_GET['page'] ?? 1));
@@ -239,6 +243,8 @@ if (isset($_GET['edit'])) {
     $showForm = true;
     $gallery = product_load_gallery($pdo, (int) $edit['id']);
     $selectedCarModelIds = cms_product_load_car_model_ids($pdo, (int) $edit['id']);
+    $selectedCategoryIds = cms_product_load_category_ids($pdo, (int) $edit['id']);
+    $carModelCategoryMap = cms_product_load_car_model_categories($pdo, (int) $edit['id']);
 }
 
 if (isset($_GET['delete'])) {
@@ -256,9 +262,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $returnQ = trim((string) ($_POST['return_q'] ?? ''));
     $returnPage = max(1, (int) ($_POST['return_page'] ?? 1));
     try {
-        $categoryId = (int) ($_POST['category_id'] ?? 0);
+        $categoryId1 = (int) ($_POST['category_id_1'] ?? 0);
+        $categoryId2 = (int) ($_POST['category_id_2'] ?? 0);
+        $categoryIds = array_values(array_filter([$categoryId1, $categoryId2], static fn (int $v): bool => $v > 0));
         $carModelIds = isset($_POST['car_model_ids']) && is_array($_POST['car_model_ids'])
             ? $_POST['car_model_ids']
+            : [];
+        $carModelCategoryIds = isset($_POST['car_model_category_ids']) && is_array($_POST['car_model_category_ids'])
+            ? $_POST['car_model_category_ids']
             : [];
         $name = trim((string) ($_POST['name'] ?? ''));
         $slug = trim((string) ($_POST['slug'] ?? ''));
@@ -310,7 +321,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $collectedGallery = product_collect_gallery_from_post($galleryCount, $imageUploadOptions);
 
-        if ($categoryId <= 0 || $name === '') {
+        if ($categoryIds === [] || $name === '') {
             throw new RuntimeException('دسته محصول و نام الزامی است');
         }
         $validatedCarModelIds = [];
@@ -349,12 +360,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE products SET category_id=?, name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
+                'UPDATE products SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
                  video_path=?, video_path_low=?, video_poster=?, detail_lead_image=?, shop_display_image=?, skip_image_auto_frame=?,
                  dim_length=?, dim_width=?, dim_height=?, dim_weight=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
-                $categoryId, $name, $slug, $visualId,
+                $name, $slug, $visualId,
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
                 $packSize,
@@ -375,13 +386,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productId = $id;
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO products (category_id, name, slug, visual_id, description, price_text, pack_size, banner, image,
+                'INSERT INTO products (name, slug, visual_id, description, price_text, pack_size, banner, image,
                  video_path, video_path_low, video_poster, detail_lead_image, shop_display_image, skip_image_auto_frame,
                  dim_length, dim_width, dim_height, dim_weight, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
-                $categoryId, $name, $slug, $visualId,
+                $name, $slug, $visualId,
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
                 $packSize,
@@ -402,7 +413,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productId = (int) $pdo->lastInsertId();
         }
 
-        cms_product_save_car_model_ids($pdo, $productId, $validatedCarModelIds);
+        cms_product_save_category_ids($pdo, $productId, $categoryIds);
+        cms_product_save_car_model_ids($pdo, $productId, $validatedCarModelIds, $carModelCategoryIds);
 
         $persistGallery = array_values(array_filter(
             $collectedGallery,
@@ -443,6 +455,8 @@ if ($showForm && isset($_GET['gallery_extra']) && $edit) {
 
 $productModelNamesSql = cms_product_model_names_sql('p');
 $productFactoryNamesSql = cms_product_factory_names_sql('p');
+$productCategoryNamesSql = cms_product_category_names_sql('p');
+$primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
 $items = [];
 $totalRows = 0;
 $totalPages = 1;
@@ -460,7 +474,7 @@ if (!$showForm) {
     $whereSql = implode(' AND ', $where);
 
     $countStmt = $pdo->prepare(
-        "SELECT COUNT(*) FROM products p JOIN categories c ON c.id = p.category_id WHERE {$whereSql}"
+        "SELECT COUNT(*) FROM products p WHERE {$whereSql}"
     );
     $countStmt->execute($listParams);
     $totalRows = (int) $countStmt->fetchColumn();
@@ -471,9 +485,9 @@ if (!$showForm) {
     $offset = ($listPage - 1) * PRODUCTS_PAGE_SIZE;
 
     $listStmt = $pdo->prepare(
-        "SELECT p.*, c.name AS category_name, c.image AS category_image, {$productModelNamesSql} AS model_name, {$productFactoryNamesSql} AS factory_name
+        "SELECT p.*, {$productCategoryNamesSql} AS category_name, c.image AS category_image, {$productModelNamesSql} AS model_name, {$productFactoryNamesSql} AS factory_name
          FROM products p
-         JOIN categories c ON c.id = p.category_id
+         {$primaryCategoryJoinSql}
          WHERE {$whereSql}
          ORDER BY p.sort_order ASC, p.name ASC
          LIMIT " . PRODUCTS_PAGE_SIZE . ' OFFSET ' . (int) $offset
@@ -497,7 +511,7 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
 <div class="cms-page-head">
   <div>
     <h1 style="margin:0">محصولات</h1>
-    <p class="cms-muted" style="margin:.35rem 0 0">هر محصول: یک یا چند مدل خودرو + دسته محصول</p>
+    <p class="cms-muted" style="margin:.35rem 0 0">هر محصول: یک یا چند مدل خودرو + یک یا دو دسته محصول</p>
   </div>
   <?php if (!$showForm): ?>
     <a class="cms-btn" href="products.php?new=1">افزودن محصول</a>
@@ -538,6 +552,19 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
             >
               <input type="checkbox" name="car_model_ids[]" value="<?= $mid ?>" <?= in_array($mid, $selectedCarModelIds, true) ? 'checked' : '' ?>>
               <span><?= cms_h(($m['factory_name'] ?? '') . ' / ' . $m['name']) ?></span>
+              <select
+                class="cms-select"
+                name="car_model_category_ids[<?= $mid ?>]"
+                style="margin-inline-start:auto;max-width:12rem;padding:.15rem .4rem;font-size:.8rem"
+                aria-label="دسته این مدل (اختیاری)"
+              >
+                <option value="">پیش‌فرض (دسته‌های محصول)</option>
+                <?php foreach ($categories as $c): ?>
+                  <option value="<?= (int) $c['id'] ?>" <?= (int) ($carModelCategoryMap[$mid] ?? 0) === (int) $c['id'] ? 'selected' : '' ?>>
+                    <?= cms_h($c['name']) ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
             </label>
           <?php endforeach; ?>
         </div>
@@ -546,11 +573,21 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   </fieldset>
 
   <div class="cms-grid-2">
-    <label class="cms-field"><span class="cms-label">دسته محصول</span>
-      <select class="cms-select" name="category_id" required>
+    <label class="cms-field"><span class="cms-label">دسته اول (الزامی)</span>
+      <select class="cms-select" name="category_id_1" required>
         <option value="">انتخاب…</option>
         <?php foreach ($categories as $c): ?>
-          <option value="<?= (int) $c['id'] ?>" <?= (int) ($edit['category_id'] ?? 0) === (int) $c['id'] ? 'selected' : '' ?>>
+          <option value="<?= (int) $c['id'] ?>" <?= (int) ($selectedCategoryIds[0] ?? 0) === (int) $c['id'] ? 'selected' : '' ?>>
+            <?= cms_h($c['name']) ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+    </label>
+    <label class="cms-field"><span class="cms-label">دسته دوم (اختیاری)</span>
+      <select class="cms-select" name="category_id_2">
+        <option value="">—</option>
+        <?php foreach ($categories as $c): ?>
+          <option value="<?= (int) $c['id'] ?>" <?= (int) ($selectedCategoryIds[1] ?? 0) === (int) $c['id'] ? 'selected' : '' ?>>
             <?= cms_h($c['name']) ?>
           </option>
         <?php endforeach; ?>
