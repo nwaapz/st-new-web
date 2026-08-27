@@ -604,7 +604,7 @@ function price_import_row_issues(
     $issues = [];
     $action = (string) ($row['action'] ?? 'create');
 
-    if (trim((string) ($row['name'] ?? '')) === '') {
+    if (trim((string) ($row['name'] ?? '')) === '' && ($row['action'] ?? '') === 'create') {
         $issues[] = 'نام محصول خالی است';
     }
     if (trim((string) ($row['price_text'] ?? '')) === '') {
@@ -669,6 +669,67 @@ function price_import_car_names_for_ids(array $carModelIds, array $carModels): s
         }
     }
     return implode(' · ', $names);
+}
+
+/** @param list<array<string, mixed>> $rows */
+function price_import_refresh_session_rows(PDO $pdo, array $rows): array
+{
+    if ($rows === []) {
+        return $rows;
+    }
+
+    cms_ensure_product_car_models_schema($pdo);
+    $carModels = price_import_load_car_models($pdo);
+    $productIds = [];
+
+    foreach ($rows as &$row) {
+        $productId = (int) ($row['existing_product_id'] ?? 0);
+        if ($productId <= 0 && trim((string) ($row['visual_id'] ?? '')) !== '') {
+            $existing = price_import_find_product_by_visual_id($pdo, (string) $row['visual_id']);
+            if ($existing) {
+                $productId = (int) $existing['id'];
+                $row['existing_product_id'] = $productId;
+                $row['action'] = 'update';
+                $row['existing_name'] = (string) $existing['name'];
+                $row['existing_price_text'] = (string) ($existing['price_text'] ?? '');
+                $row['existing_pack_size'] = $existing['pack_size'] !== null ? (int) $existing['pack_size'] : null;
+                $row['category_id'] = null;
+            }
+        }
+        if ($productId > 0) {
+            $productIds[] = $productId;
+        }
+    }
+    unset($row);
+
+    $carIdsMap = cms_product_load_car_model_ids_map($pdo, array_values(array_unique($productIds)));
+    $refreshed = [];
+
+    foreach ($rows as $row) {
+        $productId = (int) ($row['existing_product_id'] ?? 0);
+        $existingCarIds = $productId > 0 ? ($carIdsMap[$productId] ?? []) : [];
+        $skipCars = $productId > 0 && $existingCarIds !== [];
+
+        $row['skip_cars'] = $skipCars;
+        if ($skipCars) {
+            $row['existing_car_ids'] = $existingCarIds;
+            $row['existing_car_names'] = price_import_car_names_for_ids($existingCarIds, $carModels);
+            $row['car_matches'] = [];
+            $row['car_overrides'] = [];
+            $row['extra_cars'] = [];
+            $row['car_category_map'] = [];
+        }
+
+        $carMatches = is_array($row['car_matches'] ?? null) ? $row['car_matches'] : [];
+        $overrides = is_array($row['car_overrides'] ?? null) ? $row['car_overrides'] : [];
+        $extraCars = is_array($row['extra_cars'] ?? null) ? $row['extra_cars'] : [];
+        $issues = price_import_row_issues($row, $carMatches, $overrides, $extraCars);
+        $row['ready'] = $issues['ready'];
+        $row['issues'] = $issues['issues'];
+        $refreshed[] = $row;
+    }
+
+    return $refreshed;
 }
 
 /** @param list<array<string, mixed>> $parsedRows */

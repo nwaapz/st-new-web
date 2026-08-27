@@ -2335,6 +2335,10 @@ a.cms-kpi:hover {
   overflow: hidden;
 }
 
+.price-import-row-card.is-filtered-out {
+  display: none !important;
+}
+
 .price-import-row-card.is-ready {
   border-color: rgba(46, 160, 67, 0.35);
 }

@@ -92,6 +92,11 @@ function price_import_page_handle_apply(PDO $pdo, array $session, array $postedR
         $session = price_import_session_remove_rows($session, $result['applied_indices']);
     }
 
+    $session['preview']['rows'] = price_import_refresh_session_rows(
+        $pdo,
+        is_array($session['preview']['rows'] ?? null) ? $session['preview']['rows'] : []
+    );
+
     return [
         'session' => $session,
         'result' => $result,
@@ -261,6 +266,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $session = $_SESSION[PRICE_IMPORT_SESSION_KEY] ?? null;
 $preview = is_array($session) ? ($session['preview'] ?? null) : null;
 $rows = is_array($preview) ? ($preview['rows'] ?? []) : [];
+if ($rows !== []) {
+    $rows = price_import_refresh_session_rows($pdo, $rows);
+    if (is_array($session)) {
+        $_SESSION[PRICE_IMPORT_SESSION_KEY]['preview']['rows'] = $rows;
+    }
+}
 $categories = price_import_load_categories($pdo);
 $carModels = price_import_load_car_models($pdo);
 $sourceName = is_array($session) ? (string) ($session['source_name'] ?? '') : '';
@@ -540,11 +551,10 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
   (function () {
     var toggle = document.getElementById('price-import-show-review');
     if (toggle) {
-      var cards = document.querySelectorAll('.price-import-row-card');
       function applyFilter() {
-        cards.forEach(function (card) {
-          var needsReview = card.getAttribute('data-ready') !== '1';
-          card.style.display = toggle.checked && !needsReview ? 'none' : '';
+        document.querySelectorAll('.price-import-row-card').forEach(function (card) {
+          var isReady = card.getAttribute('data-ready') === '1';
+          card.classList.toggle('is-filtered-out', toggle.checked && isReady);
         });
       }
       toggle.addEventListener('change', applyFilter);
@@ -573,7 +583,9 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
       }
     }
 
-    if (extraTemplate) {
+    if (!extraTemplate) {
+      return;
+    }
 
     function nextExtraIndex(list) {
       var maxIdx = -1;
@@ -605,11 +617,11 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         replaceExtraCarFieldNames(clone, rowIndex, extraIdx);
         var removeBtn = clone.querySelector('.price-import-remove-car');
         if (removeBtn) bindRemove(removeBtn);
-        var picker = clone.querySelector('[data-cms-check-list-filter]');
         list.appendChild(clone);
+        var picker = list.querySelector('.price-import-car-item--extra:last-child [data-cms-check-list-filter]');
         if (picker) initCarPicker(picker);
       });
-    }
+    });
   })();
   </script>
 <?php endif; ?>
