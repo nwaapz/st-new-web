@@ -115,6 +115,40 @@ function price_import_page_store_session(array $session): int
     return $remaining;
 }
 
+function price_import_render_car_picker(string $fieldName, array $carModels, ?int $selectedId = null): void
+{
+    ?>
+    <div class="cms-check-list-filter price-import-car-picker" data-cms-check-list-filter>
+      <input
+        type="search"
+        class="cms-input cms-check-list-filter__input"
+        placeholder="جستجو کارخانه یا مدل…"
+        autocomplete="off"
+        aria-label="جستجو مدل خودرو"
+      >
+      <p class="cms-check-list-filter__empty cms-muted" hidden>موردی یافت نشد</p>
+      <div class="cms-check-list">
+        <?php foreach ($carModels as $opt):
+            $optId = (int) ($opt['id'] ?? 0);
+            if ($optId <= 0) {
+                continue;
+            }
+            $searchHaystack = trim((string) (($opt['factory_name'] ?? '') . ' ' . ($opt['name'] ?? '')));
+            $checked = $selectedId !== null && $selectedId === $optId ? 'checked' : '';
+            ?>
+          <label
+            class="cms-check cms-check-list__item"
+            data-cms-check-search="<?= cms_h($searchHaystack) ?>"
+          >
+            <input type="radio" name="<?= cms_h($fieldName) ?>" value="<?= $optId ?>" <?= $checked ?>>
+            <span><?= cms_h(price_import_car_model_label($opt)) ?></span>
+          </label>
+        <?php endforeach; ?>
+      </div>
+    </div>
+    <?php
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
     $applyOneIndex = isset($_POST['apply_row']) && $_POST['apply_row'] !== ''
@@ -434,21 +468,19 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                     <div class="price-import-car-item__head">
                       <span class="price-import-badge <?= $badgeClass ?>"><?= cms_h($confidenceLabel) ?></span>
                       <span class="price-import-car-item__token"><?= cms_h($token) ?></span>
-                      <?php if ($confidence === 'certain' || $confidence === 'likely'): ?>
-                        <span class="cms-muted">→ <?= cms_h((string) ($match['car_model_name'] ?? '')) ?></span>
-                      <?php endif; ?>
                     </div>
                     <div class="price-import-car-item__controls">
-                      <?php if ($needsCarPick): ?>
-                        <select class="cms-input price-import-car-select" name="rows[<?= $index ?>][car_pick][<?= cms_h($norm) ?>]" aria-label="انتخاب خودرو">
-                          <option value="">— انتخاب خودرو —</option>
-                          <?php foreach ($carModels as $opt):
-                              $optId = (int) ($opt['id'] ?? 0);
-                              ?>
-                            <option value="<?= $optId ?>"><?= cms_h(price_import_car_model_label($opt)) ?></option>
-                          <?php endforeach; ?>
-                        </select>
-                      <?php endif; ?>
+                      <?php
+                      $pickFieldName = 'rows[' . $index . '][car_pick][' . $norm . ']';
+                      $selectedCarId = null;
+                      if ($confidence === 'certain' || $confidence === 'likely') {
+                          $selectedCarId = (int) ($match['car_model_id'] ?? 0);
+                          if ($selectedCarId <= 0) {
+                              $selectedCarId = null;
+                          }
+                      }
+                      price_import_render_car_picker($pickFieldName, $carModels, $selectedCarId);
+                      ?>
                       <select
                         class="cms-input price-import-category-select"
                         name="rows[<?= $index ?>][car_category][<?= cms_h($norm) ?>]"
@@ -490,14 +522,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         <button type="button" class="cms-btn price-import-remove-car" aria-label="حذف خودرو">حذف</button>
       </div>
       <div class="price-import-car-item__controls">
-        <select class="cms-input price-import-car-select" data-name="rows[__INDEX__][extra_cars][__EXTRA_IDX__][car_id]" aria-label="انتخاب خودرو">
-          <option value="">— انتخاب خودرو —</option>
-          <?php foreach ($carModels as $opt):
-              $optId = (int) ($opt['id'] ?? 0);
-              ?>
-            <option value="<?= $optId ?>"><?= cms_h(price_import_car_model_label($opt)) ?></option>
-          <?php endforeach; ?>
-        </select>
+        <?php price_import_render_car_picker('rows[__INDEX__][extra_cars][__EXTRA_IDX__][car_id]', $carModels); ?>
         <select class="cms-input price-import-category-select" data-name="rows[__INDEX__][extra_cars][__EXTRA_IDX__][category_id]" aria-label="دسته این خودرو (اختیاری)">
           <option value="">پیش‌فرض (دسته محصول)</option>
           <?php foreach ($categories as $cat):
@@ -527,7 +552,28 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     }
 
     var extraTemplate = document.getElementById('price-import-extra-car-template');
-    if (!extraTemplate) return;
+
+    function replaceExtraCarFieldNames(root, rowIndex, extraIdx) {
+      root.querySelectorAll('[data-name]').forEach(function (el) {
+        el.name = el.getAttribute('data-name')
+          .replace('__INDEX__', rowIndex)
+          .replace('__EXTRA_IDX__', String(extraIdx));
+        el.removeAttribute('data-name');
+      });
+      root.querySelectorAll('input[type="radio"][name*="__INDEX__"]').forEach(function (el) {
+        el.name = el.name
+          .replace('__INDEX__', rowIndex)
+          .replace('__EXTRA_IDX__', String(extraIdx));
+      });
+    }
+
+    function initCarPicker(root) {
+      if (window.cmsInitCheckListFilter) {
+        window.cmsInitCheckListFilter(root);
+      }
+    }
+
+    if (extraTemplate) {
 
     function nextExtraIndex(list) {
       var maxIdx = -1;
@@ -556,17 +602,14 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         if (!list) return;
         var extraIdx = nextExtraIndex(list);
         var clone = extraTemplate.content.cloneNode(true);
-        clone.querySelectorAll('[data-name]').forEach(function (el) {
-          el.name = el.getAttribute('data-name')
-            .replace('__INDEX__', rowIndex)
-            .replace('__EXTRA_IDX__', String(extraIdx));
-          el.removeAttribute('data-name');
-        });
+        replaceExtraCarFieldNames(clone, rowIndex, extraIdx);
         var removeBtn = clone.querySelector('.price-import-remove-car');
         if (removeBtn) bindRemove(removeBtn);
+        var picker = clone.querySelector('[data-cms-check-list-filter]');
         list.appendChild(clone);
+        if (picker) initCarPicker(picker);
       });
-    });
+    }
   })();
   </script>
 <?php endif; ?>

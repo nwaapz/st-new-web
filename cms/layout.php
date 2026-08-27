@@ -161,7 +161,7 @@ function cms_layout_end(): void
     echo '<div class="cms-media-grid" id="cms-media-grid"></div>';
     echo '</div></div>';
     echo '<script src="assets/cms-upload.js?v=3"></script>';
-    echo '<script src="assets/cms-check-list-filter.js?v=2"></script>';
+    echo '<script src="assets/cms-check-list-filter.js?v=3"></script>';
     echo '</body></html>';
 }
 

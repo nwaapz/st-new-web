@@ -48,11 +48,11 @@
     var visibleCount = 0;
 
     items.forEach(function (item) {
-      var checkbox = item.querySelector('input[type="checkbox"]');
+      var inputEl = item.querySelector('input[type="checkbox"], input[type="radio"]');
       var haystack = normalizeQuery(
         item.getAttribute("data-cms-check-search") || item.textContent || ""
       );
-      var checked = checkbox && checkbox.checked;
+      var checked = inputEl && inputEl.checked;
       var show = query === "" || checked || haystack.indexOf(query) !== -1;
 
       item.hidden = !show;
@@ -80,7 +80,7 @@
 
     list.addEventListener("change", function (event) {
       var target = event.target;
-      if (target && target.matches('input[type="checkbox"]')) {
+      if (target && target.matches('input[type="checkbox"], input[type="radio"]')) {
         applyFilter(root);
       }
     });
@@ -91,6 +91,8 @@
   function initAll() {
     document.querySelectorAll("[data-cms-check-list-filter]").forEach(initFilter);
   }
+
+  window.cmsInitCheckListFilter = initFilter;
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initAll);
