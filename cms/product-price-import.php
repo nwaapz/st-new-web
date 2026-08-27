@@ -359,7 +359,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         $skipCars = !empty($row['skip_cars']);
         $needsCarSetup = !empty($row['needs_car_setup']);
         ?>
-        <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>" data-needs-car-setup="<?= $needsCarSetup ? '1' : '0' ?>" data-row-index="<?= $index ?>">
+        <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>" data-needs-car-setup="<?= $needsCarSetup ? '1' : '0' ?>" data-row-index="<?= $index ?>" data-action="<?= cms_h($action) ?>" data-skip-cars="<?= $skipCars ? '1' : '0' ?>">
           <header class="price-import-row-card__head">
             <label class="cms-check" title="اعمال این ردیف">
               <input type="checkbox" name="rows[<?= $index ?>][include]" value="1" <?= !isset($row['include']) || !empty($row['include']) ? 'checked' : '' ?>>
@@ -375,9 +375,9 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
               </div>
             </div>
             <?php if ($ready): ?>
-              <span class="price-import-badge price-import-badge--ok">آماده</span>
+              <span class="price-import-badge price-import-badge--ok price-import-row-ready-badge">آماده</span>
             <?php else: ?>
-              <span class="price-import-badge price-import-badge--warn">نیاز به بررسی</span>
+              <span class="price-import-badge price-import-badge--warn price-import-row-ready-badge">نیاز به بررسی</span>
             <?php endif; ?>
             <?php if ($skipCars): ?>
               <span class="price-import-badge price-import-badge--car-done">خودرو ثبت شده</span>
@@ -480,7 +480,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                       'unmatched' => 'نامشخص',
                   ][$confidence] ?? $confidence;
                   ?>
-                  <div class="price-import-car-item<?= $needsCarPick ? ' needs-attention' : '' ?>">
+                  <div class="price-import-car-item<?= $needsCarPick ? ' needs-attention' : '' ?>"<?= $needsCarPick ? ' data-requires-car-pick="1"' : '' ?>>
                     <div class="price-import-car-item__head">
                       <span class="price-import-badge <?= $badgeClass ?>"><?= cms_h($confidenceLabel) ?></span>
                       <span class="price-import-car-item__token"><?= cms_h($token) ?></span>
@@ -554,6 +554,95 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
   <script>
   (function () {
+    function rowFieldValue(card, suffix) {
+      var index = card.getAttribute('data-row-index') || '0';
+      var el = card.querySelector('[name="rows[' + index + ']' + suffix + '"]');
+      return el ? String(el.value || '').trim() : '';
+    }
+
+    function countConfirmedCars(card) {
+      var count = 0;
+      card.querySelectorAll('.price-import-car-item input[type="radio"]:checked').forEach(function () {
+        count += 1;
+      });
+      return count;
+    }
+
+    function allRequiredCarsPicked(card) {
+      var required = card.querySelectorAll(
+        '.price-import-car-item[data-requires-car-pick="1"], .price-import-car-item--extra'
+      );
+      for (var i = 0; i < required.length; i += 1) {
+        if (!required[i].querySelector('input[type="radio"]:checked')) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function evaluateRowReadiness(card) {
+      if (!card) {
+        return false;
+      }
+
+      var action = card.getAttribute('data-action') || 'create';
+      var skipCars = card.getAttribute('data-skip-cars') === '1';
+
+      if (!rowFieldValue(card, '[price_text]')) {
+        return false;
+      }
+
+      if (action === 'create') {
+        if (!rowFieldValue(card, '[name]')) {
+          return false;
+        }
+        if (!(parseInt(rowFieldValue(card, '[pack_size]'), 10) > 0)) {
+          return false;
+        }
+        if (!(parseInt(rowFieldValue(card, '[category_id]'), 10) > 0)) {
+          return false;
+        }
+        if (!skipCars) {
+          if (!allRequiredCarsPicked(card) || countConfirmedCars(card) === 0) {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    }
+
+    function updateRowReadyUi(card) {
+      var ready = evaluateRowReadiness(card);
+      card.setAttribute('data-ready', ready ? '1' : '0');
+      card.classList.toggle('is-ready', ready);
+      card.classList.toggle('needs-review', !ready);
+
+      var saveBtn = card.querySelector('.price-import-save-row');
+      if (saveBtn) {
+        saveBtn.disabled = !ready;
+      }
+
+      var badge = card.querySelector('.price-import-row-ready-badge');
+      if (badge) {
+        badge.textContent = ready ? 'آماده' : 'نیاز به بررسی';
+        badge.classList.toggle('price-import-badge--ok', ready);
+        badge.classList.toggle('price-import-badge--warn', !ready);
+      }
+    }
+
+    function bindRowReadiness(card) {
+      card.addEventListener('input', function () {
+        updateRowReadyUi(card);
+      });
+      card.addEventListener('change', function () {
+        updateRowReadyUi(card);
+      });
+      updateRowReadyUi(card);
+    }
+
+    document.querySelectorAll('.price-import-row-card').forEach(bindRowReadiness);
+
     var toggle = document.getElementById('price-import-show-car-setup');
     if (toggle) {
       function applyFilter() {
@@ -606,7 +695,9 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     function bindRemove(btn) {
       btn.addEventListener('click', function () {
         var item = btn.closest('.price-import-car-item--extra');
+        var card = btn.closest('.price-import-row-card');
         if (item) item.remove();
+        if (card) updateRowReadyUi(card);
       });
     }
 
@@ -625,6 +716,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         list.appendChild(clone);
         var picker = list.querySelector('.price-import-car-item--extra:last-child [data-cms-check-list-filter]');
         if (picker) initCarPicker(picker);
+        updateRowReadyUi(card);
       });
     });
   })();
