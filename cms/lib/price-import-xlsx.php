@@ -61,7 +61,7 @@ function price_import_xlsx_read_shared_strings_from_path(string $path): array
     return $strings;
 }
 
-function price_import_xlsx_find_first_sheet_from_path(string $path): string|false
+function price_import_xlsx_find_first_sheet_from_path(string $path)
 {
     if (class_exists('ZipArchive')) {
         $zip = new ZipArchive();
@@ -152,7 +152,7 @@ function price_import_xlsx_col_index(string $cellRef): int
 }
 
 /** @param list<string> $sharedStrings */
-function price_import_xlsx_cell_value(SimpleXMLElement $cell, array $sharedStrings): mixed
+function price_import_xlsx_cell_value(SimpleXMLElement $cell, array $sharedStrings)
 {
     $type = (string) ($cell['t'] ?? '');
     if ($type === 'inlineStr') {
@@ -170,7 +170,7 @@ function price_import_xlsx_cell_value(SimpleXMLElement $cell, array $sharedStrin
         return $raw === '1';
     }
     if (is_numeric($raw)) {
-        return str_contains($raw, '.') ? (float) $raw : (int) $raw;
+        return strpos($raw, '.') !== false ? (float) $raw : (int) $raw;
     }
     return $raw;
 }

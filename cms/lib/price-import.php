@@ -48,7 +48,7 @@ function price_import_temp_dir(): string
     return $dir;
 }
 
-function price_import_cell_string(mixed $value): string
+function price_import_cell_string($value): string
 {
     if ($value === null) {
         return '';
@@ -97,7 +97,7 @@ function price_import_build_name(array $row): string
     return $base . ' ' . $spec;
 }
 
-function price_import_rial_to_toman_text(mixed $rial): ?string
+function price_import_rial_to_toman_text($rial): ?string
 {
     if ($rial === null || $rial === '') {
         return null;
@@ -112,7 +112,7 @@ function price_import_rial_to_toman_text(mixed $rial): ?string
     return invoices_format_toman($toman);
 }
 
-function price_import_parse_pack_size(mixed $value): ?int
+function price_import_parse_pack_size($value): ?int
 {
     if ($value === null || $value === '') {
         return null;
@@ -133,7 +133,9 @@ function price_import_read_csv_rows(string $path): array
     if ($content === false) {
         throw new RuntimeException('خواندن CSV ناموفق بود');
     }
-    if (str_starts_with($content, "\xEF\xBB\xBF")) {
+    if (!function_exists('str_starts_with')) {
+        $content = substr($content, 0, 3) === "\xEF\xBB\xBF" ? substr($content, 3) : $content;
+    } elseif (str_starts_with($content, "\xEF\xBB\xBF")) {
         $content = substr($content, 3);
     }
 
@@ -168,7 +170,7 @@ function price_import_parse_csv_line(string $line): array
     foreach ($row as $cell) {
         $cell = trim((string) $cell);
         if ($cell !== '' && is_numeric($cell)) {
-            $out[] = str_contains($cell, '.') ? (float) $cell : (int) $cell;
+            $out[] = strpos($cell, '.') !== false ? (float) $cell : (int) $cell;
         } else {
             $out[] = $cell;
         }

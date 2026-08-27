@@ -124,7 +124,7 @@ function price_import_zip_inflate(string $data, int $method, int $uncompSize): s
     throw new RuntimeException('باز کردن فایل فشرده ZIP ناموفق بود — zlib/raw inflate در دسترس نیست');
 }
 
-function price_import_zip_fallback_extract(string $path, string $innerName): string|false
+function price_import_zip_fallback_extract(string $path, string $innerName)
 {
     $innerName = str_replace('\\', '/', $innerName);
     $index = price_import_zip_index($path);
@@ -169,7 +169,7 @@ function price_import_zip_fallback_list(string $path): array
     return array_keys(price_import_zip_index($path));
 }
 
-function price_import_zip_get_contents(string $path, string $innerName): string|false
+function price_import_zip_get_contents(string $path, string $innerName)
 {
     if (class_exists('ZipArchive')) {
         $zip = new ZipArchive();

@@ -290,11 +290,13 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                   $token = (string) ($match['token'] ?? '');
                   $norm = search_normalize($token);
                   $confidence = (string) ($match['confidence'] ?? 'unmatched');
-                  $badgeClass = match ($confidence) {
-                      'certain' => 'price-import-badge--ok',
-                      'likely' => 'price-import-badge--likely',
-                      default => 'price-import-badge--warn',
-                  };
+                  if ($confidence === 'certain') {
+                      $badgeClass = 'price-import-badge--ok';
+                  } elseif ($confidence === 'likely') {
+                      $badgeClass = 'price-import-badge--likely';
+                  } else {
+                      $badgeClass = 'price-import-badge--warn';
+                  }
                   ?>
                   <div class="price-import-car-token">
                     <span class="price-import-badge <?= $badgeClass ?>"><?= cms_h($confidence) ?></span>
