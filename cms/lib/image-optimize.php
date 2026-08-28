@@ -210,7 +210,7 @@ function cms_image_save_to_path($img, string $path, string $mime): bool
 {
     switch ($mime) {
         case 'image/jpeg':
-            imageinterlace($img, true);
+            imageinterlace($img, 1);
             return imagejpeg($img, $path, cms_image_optimize_jpeg_quality());
         case 'image/png':
             imagealphablending($img, false);
@@ -418,7 +418,7 @@ function cms_optimize_stored_image(string $absolutePath, string $mime): string
     $saved = false;
     switch ($outputMime) {
         case 'image/jpeg':
-            imageinterlace($dst, true);
+            imageinterlace($dst, 1);
             $saved = imagejpeg($dst, $tmpPath, cms_image_optimize_jpeg_quality());
             break;
         case 'image/png':
