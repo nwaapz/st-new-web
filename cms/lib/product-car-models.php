@@ -185,6 +185,82 @@ function cms_product_load_car_model_categories_map(PDO $pdo, array $productIds):
     return $map;
 }
 
+/**
+ * Car models with effective category for product cards (override or primary product category).
+ *
+ * @return array<int, list<array{car_model_id: int, car_name: string, category_id: int, category_name: string}>>
+ */
+function cms_product_load_car_model_entries_map(PDO $pdo, array $productIds): array
+{
+    $productIds = array_values(array_unique(array_filter(array_map('intval', $productIds), static fn (int $id): bool => $id > 0)));
+    if ($productIds === []) {
+        return [];
+    }
+
+    $categoryMap = cms_product_load_category_ids_map($pdo, $productIds);
+
+    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT pcm.product_id, pcm.car_model_id, pcm.category_id AS override_category_id, m.name AS car_name
+         FROM product_car_models pcm
+         JOIN car_models m ON m.id = pcm.car_model_id
+         WHERE pcm.product_id IN ({$placeholders})
+         ORDER BY pcm.product_id ASC, pcm.sort_order ASC, pcm.car_model_id ASC"
+    );
+    $stmt->execute($productIds);
+
+    $rowsByProduct = [];
+    $categoryIdsNeeded = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $pid = (int) $row['product_id'];
+        $overrideCategoryId = $row['override_category_id'] !== null ? (int) $row['override_category_id'] : 0;
+        $productCategoryIds = $categoryMap[$pid] ?? [];
+        $effectiveCategoryId = $overrideCategoryId > 0
+            ? $overrideCategoryId
+            : (int) ($productCategoryIds[0] ?? 0);
+
+        if ($effectiveCategoryId > 0) {
+            $categoryIdsNeeded[$effectiveCategoryId] = true;
+        }
+
+        if (!isset($rowsByProduct[$pid])) {
+            $rowsByProduct[$pid] = [];
+        }
+        $rowsByProduct[$pid][] = [
+            'car_model_id' => (int) $row['car_model_id'],
+            'car_name' => (string) $row['car_name'],
+            'category_id' => $effectiveCategoryId,
+        ];
+    }
+
+    $categoryNames = [];
+    if ($categoryIdsNeeded !== []) {
+        $catIds = array_keys($categoryIdsNeeded);
+        $catPlaceholders = implode(',', array_fill(0, count($catIds), '?'));
+        $catStmt = $pdo->prepare("SELECT id, name FROM categories WHERE id IN ({$catPlaceholders})");
+        $catStmt->execute($catIds);
+        foreach ($catStmt->fetchAll() ?: [] as $catRow) {
+            $categoryNames[(int) $catRow['id']] = (string) $catRow['name'];
+        }
+    }
+
+    $map = [];
+    foreach ($rowsByProduct as $pid => $entries) {
+        $map[$pid] = [];
+        foreach ($entries as $entry) {
+            $categoryId = (int) $entry['category_id'];
+            $map[$pid][] = [
+                'car_model_id' => (int) $entry['car_model_id'],
+                'car_name' => (string) $entry['car_name'],
+                'category_id' => $categoryId,
+                'category_name' => $categoryNames[$categoryId] ?? '',
+            ];
+        }
+    }
+
+    return $map;
+}
+
 function cms_ensure_product_car_models_schema(PDO $pdo): void
 {
     static $ready = false;
