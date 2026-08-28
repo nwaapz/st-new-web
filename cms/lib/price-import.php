@@ -1290,6 +1290,84 @@ function price_import_session_remove_rows(array $session, array $indicesToRemove
 }
 
 /**
+ * @return list<int>
+ */
+function price_import_session_dismissed_indices(array $session): array
+{
+    $raw = $session['dismissed_indices'] ?? [];
+    if (!is_array($raw)) {
+        return [];
+    }
+
+    $indices = [];
+    foreach ($raw as $index) {
+        $index = (int) $index;
+        if ($index >= 0) {
+            $indices[] = $index;
+        }
+    }
+
+    return array_values(array_unique($indices));
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function price_import_session_dismiss_row(array $session, int $index): array
+{
+    if ($index < 0) {
+        return $session;
+    }
+
+    $dismissed = price_import_session_dismissed_indices($session);
+    if (!in_array($index, $dismissed, true)) {
+        $dismissed[] = $index;
+    }
+    $session['dismissed_indices'] = $dismissed;
+
+    return $session;
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function price_import_session_reopen_row(array $session, int $index): array
+{
+    $dismissed = array_values(array_filter(
+        price_import_session_dismissed_indices($session),
+        static fn (int $candidate): bool => $candidate !== $index
+    ));
+    $session['dismissed_indices'] = $dismissed;
+
+    return $session;
+}
+
+/**
+ * @param list<array<string, mixed>> $rows
+ * @return array{visible:list<array<string, mixed>>,dismissed:list<array<string, mixed>>}
+ */
+function price_import_partition_rows_by_dismissed(array $rows, array $session): array
+{
+    $dismissedSet = array_flip(price_import_session_dismissed_indices($session));
+    $visible = [];
+    $dismissed = [];
+
+    foreach ($rows as $row) {
+        $index = (int) ($row['index'] ?? -1);
+        if (isset($dismissedSet[$index])) {
+            $dismissed[] = $row;
+        } else {
+            $visible[] = $row;
+        }
+    }
+
+    return [
+        'visible' => $visible,
+        'dismissed' => $dismissed,
+    ];
+}
+
+/**
  * @param callable(array<string, mixed>, array<string, mixed>): array<string, mixed> $mergeFormRow
  * @return array<string, mixed>
  */

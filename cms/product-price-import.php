@@ -82,11 +82,15 @@ function price_import_page_handle_apply(PDO $pdo, array $session, array $postedR
     $session = price_import_session_merge_posted_rows($session, $postedRows, 'price_import_merge_form_row');
 
     $rows = is_array($session['preview']['rows'] ?? null) ? $session['preview']['rows'] : [];
+    $dismissedSet = array_flip(price_import_session_dismissed_indices($session));
     $formRows = [];
     foreach ($rows as $row) {
         $index = (int) ($row['index'] ?? -1);
         if ($onlyIndex !== null) {
             $row['include'] = $index === $onlyIndex;
+        }
+        if (isset($dismissedSet[$index])) {
+            $row['include'] = false;
         }
         $formRows[$index] = $row;
     }
@@ -111,7 +115,8 @@ function price_import_page_handle_apply(PDO $pdo, array $session, array $postedR
 
 function price_import_page_store_session(array $session): int
 {
-    $remaining = count($session['preview']['rows'] ?? []);
+    $rows = is_array($session['preview']['rows'] ?? null) ? $session['preview']['rows'] : [];
+    $remaining = count(price_import_partition_rows_by_dismissed($rows, $session)['visible']);
     if ($remaining === 0) {
         if (!empty($session['stored_path']) && is_file($session['stored_path'])) {
             @unlink($session['stored_path']);
@@ -165,6 +170,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $applyOneIndex = isset($_POST['apply_row']) && $_POST['apply_row'] !== ''
         ? (int) $_POST['apply_row']
         : null;
+    $closeRowIndex = isset($_POST['close_row']) && $_POST['close_row'] !== ''
+        ? (int) $_POST['close_row']
+        : null;
+    $reopenRowIndex = isset($_POST['reopen_row']) && $_POST['reopen_row'] !== ''
+        ? (int) $_POST['reopen_row']
+        : null;
 
     try {
         if ($action === 'clear') {
@@ -207,6 +218,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'preview' => $preview,
             ];
             cms_flash(count($parsed) . ' ردیف خوانده شد — موارد نیازمند بررسی را تکمیل کنید');
+            cms_redirect('product-price-import.php');
+        }
+
+        if ($closeRowIndex !== null || $reopenRowIndex !== null) {
+            $session = $_SESSION[PRICE_IMPORT_SESSION_KEY] ?? null;
+            if (!is_array($session) || empty($session['preview']['rows'])) {
+                throw new RuntimeException('ابتدا فایل را آپلود کنید');
+            }
+
+            $postedRows = $_POST['rows'] ?? [];
+            if (is_array($postedRows) && $postedRows !== []) {
+                $session = price_import_session_merge_posted_rows(
+                    $session,
+                    $postedRows,
+                    'price_import_merge_form_row'
+                );
+            }
+
+            if ($closeRowIndex !== null) {
+                $session = price_import_session_dismiss_row($session, $closeRowIndex);
+                $_SESSION[PRICE_IMPORT_SESSION_KEY] = $session;
+                cms_flash('ردیف بسته شد — در آپلود بعدی فایل دوباره نمایش داده می‌شود');
+            } else {
+                $session = price_import_session_reopen_row($session, (int) $reopenRowIndex);
+                $_SESSION[PRICE_IMPORT_SESSION_KEY] = $session;
+                cms_flash('ردیف بازگردانده شد');
+            }
+
             cms_redirect('product-price-import.php');
         }
 
@@ -271,22 +310,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $session = $_SESSION[PRICE_IMPORT_SESSION_KEY] ?? null;
 $preview = is_array($session) ? ($session['preview'] ?? null) : null;
-$rows = is_array($preview) ? ($preview['rows'] ?? []) : [];
-if ($rows !== []) {
-    $rows = price_import_refresh_session_rows($pdo, $rows);
+$allRows = is_array($preview) ? ($preview['rows'] ?? []) : [];
+if ($allRows !== []) {
+    $allRows = price_import_refresh_session_rows($pdo, $allRows);
     if (is_array($session)) {
-        $_SESSION[PRICE_IMPORT_SESSION_KEY]['preview']['rows'] = $rows;
+        $_SESSION[PRICE_IMPORT_SESSION_KEY]['preview']['rows'] = $allRows;
     }
 }
+$rowPartitions = is_array($session)
+    ? price_import_partition_rows_by_dismissed($allRows, $session)
+    : ['visible' => $allRows, 'dismissed' => []];
+$rows = $rowPartitions['visible'];
+$dismissedRows = $rowPartitions['dismissed'];
 $categories = price_import_load_categories($pdo);
 $carModels = price_import_load_car_models($pdo);
 $sourceName = is_array($session) ? (string) ($session['source_name'] ?? '') : '';
 
 $readyCount = 0;
 $carSetupCount = 0;
+$reviewCount = 0;
 foreach ($rows as $row) {
     if (!empty($row['ready'])) {
         $readyCount++;
+    } else {
+        $reviewCount++;
     }
     if (!empty($row['needs_car_setup'])) {
         $carSetupCount++;
@@ -311,14 +358,18 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     <input class="cms-input" type="file" name="price_file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required>
     <div class="cms-form__actions">
       <button class="cms-btn cms-btn--primary" type="submit">خواندن و پیش‌نمایش</button>
-      <?php if ($rows !== []): ?>
+      <?php if ($allRows !== []): ?>
         <button class="cms-btn" type="submit" formaction="product-price-import.php" formmethod="post" name="action" value="clear">پاک کردن پیش‌نمایش</button>
       <?php endif; ?>
     </div>
   </form>
   <?php if ($sourceName !== ''): ?>
     <p class="cms-muted">فایل فعلی: <strong><?= cms_h($sourceName) ?></strong>
-      — <?= count($rows) ?> ردیف —
+      — <?= count($rows) ?> ردیف نمایش
+      <?php if ($dismissedRows !== []): ?>
+        — <?= count($dismissedRows) ?> بسته‌شده
+      <?php endif; ?>
+      —
       <span class="price-import-badge price-import-badge--ok"><?= $readyCount ?> آماده</span>
       <?php if ($carSetupCount > 0): ?>
         <span class="price-import-badge price-import-badge--warn"><?= $carSetupCount ?> نیاز به تعریف خودرو</span>
@@ -327,13 +378,16 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
   <?php endif; ?>
 </div>
 
-<?php if ($rows !== []): ?>
+<?php if ($allRows !== []): ?>
   <form method="post" class="cms-card price-import-preview">
     <input type="hidden" name="action" value="apply">
     <h2>۲. بررسی و تأیید</h2>
 
     <div class="price-import-summary">
       <span><strong><?= count($rows) ?></strong> ردیف</span>
+      <?php if ($dismissedRows !== []): ?>
+        <span class="price-import-badge"><?= count($dismissedRows) ?> بسته‌شده</span>
+      <?php endif; ?>
       <span class="price-import-badge price-import-badge--ok"><?= $readyCount ?> آماده</span>
       <?php if ($carSetupCount > 0): ?>
         <span class="price-import-badge price-import-badge--warn"><?= $carSetupCount ?> نیاز به تعریف خودرو</span>
@@ -353,6 +407,9 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     </div>
 
     <div class="price-import-rows">
+      <?php if ($rows === []): ?>
+        <p class="cms-muted">همه ردیف‌ها بسته شده‌اند. برای بازگردانی از فهرست پایین استفاده کنید یا فایل را دوباره آپلود کنید.</p>
+      <?php endif; ?>
       <?php foreach ($rows as $row):
         $index = (int) ($row['index'] ?? 0);
         $ready = !empty($row['ready']);
@@ -395,6 +452,14 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
               class="cms-btn price-import-save-row"
               <?= $ready ? '' : 'disabled' ?>
             >ذخیره این ردیف</button>
+            <button
+              type="submit"
+              name="close_row"
+              value="<?= $index ?>"
+              class="cms-btn price-import-close-row"
+              title="بستن — در این بارگذاری نادیده گرفته می‌شود"
+              aria-label="بستن ردیف"
+            >×</button>
           </header>
 
           <?php if (!$ready && $issues !== []): ?>
@@ -536,6 +601,37 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
       </button>
     </div>
   </form>
+
+  <?php if ($dismissedRows !== []): ?>
+    <div class="cms-card price-import-dismissed-panel">
+      <details class="price-import-dismissed">
+        <summary>
+          <?= count($dismissedRows) ?> ردیف بسته‌شده
+          <span class="cms-muted">— در آپلود بعدی فایل دوباره نمایش داده می‌شوند</span>
+        </summary>
+        <ul class="price-import-dismissed-list">
+          <?php foreach ($dismissedRows as $row):
+              $index = (int) ($row['index'] ?? 0);
+              ?>
+            <li class="price-import-dismissed-item">
+              <div class="price-import-dismissed-item__meta">
+                <strong><?= cms_h((string) ($row['name'] ?? '')) ?></strong>
+                <span dir="ltr">کد <?= cms_h((string) ($row['visual_id'] ?? '')) ?></span>
+              </div>
+              <form method="post" class="price-import-reopen-form">
+                <button
+                  type="submit"
+                  name="reopen_row"
+                  value="<?= $index ?>"
+                  class="cms-btn"
+                >بازگردانی</button>
+              </form>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      </details>
+    </div>
+  <?php endif; ?>
 
   <?php if ($carModels !== []): ?>
   <template id="price-import-extra-car-template">

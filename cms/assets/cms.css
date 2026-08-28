@@ -2350,12 +2350,58 @@ a.cms-kpi:hover {
 
 .price-import-row-card__head {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto auto auto;
   gap: 0.75rem 1rem;
   align-items: start;
   padding: 0.9rem 1rem;
   border-bottom: 1px solid var(--cms-line);
   background: rgba(0, 0, 0, 0.18);
+}
+
+.price-import-close-row {
+  min-width: 2rem;
+  padding-inline: 0.55rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.price-import-dismissed-panel {
+  margin-top: 1rem;
+}
+
+.price-import-dismissed summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.price-import-dismissed-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.price-import-dismissed-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--cms-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.price-import-dismissed-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+}
+
+.price-import-reopen-form {
+  margin: 0;
 }
 
 .price-import-row-card__title {
