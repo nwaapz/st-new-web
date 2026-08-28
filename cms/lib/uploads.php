@@ -173,6 +173,132 @@ function cms_upload_session_clear_paths(): void
     $_SESSION['cms_upload_session_paths'] = [];
 }
 
+/**
+ * Resolve `/uploads/...` to an absolute file under uploads root.
+ * Returns null if missing or outside uploads.
+ */
+function cms_resolve_upload_web_path(string $webPath): ?string
+{
+    $webPath = trim($webPath);
+    if ($webPath === '' || !str_starts_with($webPath, '/uploads/')) {
+        return null;
+    }
+
+    $relative = substr($webPath, strlen('/uploads/'));
+    $relative = str_replace('\\', '/', $relative);
+    if ($relative === '' || str_contains($relative, '..')) {
+        return null;
+    }
+
+    $root = cms_uploads_root();
+    $rootReal = realpath($root);
+    if ($rootReal === false || !is_dir($rootReal)) {
+        return null;
+    }
+
+    $abs = $rootReal . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+    if (!is_file($abs)) {
+        return null;
+    }
+
+    $resolved = realpath($abs);
+    if ($resolved === false) {
+        return null;
+    }
+
+    $rootPrefix = rtrim(str_replace('\\', '/', $rootReal), '/') . '/';
+    $resolvedNorm = str_replace('\\', '/', $resolved);
+    if (!str_starts_with($resolvedNorm, $rootPrefix)) {
+        return null;
+    }
+
+    return $resolved;
+}
+
+/** @return list<array{path:string,name:string,relative:string,url:string,mtime:int,size:int}> */
+function cms_scan_upload_images(): array
+{
+    $root = cms_uploads_root();
+    if (!is_dir($root)) {
+        return [];
+    }
+
+    $rootReal = realpath($root);
+    if ($rootReal === false) {
+        return [];
+    }
+
+    $imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+    $items = [];
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($rootReal, FilesystemIterator::SKIP_DOTS)
+    );
+
+    foreach ($iterator as $fileInfo) {
+        if (!$fileInfo->isFile()) {
+            continue;
+        }
+        $ext = strtolower($fileInfo->getExtension());
+        if (!in_array($ext, $imageExts, true)) {
+            continue;
+        }
+
+        $full = $fileInfo->getPathname();
+        $relative = substr($full, strlen($rootReal));
+        $relative = str_replace('\\', '/', ltrim($relative, '/\\'));
+        $path = '/uploads/' . $relative;
+
+        $items[] = [
+            'path' => $path,
+            'name' => basename($relative),
+            'relative' => $relative,
+            'url' => cms_asset_url($path),
+            'mtime' => (int) filemtime($full),
+            'size' => (int) filesize($full),
+        ];
+    }
+
+    usort($items, static fn(array $a, array $b): int => ($b['mtime'] ?? 0) <=> ($a['mtime'] ?? 0));
+
+    return $items;
+}
+
+function cms_delete_upload_file(string $webPath): void
+{
+    $abs = cms_resolve_upload_web_path($webPath);
+    if ($abs === null) {
+        throw new RuntimeException('فایل یافت نشد');
+    }
+
+    $ext = strtolower(pathinfo($abs, PATHINFO_EXTENSION));
+    if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true)) {
+        throw new RuntimeException('فقط حذف تصویر مجاز است');
+    }
+
+    if (!unlink($abs)) {
+        throw new RuntimeException('حذف فایل ناموفق بود');
+    }
+
+    cms_upload_ensure_session();
+    if (isset($_SESSION['cms_upload_session_paths']) && is_array($_SESSION['cms_upload_session_paths'])) {
+        $_SESSION['cms_upload_session_paths'] = array_values(array_filter(
+            $_SESSION['cms_upload_session_paths'],
+            static fn($path): bool => $path !== $webPath
+        ));
+    }
+}
+
+function cms_format_upload_bytes(int $bytes): string
+{
+    if ($bytes < 1024) {
+        return $bytes . ' B';
+    }
+    if ($bytes < 1024 * 1024) {
+        return round($bytes / 1024, 1) . ' KB';
+    }
+    return round($bytes / (1024 * 1024), 1) . ' MB';
+}
+
 function cms_upload_error_message(int $error, string $kind = 'file'): string
 {
     $uploadErrors = [

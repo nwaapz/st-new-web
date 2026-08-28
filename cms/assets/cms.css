@@ -1256,6 +1256,86 @@ textarea.cms-input {
   direction: ltr;
 }
 
+.cms-media-library__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.cms-media-library__search {
+  flex: 1 1 220px;
+  min-width: 0;
+  margin: 0;
+}
+
+.cms-media-library__stats {
+  margin: 0;
+  align-self: center;
+}
+
+.cms-media-library__grid {
+  margin-top: 0.25rem;
+}
+
+.cms-media-library__item {
+  gap: 0.28rem;
+}
+
+.cms-media-library__thumb {
+  display: block;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.cms-media-library__thumb img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  background: #111;
+}
+
+.cms-media-library__name {
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+
+.cms-media-library__meta,
+.cms-media-library__folder {
+  font-size: 0.66rem;
+  color: var(--cms-text-muted);
+}
+
+.cms-media-library__folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cms-media-library__delete {
+  margin-top: 0.15rem;
+  width: 100%;
+  font-size: 0.72rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.cms-media-library__filtered {
+  margin: 0.75rem 0 0;
+}
+
+.cms-btn--danger {
+  color: #ffb4ab;
+  border-color: rgba(255, 120, 120, 0.35);
+}
+
+.cms-btn--danger:hover {
+  color: #fff;
+  background: rgba(180, 40, 40, 0.35);
+  border-color: rgba(255, 120, 120, 0.55);
+}
+
 /* Legacy unused nav helpers kept harmless */
 .cms-nav__links {
   display: flex;

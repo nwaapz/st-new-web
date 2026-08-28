@@ -43,6 +43,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'product-series.php' => 'سری محصولات',
             'products.php' => 'محصولات',
             'media-upload.php' => 'آپلود تصاویر',
+            'media-library.php' => 'کتابخانه تصاویر',
             'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
             'orders.php' => 'سفارش‌ها',
@@ -68,7 +69,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=22">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=23">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';

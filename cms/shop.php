@@ -168,6 +168,11 @@ cms_layout_start('فروشگاه', cms_current_username(), 'shop');
     <p class="cms-muted" style="margin:0 0 .35rem">گروهی + پیشوند نشست</p>
     <p style="font-size:1rem;margin:0;font-weight:700">انتخاب از سرور</p>
   </a>
+  <a class="cms-panel cms-hub-card" href="media-library.php">
+    <h2>کتابخانه تصاویر</h2>
+    <p class="cms-muted" style="margin:0 0 .35rem">مشاهده و حذف فایل‌های سرور</p>
+    <p style="font-size:1rem;margin:0;font-weight:700">مدیریت /uploads</p>
+  </a>
   <a class="cms-panel cms-hub-card" href="product-reviews.php">
     <h2>نظرات محصولات</h2>
     <p class="cms-muted" style="margin:0 0 .35rem">در انتظار تأیید</p>
