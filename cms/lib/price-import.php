@@ -826,13 +826,6 @@ function price_import_confirmed_car_ids(array $carMatches, array $overrides = []
         $norm = search_normalize($token);
         if (isset($overrides[$norm]) && (int) $overrides[$norm] > 0) {
             $ids[] = (int) $overrides[$norm];
-            continue;
-        }
-        if (($match['confidence'] ?? '') === 'certain' || ($match['confidence'] ?? '') === 'likely') {
-            $id = (int) ($match['car_model_id'] ?? 0);
-            if ($id > 0) {
-                $ids[] = $id;
-            }
         }
     }
     foreach ($extraCars as $extra) {
@@ -842,6 +835,50 @@ function price_import_confirmed_car_ids(array $carMatches, array $overrides = []
         }
     }
     return array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+}
+
+/**
+ * Parsed car tokens still shown in the import row (removed tokens are excluded on save).
+ *
+ * @return list<string>|null null = treat all parsed tokens as active (legacy)
+ */
+function price_import_parse_car_active_norms(array $input): ?array
+{
+    if (!isset($input['car_active']) || !is_array($input['car_active'])) {
+        return null;
+    }
+
+    $norms = [];
+    foreach ($input['car_active'] as $norm => $flag) {
+        if ((string) $flag !== '' && (string) $flag !== '0') {
+            $norms[] = (string) $norm;
+        }
+    }
+
+    return $norms;
+}
+
+/**
+ * @param list<array<string, mixed>> $carMatches
+ * @param list<string>|null $activeNorms
+ * @return list<array<string, mixed>>
+ */
+function price_import_filter_car_matches_by_active(array $carMatches, ?array $activeNorms): array
+{
+    if ($activeNorms === null) {
+        return $carMatches;
+    }
+
+    $activeSet = array_flip($activeNorms);
+    $filtered = [];
+    foreach ($carMatches as $match) {
+        $norm = search_normalize((string) ($match['token'] ?? ''));
+        if ($norm !== '' && isset($activeSet[$norm])) {
+            $filtered[] = $match;
+        }
+    }
+
+    return $filtered;
 }
 
 /**
@@ -877,12 +914,16 @@ function price_import_row_issues(
             foreach ($carMatches as $match) {
                 $token = (string) ($match['token'] ?? '');
                 $norm = search_normalize($token);
-                $confidence = (string) ($match['confidence'] ?? 'unmatched');
                 if (isset($overrides[$norm]) && (int) $overrides[$norm] > 0) {
                     continue;
                 }
-                if ($confidence === 'uncertain' || $confidence === 'unmatched') {
-                    $issues[] = 'خودرو نیاز به انتخاب دارد: ' . $token;
+                $issues[] = 'خودرو نیاز به انتخاب دارد: ' . $token;
+            }
+
+            foreach ($extraCars as $extra) {
+                if ((int) ($extra['car_id'] ?? 0) <= 0) {
+                    $issues[] = 'خودرو اضافه‌شده باید انتخاب شود';
+                    break;
                 }
             }
 
@@ -1149,7 +1190,7 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
             $productId,
         ]);
         if (!$skipCars && $carIds !== []) {
-            price_import_merge_car_models($pdo, $productId, $carIds, $carCategoryMap);
+            cms_product_save_car_model_ids($pdo, $productId, $carIds, $carCategoryMap);
             price_import_sync_product_categories(
                 $pdo,
                 $productId,

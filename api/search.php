@@ -69,13 +69,28 @@ try {
              LIMIT 5"
         );
         $stmt->execute([$like, $like, $like, $like, $like, $like]);
-        foreach ($stmt->fetchAll() ?: [] as $row) {
+        $rows = $stmt->fetchAll() ?: [];
+        $productIds = array_map(static fn (array $row): int => (int) $row['id'], $rows);
+        $categoryMap = cms_product_load_category_ids_map($pdo, $productIds);
+        $carModelCategoryMap = cms_product_load_car_model_categories_map($pdo, $productIds);
+        foreach ($rows as $row) {
+            $pid = (int) $row['id'];
+            $categoryIds = $categoryMap[$pid] ?? [];
+            $carModelCategories = $carModelCategoryMap[$pid] ?? [];
+            $categoryName = cms_product_resolve_display_category_names(
+                $pdo,
+                $categoryIds,
+                $carModelCategories
+            );
+            if ($categoryName === '') {
+                $categoryName = (string) ($row['category_name'] ?? '');
+            }
             $products[] = [
-                'id' => (int) $row['id'],
+                'id' => $pid,
                 'name' => (string) $row['name'],
                 'slug' => (string) $row['slug'],
                 'visual_id' => $row['visual_id'] !== null ? (string) $row['visual_id'] : null,
-                'category_name' => (string) $row['category_name'],
+                'category_name' => $categoryName,
                 'factory_name' => (string) $row['factory_name'],
             ];
         }

@@ -343,6 +343,8 @@ try {
 
     $carModelCategoryMap = cms_product_load_car_model_categories_map($pdo, $productIds);
 
+    $carModelEntriesMap = cms_product_load_car_model_entries_map($pdo, $productIds);
+
     foreach ($items as &$item) {
 
         $pid = (int) $item['id'];
@@ -364,6 +366,17 @@ try {
         }
 
         $item['car_model_categories'] = $carModelCategoryMap[$pid] ?? [];
+
+        $item['car_model_entries'] = $carModelEntriesMap[$pid] ?? [];
+
+        $displayCategory = cms_product_resolve_display_category_names(
+            $pdo,
+            $item['category_ids'],
+            $item['car_model_categories']
+        );
+        if ($displayCategory !== '') {
+            $item['category_name'] = $displayCategory;
+        }
 
     }
 

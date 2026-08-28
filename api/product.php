@@ -173,6 +173,16 @@ try {
     }
     $carModelCategoriesMap = cms_product_load_car_model_categories_map($pdo, [$productId]);
     $product['car_model_categories'] = $carModelCategoriesMap[$productId] ?? [];
+    $carModelEntriesMap = cms_product_load_car_model_entries_map($pdo, [$productId]);
+    $product['car_model_entries'] = $carModelEntriesMap[$productId] ?? [];
+    $displayCategory = cms_product_resolve_display_category_names(
+        $pdo,
+        $product['category_ids'],
+        $product['car_model_categories']
+    );
+    if ($displayCategory !== '') {
+        $product['category_name'] = $displayCategory;
+    }
     $product['rating_avg'] = $rating['rating_avg'] !== null
         ? round((float) $rating['rating_avg'], 1)
         : null;

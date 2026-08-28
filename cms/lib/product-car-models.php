@@ -215,9 +215,10 @@ function cms_product_load_car_model_entries_map(PDO $pdo, array $productIds): ar
         $pid = (int) $row['product_id'];
         $overrideCategoryId = $row['override_category_id'] !== null ? (int) $row['override_category_id'] : 0;
         $productCategoryIds = $categoryMap[$pid] ?? [];
+        $carIndex = isset($rowsByProduct[$pid]) ? count($rowsByProduct[$pid]) : 0;
         $effectiveCategoryId = $overrideCategoryId > 0
             ? $overrideCategoryId
-            : (int) ($productCategoryIds[0] ?? 0);
+            : (int) ($productCategoryIds[$carIndex] ?? $productCategoryIds[0] ?? 0);
 
         if ($effectiveCategoryId > 0) {
             $categoryIdsNeeded[$effectiveCategoryId] = true;

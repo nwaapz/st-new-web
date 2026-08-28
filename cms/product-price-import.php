@@ -52,8 +52,14 @@ function price_import_merge_form_row(array $row, array $input): array
 
     $extraCars = price_import_parse_extra_cars($input);
     $merged['extra_cars'] = $extraCars;
+
+    $originalMatches = is_array($row['car_matches'] ?? null) ? $row['car_matches'] : [];
+    $activeNorms = price_import_parse_car_active_norms($input);
+    $activeMatches = price_import_filter_car_matches_by_active($originalMatches, $activeNorms);
+    $merged['car_matches'] = $activeMatches;
+
     $merged['car_category_map'] = price_import_build_car_category_map(
-        is_array($merged['car_matches'] ?? null) ? $merged['car_matches'] : [],
+        $activeMatches,
         $carOverrides,
         $carCategoryPick,
         $extraCars
@@ -61,7 +67,7 @@ function price_import_merge_form_row(array $row, array $input): array
 
     $issues = price_import_row_issues(
         $merged,
-        is_array($merged['car_matches'] ?? null) ? $merged['car_matches'] : [],
+        $activeMatches,
         $carOverrides,
         $extraCars
     );
@@ -484,6 +490,8 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                     <div class="price-import-car-item__head">
                       <span class="price-import-badge <?= $badgeClass ?>"><?= cms_h($confidenceLabel) ?></span>
                       <span class="price-import-car-item__token"><?= cms_h($token) ?></span>
+                      <button type="button" class="cms-btn price-import-remove-car" aria-label="حذف خودرو">حذف</button>
+                      <input type="hidden" name="rows[<?= $index ?>][car_active][<?= cms_h($norm) ?>]" value="1">
                     </div>
                     <div class="price-import-car-item__controls">
                       <?php
@@ -560,20 +568,13 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
       return el ? String(el.value || '').trim() : '';
     }
 
-    function countConfirmedCars(card) {
-      var count = 0;
-      card.querySelectorAll('.price-import-car-item input[type="radio"]:checked').forEach(function () {
-        count += 1;
-      });
-      return count;
-    }
-
-    function allRequiredCarsPicked(card) {
-      var required = card.querySelectorAll(
-        '.price-import-car-item[data-requires-car-pick="1"], .price-import-car-item--extra'
-      );
-      for (var i = 0; i < required.length; i += 1) {
-        if (!required[i].querySelector('input[type="radio"]:checked')) {
+    function allActiveCarsPicked(card) {
+      var items = card.querySelectorAll('.price-import-car-item');
+      if (items.length === 0) {
+        return false;
+      }
+      for (var i = 0; i < items.length; i += 1) {
+        if (!items[i].querySelector('input[type="radio"]:checked')) {
           return false;
         }
       }
@@ -603,7 +604,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
           return false;
         }
         if (!skipCars) {
-          if (!allRequiredCarsPicked(card) || countConfirmedCars(card) === 0) {
+          if (!allActiveCarsPicked(card)) {
             return false;
           }
         }
@@ -694,12 +695,14 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
     function bindRemove(btn) {
       btn.addEventListener('click', function () {
-        var item = btn.closest('.price-import-car-item--extra');
+        var item = btn.closest('.price-import-car-item');
         var card = btn.closest('.price-import-row-card');
         if (item) item.remove();
         if (card) updateRowReadyUi(card);
       });
     }
+
+    document.querySelectorAll('.price-import-remove-car').forEach(bindRemove);
 
     document.querySelectorAll('.price-import-add-car').forEach(function (addBtn) {
       addBtn.addEventListener('click', function () {
