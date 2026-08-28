@@ -209,6 +209,37 @@
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   }
 
+  function renderMediaItem(it, kind) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className =
+      "cms-media-item" +
+      (kind === "video" ? " cms-media-item--video" : "") +
+      (it.in_session ? " cms-media-item--session" : "");
+    btn.title = it.name;
+    const sizeLabel = formatMediaSize(it.size);
+    if (kind === "video") {
+      btn.innerHTML =
+        '<video class="cms-media-item__video" muted preload="metadata" playsinline src="' +
+        it.url +
+        '"></video><span>' +
+        it.name +
+        (sizeLabel ? " · " + sizeLabel : "") +
+        "</span>";
+    } else {
+      btn.innerHTML =
+        '<img src="' +
+        it.url +
+        '" alt=""><span>' +
+        it.name +
+        "</span>";
+    }
+    btn.onclick = function () {
+      cmsPickMedia(it.path, it.url, kind);
+    };
+    return btn;
+  }
+
   window.cmsOpenMediaPicker = function cmsOpenMediaPicker(textId, previewId, opts) {
     opts = opts || {};
     const kind = opts.kind || "image";
@@ -217,6 +248,10 @@
 
     const modal = document.getElementById("cms-media-modal");
     const grid = document.getElementById("cms-media-grid");
+    const sessionBlock = document.getElementById("cms-media-session-block");
+    const sessionGrid = document.getElementById("cms-media-session-grid");
+    const sessionTitle = document.getElementById("cms-media-session-title");
+    const allTitle = document.getElementById("cms-media-all-title");
     const status = document.getElementById("cms-media-status");
     const title = document.getElementById("cms-media-modal-title");
     if (!modal || !grid || !status) return;
@@ -227,6 +262,9 @@
     }
     modal.hidden = false;
     grid.innerHTML = "";
+    if (sessionGrid) sessionGrid.innerHTML = "";
+    if (sessionBlock) sessionBlock.hidden = true;
+    if (allTitle) allTitle.hidden = true;
     status.textContent = "در حال بارگذاری…";
 
     const params = new URLSearchParams({ kind: kind });
@@ -238,6 +276,14 @@
       })
       .then(function (data) {
         const items = data.items || [];
+        const sessionPrefix = data.session_prefix || "";
+        const sessionItems = items.filter(function (it) {
+          return it.in_session;
+        });
+        const otherItems = items.filter(function (it) {
+          return !it.in_session;
+        });
+
         if (!items.length) {
           status.textContent =
             kind === "video"
@@ -245,37 +291,48 @@
               : "هنوز تصویری در uploads نیست.";
           return;
         }
-        status.textContent =
-          items.length +
-          (kind === "video" ? " ویدیو" : " تصویر") +
-          " — یکی را انتخاب کنید";
-        items.forEach(function (it) {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className =
-            "cms-media-item" + (kind === "video" ? " cms-media-item--video" : "");
-          btn.title = it.name;
-          const sizeLabel = formatMediaSize(it.size);
-          if (kind === "video") {
-            btn.innerHTML =
-              '<video class="cms-media-item__video" muted preload="metadata" playsinline src="' +
-              it.url +
-              '"></video><span>' +
-              it.name +
-              (sizeLabel ? " · " + sizeLabel : "") +
-              "</span>";
-          } else {
-            btn.innerHTML =
-              '<img src="' +
-              it.url +
-              '" alt=""><span>' +
-              it.name +
-              "</span>";
+
+        if (sessionPrefix) {
+          status.textContent =
+            "پیشوند نشست: " +
+            sessionPrefix +
+            " — " +
+            items.length +
+            (kind === "video" ? " ویدیو" : " تصویر");
+        } else {
+          status.textContent =
+            items.length +
+            (kind === "video" ? " ویدیو" : " تصویر") +
+            " — یکی را انتخاب کنید";
+        }
+
+        if (
+          kind === "image" &&
+          sessionItems.length &&
+          sessionGrid &&
+          sessionBlock
+        ) {
+          sessionBlock.hidden = false;
+          if (sessionTitle) {
+            sessionTitle.textContent =
+              "تصاویر این نشست (" + sessionItems.length + ")";
           }
-          btn.onclick = function () {
-            cmsPickMedia(it.path, it.url, kind);
-          };
-          grid.appendChild(btn);
+          sessionItems.forEach(function (it) {
+            sessionGrid.appendChild(renderMediaItem(it, kind));
+          });
+        }
+
+        const listItems =
+          kind === "image" && sessionItems.length ? otherItems : items;
+
+        if (kind === "image" && sessionItems.length && allTitle) {
+          allTitle.hidden = false;
+          allTitle.textContent =
+            "همه تصاویر" + (otherItems.length ? " (" + otherItems.length + ")" : "");
+        }
+
+        listItems.forEach(function (it) {
+          grid.appendChild(renderMediaItem(it, kind));
         });
       })
       .catch(function () {

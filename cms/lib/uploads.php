@@ -63,7 +63,7 @@ function cms_migrate_legacy_cms_uploads(): array
     return $result;
 }
 
-function cms_unique_upload_name(string $uploadsDir, string $originalName, string $ext): string
+function cms_unique_upload_name(string $uploadsDir, string $originalName, string $ext, string $prefix = ''): string
 {
     $base = pathinfo($originalName, PATHINFO_FILENAME);
     $safe = preg_replace('/[^\p{L}\p{N}._-]+/u', '-', $base);
@@ -79,11 +79,100 @@ function cms_unique_upload_name(string $uploadsDir, string $originalName, string
     }
     $safe = rtrim($safe, '-._');
 
+    $prefix = cms_sanitize_upload_prefix($prefix);
+    if ($prefix !== '') {
+        $safe = $prefix . '-' . $safe;
+    }
+
     $name = $safe . $ext;
     if (!file_exists($uploadsDir . DIRECTORY_SEPARATOR . $name)) {
         return $name;
     }
     return $safe . '-' . bin2hex(random_bytes(3)) . $ext;
+}
+
+function cms_upload_ensure_session(): void
+{
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start([
+            'cookie_httponly' => true,
+            'cookie_samesite' => 'Lax',
+        ]);
+    }
+}
+
+/** Safe ASCII-ish prefix for uploaded filenames (session-scoped). */
+function cms_sanitize_upload_prefix(string $prefix): string
+{
+    $prefix = trim($prefix);
+    if ($prefix === '') {
+        return '';
+    }
+    $safe = preg_replace('/[^\p{L}\p{N}._-]+/u', '-', $prefix);
+    $safe = trim((string) $safe, '-._');
+    $safe = preg_replace('/-+/', '-', (string) $safe);
+    if ($safe === '' || $safe === null) {
+        return '';
+    }
+    if (function_exists('mb_strlen') && mb_strlen($safe) > 40) {
+        return mb_substr($safe, 0, 40);
+    }
+    if (strlen($safe) > 40) {
+        return substr($safe, 0, 40);
+    }
+    return rtrim($safe, '-._');
+}
+
+function cms_upload_session_prefix(): string
+{
+    cms_upload_ensure_session();
+    return cms_sanitize_upload_prefix((string) ($_SESSION['cms_upload_prefix'] ?? ''));
+}
+
+function cms_upload_session_set_prefix(string $prefix): string
+{
+    cms_upload_ensure_session();
+    $safe = cms_sanitize_upload_prefix($prefix);
+    $_SESSION['cms_upload_prefix'] = $safe;
+    return $safe;
+}
+
+/** @return list<string> Public paths uploaded in this CMS session. */
+function cms_upload_session_paths(): array
+{
+    cms_upload_ensure_session();
+    $paths = $_SESSION['cms_upload_session_paths'] ?? [];
+    if (!is_array($paths)) {
+        return [];
+    }
+    $out = [];
+    foreach ($paths as $path) {
+        if (is_string($path) && str_starts_with($path, '/uploads/')) {
+            $out[] = $path;
+        }
+    }
+    return $out;
+}
+
+function cms_upload_session_track_path(string $path): void
+{
+    $path = trim($path);
+    if ($path === '' || !str_starts_with($path, '/uploads/')) {
+        return;
+    }
+    cms_upload_ensure_session();
+    if (!isset($_SESSION['cms_upload_session_paths']) || !is_array($_SESSION['cms_upload_session_paths'])) {
+        $_SESSION['cms_upload_session_paths'] = [];
+    }
+    if (!in_array($path, $_SESSION['cms_upload_session_paths'], true)) {
+        $_SESSION['cms_upload_session_paths'][] = $path;
+    }
+}
+
+function cms_upload_session_clear_paths(): void
+{
+    cms_upload_ensure_session();
+    $_SESSION['cms_upload_session_paths'] = [];
 }
 
 function cms_upload_error_message(int $error, string $kind = 'file'): string
@@ -148,7 +237,12 @@ function cms_store_uploaded_image(array $file, array $options = []): string
         throw new RuntimeException('پوشه uploads قابل نوشتن نیست');
     }
 
-    $name = cms_unique_upload_name($uploadsDir, (string) ($file['name'] ?? 'image'), $map[$mime]);
+    $prefix = trim((string) ($options['prefix'] ?? ''));
+    if ($prefix === '') {
+        $prefix = cms_upload_session_prefix();
+    }
+
+    $name = cms_unique_upload_name($uploadsDir, (string) ($file['name'] ?? 'image'), $map[$mime], $prefix);
     $dest = $uploadsDir . DIRECTORY_SEPARATOR . $name;
     if (!move_uploaded_file((string) $file['tmp_name'], $dest)) {
         throw new RuntimeException('ذخیره فایل ناموفق بود');
@@ -164,7 +258,10 @@ function cms_store_uploaded_image(array $file, array $options = []): string
 
     $dest = cms_optimize_stored_image($dest, $mime);
 
-    return '/uploads/' . str_replace('\\', '/', basename($dest));
+    $publicPath = '/uploads/' . str_replace('\\', '/', basename($dest));
+    cms_upload_session_track_path($publicPath);
+
+    return $publicPath;
 }
 
 /** @param array{name?:string,tmp_name?:string,error?:int,size?:int} $file */

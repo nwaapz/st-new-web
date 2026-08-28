@@ -163,6 +163,11 @@ cms_layout_start('فروشگاه', cms_current_username(), 'shop');
     <p class="cms-muted" style="margin:0 0 .35rem">مدل + دسته</p>
     <p style="font-size:1.6rem;margin:0;font-weight:700"><?= $counts['products'] ?></p>
   </a>
+  <a class="cms-panel cms-hub-card" href="media-upload.php">
+    <h2>آپلود تصاویر</h2>
+    <p class="cms-muted" style="margin:0 0 .35rem">گروهی + پیشوند نشست</p>
+    <p style="font-size:1rem;margin:0;font-weight:700">انتخاب از سرور</p>
+  </a>
   <a class="cms-panel cms-hub-card" href="product-reviews.php">
     <h2>نظرات محصولات</h2>
     <p class="cms-muted" style="margin:0 0 .35rem">در انتظار تأیید</p>

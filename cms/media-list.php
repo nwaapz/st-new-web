@@ -11,8 +11,13 @@ header('Cache-Control: no-store');
 
 $kind = trim((string) ($_GET['kind'] ?? 'image'));
 $subdir = trim(str_replace(['\\', '..'], ['/', ''], (string) ($_GET['subdir'] ?? '')), '/');
+$prefixFilter = cms_sanitize_upload_prefix((string) ($_GET['prefix'] ?? ''));
+$sessionOnly = isset($_GET['session']) && (string) $_GET['session'] === '1';
 $uploadsRoot = cms_uploads_root();
 $items = [];
+$sessionPrefix = cms_upload_session_prefix();
+$sessionPaths = cms_upload_session_paths();
+$sessionPathSet = array_fill_keys($sessionPaths, true);
 
 if ($kind === 'video') {
     if ($subdir === '') {
@@ -41,6 +46,7 @@ if ($kind === 'video') {
                 'mtime' => (int) filemtime($full),
                 'size' => (int) filesize($full),
                 'kind' => 'video',
+                'in_session' => isset($sessionPathSet[$path]),
             ];
         }
     }
@@ -60,6 +66,14 @@ if ($kind === 'video') {
                 continue;
             }
             $path = '/uploads/' . $file;
+            $inSession = isset($sessionPathSet[$path]);
+            $matchesPrefix = $prefixFilter === '' || str_starts_with($file, $prefixFilter . '-');
+            if ($sessionOnly && !$inSession) {
+                continue;
+            }
+            if ($prefixFilter !== '' && !$matchesPrefix && !$inSession) {
+                continue;
+            }
             $items[] = [
                 'path' => $path,
                 'name' => $file,
@@ -67,13 +81,23 @@ if ($kind === 'video') {
                 'mtime' => (int) filemtime($full),
                 'size' => (int) filesize($full),
                 'kind' => 'image',
+                'in_session' => $inSession,
             ];
         }
     }
 }
 
 usort($items, static function (array $a, array $b): int {
-    return $b['mtime'] <=> $a['mtime'];
+    $aSession = !empty($a['in_session']) ? 1 : 0;
+    $bSession = !empty($b['in_session']) ? 1 : 0;
+    if ($aSession !== $bSession) {
+        return $bSession <=> $aSession;
+    }
+    return ($b['mtime'] ?? 0) <=> ($a['mtime'] ?? 0);
 });
 
-echo json_encode(['items' => $items], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+echo json_encode([
+    'items' => $items,
+    'session_prefix' => $sessionPrefix,
+    'session_count' => count($sessionPaths),
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

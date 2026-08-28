@@ -42,6 +42,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'categories.php' => 'دسته‌بندی‌ها',
             'product-series.php' => 'سری محصولات',
             'products.php' => 'محصولات',
+            'media-upload.php' => 'آپلود تصاویر',
             'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
             'orders.php' => 'سفارش‌ها',
@@ -67,7 +68,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=21">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=22">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';
@@ -158,9 +159,14 @@ function cms_layout_end(): void
     echo '<div class="cms-media-modal__head"><strong id="cms-media-modal-title">انتخاب از سرور</strong>';
     echo '<button type="button" class="cms-btn cms-btn--ghost" onclick="cmsCloseMediaPicker()">بستن</button></div>';
     echo '<p class="cms-muted" id="cms-media-status">در حال بارگذاری…</p>';
+    echo '<div id="cms-media-session-block" class="cms-media-session-block" hidden>';
+    echo '<h3 class="cms-media-session-block__title" id="cms-media-session-title">تصاویر این نشست</h3>';
+    echo '<div class="cms-media-grid cms-media-grid--session" id="cms-media-session-grid"></div>';
+    echo '</div>';
+    echo '<h3 class="cms-media-all-title" id="cms-media-all-title" hidden>همه تصاویر</h3>';
     echo '<div class="cms-media-grid" id="cms-media-grid"></div>';
     echo '</div></div>';
-    echo '<script src="assets/cms-upload.js?v=3"></script>';
+    echo '<script src="assets/cms-upload.js?v=4"></script>';
     echo '<script src="assets/cms-check-list-filter.js?v=3"></script>';
     echo '</body></html>';
 }
