@@ -199,6 +199,15 @@ function cms_product_load_car_model_entries_map(PDO $pdo, array $productIds): ar
 
     $categoryMap = cms_product_load_category_ids_map($pdo, $productIds);
 
+    $categoryIdsNeeded = [];
+    foreach ($productIds as $productId) {
+        foreach ($categoryMap[$productId] ?? [] as $categoryId) {
+            if ($categoryId > 0) {
+                $categoryIdsNeeded[$categoryId] = true;
+            }
+        }
+    }
+
     $placeholders = implode(',', array_fill(0, count($productIds), '?'));
     $stmt = $pdo->prepare(
         "SELECT pcm.product_id, pcm.car_model_id, pcm.category_id AS override_category_id, m.name AS car_name
@@ -210,7 +219,6 @@ function cms_product_load_car_model_entries_map(PDO $pdo, array $productIds): ar
     $stmt->execute($productIds);
 
     $rowsByProduct = [];
-    $categoryIdsNeeded = [];
     foreach ($stmt->fetchAll() ?: [] as $row) {
         $pid = (int) $row['product_id'];
         $overrideCategoryId = $row['override_category_id'] !== null ? (int) $row['override_category_id'] : 0;

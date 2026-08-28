@@ -234,6 +234,110 @@ function cms_product_load_category_ids_map(PDO $pdo, array $productIds): array
     return $map;
 }
 
+/**
+ * Union of product-level category picks and distinct per-car override ids (max 2).
+ *
+ * @param list<int|string> $productCategoryIds
+ * @param array<int|string, int|string> $carCategoryByModel
+ * @return list<int>
+ */
+function cms_product_collect_category_ids_from_assignment(
+    array $productCategoryIds,
+    array $carCategoryByModel
+): array {
+    $ids = [];
+    foreach ($productCategoryIds as $categoryId) {
+        $categoryId = (int) $categoryId;
+        if ($categoryId > 0 && !in_array($categoryId, $ids, true)) {
+            $ids[] = $categoryId;
+        }
+    }
+    foreach ($carCategoryByModel as $categoryId) {
+        $categoryId = (int) $categoryId;
+        if ($categoryId > 0 && !in_array($categoryId, $ids, true)) {
+            $ids[] = $categoryId;
+        }
+    }
+
+    return array_slice($ids, 0, 2);
+}
+
+/**
+ * Persist product_categories from form picks and per-car overrides.
+ *
+ * @param list<int|string> $productCategoryIds
+ * @param array<int|string, int|string> $carCategoryByModel car_model_id => category override id
+ */
+function cms_product_sync_categories_from_assignment(
+    PDO $pdo,
+    int $productId,
+    array $productCategoryIds,
+    array $carCategoryByModel,
+    bool $mergeExisting = false
+): void {
+    cms_ensure_product_categories_schema($pdo);
+    $fromAssignment = cms_product_collect_category_ids_from_assignment(
+        $productCategoryIds,
+        $carCategoryByModel
+    );
+
+    if ($mergeExisting) {
+        $existing = cms_product_load_category_ids($pdo, $productId);
+        $merged = $existing;
+        foreach ($fromAssignment as $categoryId) {
+            if (!in_array($categoryId, $merged, true)) {
+                $merged[] = $categoryId;
+            }
+        }
+        $fromAssignment = array_slice($merged, 0, 2);
+    }
+
+    if ($fromAssignment === []) {
+        return;
+    }
+
+    cms_product_save_category_ids($pdo, $productId, $fromAssignment);
+}
+
+/** @return array<int, list<string>> product_id => category names in sort order */
+function cms_product_load_category_names_map(PDO $pdo, array $productIds): array
+{
+    $idsMap = cms_product_load_category_ids_map($pdo, $productIds);
+    $allIds = [];
+    foreach ($idsMap as $categoryIds) {
+        foreach ($categoryIds as $categoryId) {
+            if ($categoryId > 0) {
+                $allIds[$categoryId] = true;
+            }
+        }
+    }
+
+    $namesById = [];
+    if ($allIds !== []) {
+        $catIds = array_keys($allIds);
+        $placeholders = implode(',', array_fill(0, count($catIds), '?'));
+        $stmt = $pdo->prepare("SELECT id, name FROM categories WHERE id IN ({$placeholders})");
+        $stmt->execute($catIds);
+        foreach ($stmt->fetchAll() ?: [] as $row) {
+            $namesById[(int) $row['id']] = (string) $row['name'];
+        }
+    }
+
+    $map = [];
+    foreach ($idsMap as $productId => $categoryIds) {
+        $names = [];
+        foreach ($categoryIds as $categoryId) {
+            $name = $namesById[$categoryId] ?? '';
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+        $map[(int) $productId] = $names;
+    }
+
+    return $map;
+}
+
 function cms_ensure_product_categories_schema(PDO $pdo): void
 {
     static $ready = false;

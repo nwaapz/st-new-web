@@ -760,23 +760,13 @@ function price_import_sync_product_categories(
     int $mainCategoryId,
     array $carCategoryMap
 ): void {
-    cms_ensure_product_categories_schema($pdo);
-    $existing = cms_product_load_category_ids($pdo, $productId);
-    $fromImport = price_import_collect_product_category_ids($mainCategoryId, $carCategoryMap);
-
-    $merged = $existing;
-    foreach ($fromImport as $categoryId) {
-        if (!in_array($categoryId, $merged, true)) {
-            $merged[] = $categoryId;
-        }
-    }
-
-    $merged = array_slice($merged, 0, 2);
-    if ($merged === []) {
-        return;
-    }
-
-    cms_product_save_category_ids($pdo, $productId, $merged);
+    cms_product_sync_categories_from_assignment(
+        $pdo,
+        $productId,
+        $mainCategoryId > 0 ? [$mainCategoryId] : [],
+        $carCategoryMap,
+        true
+    );
 }
 
 function price_import_suggest_category_id(string $sectionHint, array $categories): ?int

@@ -413,8 +413,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productId = (int) $pdo->lastInsertId();
         }
 
-        cms_product_save_category_ids($pdo, $productId, $categoryIds);
         cms_product_save_car_model_ids($pdo, $productId, $validatedCarModelIds, $carModelCategoryIds);
+        cms_product_sync_categories_from_assignment(
+            $pdo,
+            $productId,
+            $categoryIds,
+            $carModelCategoryIds
+        );
 
         $persistGallery = array_values(array_filter(
             $collectedGallery,
@@ -528,6 +533,7 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
 
   <fieldset class="cms-field" style="border:0;padding:0;margin:0 0 1rem">
     <legend class="cms-label" style="padding:0;margin-bottom:.5rem">مدل‌های خودرو (کارخانه / مدل)</legend>
+    <p class="cms-muted" style="margin:0 0 .5rem;font-size:.85rem">برای هر خودرو می‌توانید دستهٔ جداگانه انتخاب کنید (اختیاری). اگر خالی بماند، دستهٔ محصول بر اساس ترتیب خودروها اعمال می‌شود: خودروی اول → دستهٔ اول، خودروی دوم → دستهٔ دوم.</p>
     <?php if ($models === []): ?>
       <p class="cms-muted" style="margin:0">هنوز مدلی ثبت نشده. ابتدا از <a href="car-models.php">مدل‌ها</a> اضافه کنید.</p>
     <?php else: ?>
@@ -572,6 +578,7 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
     <?php endif; ?>
   </fieldset>
 
+  <p class="cms-muted" style="margin:0 0 .75rem;font-size:.85rem">دستهٔ اول و دوم: دسته‌های سطح محصول (حداکثر ۲). برای دو خودرو با دو دستهٔ متفاوت، معمولاً دستهٔ اول و دوم کافی است؛ در غیر این صورت از منوی دسته در هر خودرو استفاده کنید.</p>
   <div class="cms-grid-2">
     <label class="cms-field"><span class="cms-label">دسته اول (الزامی)</span>
       <select class="cms-select" name="category_id_1" required>

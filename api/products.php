@@ -345,6 +345,8 @@ try {
 
     $carModelEntriesMap = cms_product_load_car_model_entries_map($pdo, $productIds);
 
+    $categoryNamesMap = cms_product_load_category_names_map($pdo, $productIds);
+
     foreach ($items as &$item) {
 
         $pid = (int) $item['id'];
@@ -364,6 +366,8 @@ try {
             $item['category_id'] = (int) $item['category_ids'][0];
 
         }
+
+        $item['category_names'] = $categoryNamesMap[$pid] ?? [];
 
         $item['car_model_categories'] = $carModelCategoryMap[$pid] ?? [];
 

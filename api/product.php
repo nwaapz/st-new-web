@@ -171,6 +171,8 @@ try {
     if ($product['category_ids'] !== []) {
         $product['category_id'] = (int) $product['category_ids'][0];
     }
+    $categoryNamesMap = cms_product_load_category_names_map($pdo, [$productId]);
+    $product['category_names'] = $categoryNamesMap[$productId] ?? [];
     $carModelCategoriesMap = cms_product_load_car_model_categories_map($pdo, [$productId]);
     $product['car_model_categories'] = $carModelCategoriesMap[$productId] ?? [];
     $carModelEntriesMap = cms_product_load_car_model_entries_map($pdo, [$productId]);
