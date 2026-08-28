@@ -27,13 +27,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_session'])) {
 
 $sessionPrefix = cms_upload_session_prefix();
 $sessionPaths = cms_upload_session_paths();
-$hasFrameCandidates = false;
-foreach ($sessionPaths as $path) {
-    if (cms_upload_path_is_framable($path)) {
-        $hasFrameCandidates = true;
-        break;
-    }
-}
 
 cms_layout_start('آپلود تصاویر', cms_current_username(), 'shop');
 ?>
@@ -87,20 +80,12 @@ cms_layout_start('آپلود تصاویر', cms_current_username(), 'shop');
   <div class="cms-bulk-upload__session">
     <div class="cms-bulk-upload__session-head">
       <h3>تصاویر این نشست <span class="cms-badge" id="cms-bulk-session-count"><?= count($sessionPaths) ?></span></h3>
-      <div class="cms-btn-row">
-        <button
-          type="button"
-          class="cms-btn cms-btn--ghost"
-          id="cms-bulk-frame-btn"
-          <?= $hasFrameCandidates ? '' : 'disabled' ?>
-        >مرکز‌چینی PNGهای نشست</button>
-        <?php if ($sessionPaths !== []): ?>
-          <form method="post" data-cms-no-upload-progress="1">
-            <input type="hidden" name="clear_session" value="1">
-            <button type="submit" class="cms-btn cms-btn--ghost">پاک کردن فهرست نشست</button>
-          </form>
-        <?php endif; ?>
-      </div>
+      <?php if ($sessionPaths !== []): ?>
+        <form method="post" data-cms-no-upload-progress="1">
+          <input type="hidden" name="clear_session" value="1">
+          <button type="submit" class="cms-btn cms-btn--ghost">پاک کردن فهرست نشست</button>
+        </form>
+      <?php endif; ?>
     </div>
     <div class="cms-media-grid" id="cms-bulk-session-grid">
       <?php if ($sessionPaths === []): ?>
@@ -121,6 +106,6 @@ cms_layout_start('آپلود تصاویر', cms_current_username(), 'shop');
   </div>
 </section>
 
-<script src="assets/cms-media-upload.js?v=2"></script>
+<script src="assets/cms-media-upload.js?v=3"></script>
 <?php
 cms_layout_end();

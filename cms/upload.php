@@ -39,10 +39,9 @@ try {
 
     $kind = trim((string) ($_POST['kind'] ?? 'image'));
     $subdir = trim((string) ($_POST['subdir'] ?? ''));
-    $autoFrame = !isset($_POST['auto_frame']) || (string) $_POST['auto_frame'] !== '0';
     $prefixOverride = trim((string) ($_POST['prefix'] ?? ''));
 
-    $imageOptions = ['auto_frame' => $autoFrame];
+    $imageOptions = [];
     if ($prefixOverride !== '') {
         $imageOptions['prefix'] = cms_sanitize_upload_prefix($prefixOverride);
     }

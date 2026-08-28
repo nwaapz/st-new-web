@@ -59,12 +59,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $slug = cms_slugify($name);
         }
         $description = trim((string) ($_POST['description'] ?? ''));
-        $skipImageAutoFrame = isset($_POST['skip_image_auto_frame']) ? 1 : 0;
-        $imageUploadOptions = ['auto_frame' => $skipImageAutoFrame === 0];
+        $skipImageAutoFrame = 0;
         $image = cms_handle_optional_upload(
             'image',
-            (string) ($_POST['image'] ?? ''),
-            $imageUploadOptions
+            (string) ($_POST['image'] ?? '')
         );
         $videoPath = cms_handle_optional_video_upload(
             'video_path',
@@ -159,11 +157,6 @@ cms_layout_start('دسته‌بندی‌ها', cms_current_username(), 'shop');
     <textarea class="cms-textarea" name="description"><?= cms_h($edit['description'] ?? '') ?></textarea>
   </label>
   <?php cms_image_field('image', 'تصویر', (string) ($edit['image'] ?? '')); ?>
-  <label class="cms-check" style="margin:.35rem 0 1rem">
-    <input type="checkbox" name="skip_image_auto_frame" value="1" <?= !empty($edit['skip_image_auto_frame']) ? 'checked' : '' ?>>
-    <span>حفظ قاب‌بندی اصلی تصویر (بدون برش و مرکز کردن خودکار PNG)</span>
-  </label>
-  <p class="cms-muted" style="margin:-0.5rem 0 1rem;font-size:.85rem">به‌طور پیش‌فرض، حاشیه شفاف PNG حذف و محصول در مرکز یک کادر مربع قرار می‌گیرد. تصویر پس از آپلود برای بارگذاری سریع‌تر در سایت فشرده می‌شود.</p>
   <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">ویدیو دسته</h3>
   <p class="cms-muted" style="margin:-0.25rem 0 .75rem;font-size:.85rem">اگر محصول ویدیوی اختصاصی نداشته باشد، این ویدیو در اسلایدر صفحه محصول نمایش داده می‌شود.</p>
   <?php cms_video_field('video_path', 'ویدیو دسته (پیش‌فرض محصولات)', (string) ($edit['video_path'] ?? ''), 'products/videos'); ?>

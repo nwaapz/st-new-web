@@ -5,8 +5,6 @@ declare(strict_types=1);
  * Shared image/video upload storage for CMS forms and upload.php AJAX.
  */
 
-require_once __DIR__ . '/image-optimize.php';
-
 /** Site-root uploads directory (public/uploads), not cms/uploads. */
 function cms_uploads_root(): string
 {
@@ -175,136 +173,6 @@ function cms_upload_session_clear_paths(): void
     $_SESSION['cms_upload_session_paths'] = [];
 }
 
-/** Map `/uploads/foo.png` to absolute path under uploads root (flat files only). */
-function cms_upload_web_to_absolute(string $webPath): ?string
-{
-    $webPath = trim($webPath);
-    if ($webPath === '' || !str_starts_with($webPath, '/uploads/')) {
-        return null;
-    }
-
-    $name = basename(str_replace('\\', '/', $webPath));
-    if ($name === '' || $name === '.' || $name === '..') {
-        return null;
-    }
-
-    $abs = cms_uploads_root() . DIRECTORY_SEPARATOR . $name;
-    if (!is_file($abs)) {
-        return null;
-    }
-
-    return $abs;
-}
-
-function cms_upload_absolute_to_web(string $absolutePath): string
-{
-    $name = basename(str_replace('\\', '/', $absolutePath));
-    return '/uploads/' . $name;
-}
-
-function cms_upload_session_replace_path(string $oldPath, string $newPath): void
-{
-    cms_upload_ensure_session();
-    if (!isset($_SESSION['cms_upload_session_paths']) || !is_array($_SESSION['cms_upload_session_paths'])) {
-        return;
-    }
-
-    foreach ($_SESSION['cms_upload_session_paths'] as $index => $path) {
-        if ($path === $oldPath) {
-            $_SESSION['cms_upload_session_paths'][$index] = $newPath;
-            return;
-        }
-    }
-}
-
-/** @return array{path:string,changed:bool,skipped:bool,message:string} */
-function cms_reframe_uploaded_image(string $webPath): array
-{
-    $webPath = trim($webPath);
-    $abs = cms_upload_web_to_absolute($webPath);
-    if ($abs === null) {
-        return [
-            'path' => $webPath,
-            'changed' => false,
-            'skipped' => false,
-            'message' => 'فایل یافت نشد',
-        ];
-    }
-
-    $mime = cms_detect_image_mime($abs);
-    if ($mime === 'image/jpeg') {
-        return [
-            'path' => $webPath,
-            'changed' => false,
-            'skipped' => true,
-            'message' => 'JPEG — مرکز‌چینی اعمال نمی‌شود',
-        ];
-    }
-    if ($mime === 'image/gif' && cms_image_is_animated_gif($abs)) {
-        return [
-            'path' => $webPath,
-            'changed' => false,
-            'skipped' => true,
-            'message' => 'GIF متحرک — رد شد',
-        ];
-    }
-    if (!in_array($mime, ['image/png', 'image/webp', 'image/gif'], true)) {
-        return [
-            'path' => $webPath,
-            'changed' => false,
-            'skipped' => true,
-            'message' => 'نوع فایل برای مرکز‌چینی مناسب نیست',
-        ];
-    }
-
-    $oldReal = realpath($abs) ?: $abs;
-    $beforeHash = is_file($abs) ? md5_file($abs) : '';
-
-    try {
-        $newAbs = cms_auto_frame_product_image($abs, $mime);
-        $newMime = cms_detect_image_mime($newAbs);
-        if ($newMime === '') {
-            $newMime = $mime;
-        }
-        $newAbs = cms_optimize_stored_image($newAbs, $newMime);
-    } catch (Throwable $e) {
-        return [
-            'path' => $webPath,
-            'changed' => false,
-            'skipped' => false,
-            'message' => $e->getMessage(),
-        ];
-    }
-
-    $newReal = realpath($newAbs) ?: $newAbs;
-    $afterHash = is_file($newAbs) ? md5_file($newAbs) : '';
-    $newWeb = cms_upload_absolute_to_web($newAbs);
-    $changed = $oldReal !== $newReal || ($beforeHash !== '' && $afterHash !== '' && $beforeHash !== $afterHash);
-
-    if (!$changed) {
-        return [
-            'path' => $webPath,
-            'changed' => false,
-            'skipped' => true,
-            'message' => 'قبلاً مرکز‌چین است یا نیازی به تغییر نیست',
-        ];
-    }
-
-    return [
-        'path' => $newWeb,
-        'changed' => true,
-        'skipped' => false,
-        'message' => 'مرکز‌چینی شد',
-    ];
-}
-
-/** Whether a session upload path can be auto-framed (PNG/WebP/GIF). */
-function cms_upload_path_is_framable(string $webPath): bool
-{
-    $ext = strtolower(pathinfo($webPath, PATHINFO_EXTENSION));
-    return in_array($ext, ['png', 'webp', 'gif'], true);
-}
-
 function cms_upload_error_message(int $error, string $kind = 'file'): string
 {
     $uploadErrors = [
@@ -322,7 +190,7 @@ function cms_upload_error_message(int $error, string $kind = 'file'): string
 }
 
 /** @param array{name?:string,tmp_name?:string,error?:int,size?:int} $file
- *  @param array{auto_frame?:bool} $options */
+ *  @param array{prefix?:string} $options */
 function cms_store_uploaded_image(array $file, array $options = []): string
 {
     $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
@@ -356,7 +224,6 @@ function cms_store_uploaded_image(array $file, array $options = []): string
     if (!isset($map[$mime])) {
         throw new RuntimeException('فقط JPEG/PNG/WebP/GIF مجاز است (نوع تشخیص‌داده‌شده: ' . ($mime !== '' ? $mime : 'نامشخص') . ')');
     }
-    // No app-level size cap — images are resized/compressed server-side after upload.
     // PHP upload_max_filesize / post_max_size still apply.
 
     $uploadsDir = cms_uploads_root();
@@ -377,16 +244,6 @@ function cms_store_uploaded_image(array $file, array $options = []): string
     if (!move_uploaded_file((string) $file['tmp_name'], $dest)) {
         throw new RuntimeException('ذخیره فایل ناموفق بود');
     }
-
-    if (!empty($options['auto_frame'])) {
-        $dest = cms_auto_frame_product_image($dest, $mime);
-        $detected = cms_detect_image_mime($dest);
-        if ($detected !== '') {
-            $mime = $detected;
-        }
-    }
-
-    $dest = cms_optimize_stored_image($dest, $mime);
 
     $publicPath = '/uploads/' . str_replace('\\', '/', basename($dest));
     cms_upload_session_track_path($publicPath);
