@@ -991,6 +991,7 @@ function price_import_refresh_session_rows(PDO $pdo, array $rows): array
     $refreshed = [];
 
     foreach ($rows as $row) {
+        $priceFieldsApplied = !empty($row['price_fields_applied']);
         $productId = (int) ($row['existing_product_id'] ?? 0);
         $existingCarIds = $productId > 0 ? ($carIdsMap[$productId] ?? []) : [];
         $skipCars = $productId > 0 && $existingCarIds !== [];
@@ -1012,6 +1013,9 @@ function price_import_refresh_session_rows(PDO $pdo, array $rows): array
         $issues = price_import_row_issues($row, $carMatches, $overrides, $extraCars);
         $row['ready'] = $issues['ready'];
         $row['issues'] = $issues['issues'];
+        if ($priceFieldsApplied) {
+            $row['price_fields_applied'] = true;
+        }
         $refreshed[] = $row;
     }
 
@@ -1144,6 +1148,152 @@ function price_import_save_alias(PDO $pdo, string $token, int $carModelId): void
     $stmt->execute([$norm, $carModelId]);
 }
 
+function price_import_row_pack_size(array $row): ?int
+{
+    $packSize = isset($row['pack_size']) && $row['pack_size'] !== '' && $row['pack_size'] !== null
+        ? max(0, (int) $row['pack_size'])
+        : null;
+    if ($packSize === 0) {
+        return null;
+    }
+
+    return $packSize;
+}
+
+function price_import_description_with_warranty(?string $existing, string $warranty): ?string
+{
+    $warranty = trim($warranty);
+    $existing = trim((string) $existing);
+    if ($warranty === '') {
+        return $existing !== '' ? $existing : null;
+    }
+
+    $line = 'گارانتی: ' . $warranty;
+    if ($existing === '') {
+        return $line;
+    }
+    if (preg_match('/^گارانتی:\s*/u', $existing)) {
+        return $line;
+    }
+
+    return $line . "\n" . $existing;
+}
+
+/** @param array<string, mixed> $row */
+function price_import_apply_existing_fields(PDO $pdo, array $row, ?array $existing = null): bool
+{
+    $visualId = trim((string) ($row['visual_id'] ?? ''));
+    if ($visualId === '') {
+        return false;
+    }
+
+    $priceText = trim((string) ($row['price_text'] ?? ''));
+    if ($priceText === '') {
+        return false;
+    }
+
+    if ($existing === null) {
+        $existing = price_import_find_product_by_visual_id($pdo, $visualId);
+    }
+    if (!$existing) {
+        return false;
+    }
+
+    $productId = (int) $existing['id'];
+    $packSize = price_import_row_pack_size($row);
+    $description = price_import_description_with_warranty(
+        (string) ($existing['description'] ?? ''),
+        (string) ($row['warranty'] ?? '')
+    );
+
+    $stmt = $pdo->prepare(
+        'UPDATE products SET price_text = ?, pack_size = ?, description = ?, published = 1 WHERE id = ?'
+    );
+    $stmt->execute([$priceText, $packSize, $description, $productId]);
+
+    return true;
+}
+
+/**
+ * @param array<string, mixed> $preview
+ * @return array{
+ *   updated:int,
+ *   created:int,
+ *   auto_removed_indices:list<int>,
+ *   errors:list<string>,
+ *   remaining_rows:list<array<string, mixed>>
+ * }
+ */
+function price_import_auto_apply_on_upload(PDO $pdo, array $preview, bool $saveAliases = true): array
+{
+    $rows = is_array($preview['rows'] ?? null) ? $preview['rows'] : [];
+    $updated = 0;
+    $created = 0;
+    $removedIndices = [];
+    $errors = [];
+    $remaining = [];
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($rows as $row) {
+            $index = (int) ($row['index'] ?? -1);
+            $action = (string) ($row['action'] ?? 'create');
+            $ready = !empty($row['ready']);
+            $skipCars = !empty($row['skip_cars']);
+            $priceValid = trim((string) ($row['price_text'] ?? '')) !== '';
+
+            if ($action === 'update' && $priceValid) {
+                try {
+                    if (price_import_apply_existing_fields($pdo, $row)) {
+                        $updated++;
+                        $row['price_fields_applied'] = true;
+                    }
+                    if ($skipCars) {
+                        $removedIndices[] = $index;
+                        continue;
+                    }
+                    $remaining[] = $row;
+                    continue;
+                } catch (Throwable $e) {
+                    $errors[] = 'ردیف ' . ($row['visual_id'] ?? '?') . ': ' . $e->getMessage();
+                    $remaining[] = $row;
+                    continue;
+                }
+            }
+
+            if ($action === 'create' && $ready) {
+                try {
+                    $result = price_import_apply_row($pdo, $row, $saveAliases);
+                    if ($result['action'] === 'create') {
+                        $created++;
+                    } else {
+                        $updated++;
+                    }
+                    $removedIndices[] = $index;
+                    continue;
+                } catch (Throwable $e) {
+                    $errors[] = 'ردیف ' . ($row['visual_id'] ?? '?') . ': ' . $e->getMessage();
+                }
+            }
+
+            $remaining[] = $row;
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+
+    return [
+        'updated' => $updated,
+        'created' => $created,
+        'auto_removed_indices' => $removedIndices,
+        'errors' => $errors,
+        'remaining_rows' => $remaining,
+    ];
+}
+
 /** @param array<string, mixed> $rowInput */
 function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = false): array
 {
@@ -1154,12 +1304,7 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
 
     $name = trim((string) ($rowInput['name'] ?? ''));
     $priceText = trim((string) ($rowInput['price_text'] ?? ''));
-    $packSize = isset($rowInput['pack_size']) && $rowInput['pack_size'] !== '' && $rowInput['pack_size'] !== null
-        ? max(0, (int) $rowInput['pack_size'])
-        : null;
-    if ($packSize === 0) {
-        $packSize = null;
-    }
+    $packSize = price_import_row_pack_size($rowInput);
 
     $skipCars = !empty($rowInput['skip_cars']);
     $carMatches = is_array($rowInput['car_matches'] ?? null) ? $rowInput['car_matches'] : [];
@@ -1173,12 +1318,12 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
 
     if ($existing) {
         $productId = (int) $existing['id'];
-        $stmt = $pdo->prepare('UPDATE products SET price_text = ?, pack_size = ?, published = 1 WHERE id = ?');
-        $stmt->execute([
-            $priceText !== '' ? $priceText : null,
-            $packSize,
-            $productId,
-        ]);
+        if ($priceText === '') {
+            throw new RuntimeException('قیمت نامعتبر است');
+        }
+        if (!price_import_apply_existing_fields($pdo, $rowInput, $existing)) {
+            throw new RuntimeException('به‌روزرسانی قیمت ناموفق بود');
+        }
         if (!$skipCars && $carIds !== []) {
             cms_product_save_car_model_ids($pdo, $productId, $carIds, $carCategoryMap);
             price_import_sync_product_categories(
@@ -1220,7 +1365,7 @@ function price_import_apply_row(PDO $pdo, array $rowInput, bool $saveAliases = f
     }
 
     $warranty = trim((string) ($rowInput['warranty'] ?? ''));
-    $description = $warranty !== '' ? 'گارانتی: ' . $warranty : null;
+    $description = price_import_description_with_warranty(null, $warranty);
     $slug = price_import_unique_slug($pdo, $name);
 
     $stmt = $pdo->prepare(

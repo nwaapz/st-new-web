@@ -211,13 +211,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $preview = price_import_build_preview($pdo, $parsed);
-            $_SESSION[PRICE_IMPORT_SESSION_KEY] = [
+            $autoResult = price_import_auto_apply_on_upload($pdo, $preview);
+            $sessionPayload = [
                 'source_name' => $originalName,
                 'stored_path' => $stored,
                 'parsed' => $parsed,
-                'preview' => $preview,
+                'preview' => ['rows' => $autoResult['remaining_rows']],
             ];
-            cms_flash(count($parsed) . ' ردیف خوانده شد — موارد نیازمند بررسی را تکمیل کنید');
+            $sessionPayload = price_import_session_remove_rows(
+                $sessionPayload,
+                $autoResult['auto_removed_indices']
+            );
+            $sessionPayload['preview']['rows'] = price_import_refresh_session_rows(
+                $pdo,
+                is_array($sessionPayload['preview']['rows'] ?? null) ? $sessionPayload['preview']['rows'] : []
+            );
+            $_SESSION[PRICE_IMPORT_SESSION_KEY] = $sessionPayload;
+
+            $remainingCount = count($sessionPayload['preview']['rows']);
+            $flash = sprintf(
+                '%d ردیف خوانده شد — %d قیمت خودکار به‌روزرسانی شد',
+                count($parsed),
+                $autoResult['updated']
+            );
+            if ($autoResult['created'] > 0) {
+                $flash .= '، ' . $autoResult['created'] . ' محصول جدید ایجاد شد';
+            }
+            if ($remainingCount > 0) {
+                $flash .= ' — ' . $remainingCount . ' ردیف برای تعریف خودرو یا بررسی باقی ماند';
+            } elseif ($autoResult['updated'] > 0 || $autoResult['created'] > 0) {
+                $flash .= ' — همه ردیف‌ها پردازش شد';
+            }
+            if (!empty($autoResult['errors'])) {
+                $flash .= ' — ' . count($autoResult['errors']) . ' خطا';
+            }
+            cms_flash($flash, !empty($autoResult['errors']) && $autoResult['updated'] === 0 && $autoResult['created'] === 0 ? 'error' : 'ok');
             cms_redirect('product-price-import.php');
         }
 
@@ -345,8 +373,9 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 <div class="price-import-page">
 <h1 style="margin-top:0">ورود قیمت از Excel</h1>
 <p class="cms-muted">
-  فایل لیست قیمت (.xlsx یا .csv) را آپلود کنید. روی cPanel نیازی به ریستارت Apache نیست —
-  اگر xlsx کار نکرد، در Excel «Save As → CSV UTF-8» بزنید.
+  فایل لیست قیمت (.xlsx یا .csv) را آپلود کنید. قیمت، گارانتی و تعداد کارتن محصولات موجود
+  <strong>بلافاصله</strong> در سایت به‌روز می‌شود. فقط ردیف‌های بدون خودرو یا محصول جدید در پیش‌نمایش می‌مانند.
+  روی cPanel اگر xlsx کار نکرد، در Excel «Save As → CSV UTF-8» بزنید.
 </p>
 <p class="cms-muted"><?= cms_h(price_import_xlsx_support_hint()) ?></p>
 
@@ -357,7 +386,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     <label class="cms-label">فایل .xlsx یا .csv</label>
     <input class="cms-input" type="file" name="price_file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required>
     <div class="cms-form__actions">
-      <button class="cms-btn cms-btn--primary" type="submit">خواندن و پیش‌نمایش</button>
+      <button class="cms-btn cms-btn--primary" type="submit">آپلود و به‌روزرسانی خودکار</button>
       <?php if ($allRows !== []): ?>
         <button class="cms-btn" type="submit" formaction="product-price-import.php" formmethod="post" name="action" value="clear">پاک کردن پیش‌نمایش</button>
       <?php endif; ?>
@@ -381,18 +410,18 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 <?php if ($allRows !== []): ?>
   <form method="post" class="cms-card price-import-preview">
     <input type="hidden" name="action" value="apply">
-    <h2>۲. بررسی و تأیید</h2>
+    <h2>۲. ردیف‌های نیازمند تعریف خودرو</h2>
 
     <div class="price-import-summary">
-      <span><strong><?= count($rows) ?></strong> ردیف</span>
+      <span><strong><?= count($rows) ?></strong> ردیف باقی‌مانده</span>
       <?php if ($dismissedRows !== []): ?>
         <span class="price-import-badge"><?= count($dismissedRows) ?> بسته‌شده</span>
       <?php endif; ?>
-      <span class="price-import-badge price-import-badge--ok"><?= $readyCount ?> آماده</span>
+      <span class="price-import-badge price-import-badge--ok"><?= $readyCount ?> آماده ذخیره</span>
       <?php if ($carSetupCount > 0): ?>
         <span class="price-import-badge price-import-badge--warn"><?= $carSetupCount ?> نیاز به تعریف خودرو</span>
       <?php endif; ?>
-      <span class="cms-muted">فیلدهای قرمز را تکمیل کنید</span>
+      <span class="cms-muted">خودروها را تکمیل کنید و «اعمال» بزنید</span>
     </div>
 
     <div class="price-import-toolbar">
@@ -408,7 +437,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
     <div class="price-import-rows">
       <?php if ($rows === []): ?>
-        <p class="cms-muted">همه ردیف‌ها بسته شده‌اند. برای بازگردانی از فهرست پایین استفاده کنید یا فایل را دوباره آپلود کنید.</p>
+        <p class="cms-muted">همه ردیف‌ها خودکار پردازش شدند — ردیفی برای تعریف خودرو باقی نمانده.</p>
       <?php endif; ?>
       <?php foreach ($rows as $row):
         $index = (int) ($row['index'] ?? 0);
@@ -421,6 +450,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         $needsName = $action === 'create' && trim((string) ($row['name'] ?? '')) === '';
         $skipCars = !empty($row['skip_cars']);
         $needsCarSetup = !empty($row['needs_car_setup']);
+        $priceFieldsApplied = !empty($row['price_fields_applied']);
         ?>
         <article class="price-import-row-card <?= $ready ? 'is-ready' : 'needs-review' ?>" data-ready="<?= $ready ? '1' : '0' ?>" data-needs-car-setup="<?= $needsCarSetup ? '1' : '0' ?>" data-row-index="<?= $index ?>" data-action="<?= cms_h($action) ?>" data-skip-cars="<?= $skipCars ? '1' : '0' ?>">
           <header class="price-import-row-card__head">
@@ -437,7 +467,9 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                 <?php endif; ?>
               </div>
             </div>
-            <?php if ($ready): ?>
+            <?php if ($priceFieldsApplied && $needsCarSetup): ?>
+              <span class="price-import-badge price-import-badge--ok">قیمت به‌روز شد — خودرو را تکمیل کنید</span>
+            <?php elseif ($ready): ?>
               <span class="price-import-badge price-import-badge--ok price-import-row-ready-badge">آماده</span>
             <?php else: ?>
               <span class="price-import-badge price-import-badge--warn price-import-row-ready-badge">نیاز به بررسی</span>
@@ -486,7 +518,13 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
             <div class="price-import-field<?= $needsPrice ? ' needs-attention' : '' ?>">
               <span class="price-import-field__label">قیمت (تومان)</span>
-              <input class="cms-input" name="rows[<?= $index ?>][price_text]" value="<?= cms_h((string) ($row['price_text'] ?? '')) ?>">
+              <?php if ($priceFieldsApplied && $action === 'update'): ?>
+                <div><?= cms_h((string) ($row['price_text'] ?? '')) ?></div>
+                <input type="hidden" name="rows[<?= $index ?>][price_text]" value="<?= cms_h((string) ($row['price_text'] ?? '')) ?>">
+                <span class="price-import-field__hint">در سرور ذخیره شد</span>
+              <?php else: ?>
+                <input class="cms-input" name="rows[<?= $index ?>][price_text]" value="<?= cms_h((string) ($row['price_text'] ?? '')) ?>">
+              <?php endif; ?>
               <?php if ($action === 'update' && !empty($row['existing_price_text'])): ?>
                 <span class="price-import-field__hint">قبلی: <?= cms_h((string) $row['existing_price_text']) ?></span>
               <?php endif; ?>
@@ -494,7 +532,12 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
             <div class="price-import-field<?= $needsPack ? ' needs-attention' : '' ?>">
               <span class="price-import-field__label">تعداد در کارتن</span>
-              <input class="cms-input" type="number" min="0" name="rows[<?= $index ?>][pack_size]" value="<?= cms_h((string) ($row['pack_size'] ?? '')) ?>">
+              <?php if ($priceFieldsApplied && $action === 'update'): ?>
+                <div><?= cms_h((string) ($row['pack_size'] ?? '—')) ?></div>
+                <input type="hidden" name="rows[<?= $index ?>][pack_size]" value="<?= cms_h((string) ($row['pack_size'] ?? '')) ?>">
+              <?php else: ?>
+                <input class="cms-input" type="number" min="0" name="rows[<?= $index ?>][pack_size]" value="<?= cms_h((string) ($row['pack_size'] ?? '')) ?>">
+              <?php endif; ?>
               <?php if ($action === 'update' && !empty($row['existing_pack_size'])): ?>
                 <span class="price-import-field__hint">قبلی: <?= cms_h((string) $row['existing_pack_size']) ?></span>
               <?php endif; ?>
@@ -596,8 +639,8 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
     </div>
 
     <div class="cms-form__actions">
-      <button class="cms-btn cms-btn--primary" type="submit" name="action" value="apply" <?= $reviewCount > 0 ? 'onclick="return confirm(\'فقط ردیف‌های آماده و تیک‌خورده اعمال می‌شوند. ادامه؟\')"' : '' ?>>
-        اعمال ردیف‌های آماده
+      <button class="cms-btn cms-btn--primary" type="submit" name="action" value="apply" <?= $reviewCount > 0 ? 'onclick="return confirm(\'ردیف‌های آماده (با خودرو) اعمال می‌شوند. ادامه؟\')"' : '' ?>>
+        اعمال ردیف‌های باقی‌مانده
       </button>
     </div>
   </form>
