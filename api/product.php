@@ -44,6 +44,10 @@ function product_api_ensure_schema(PDO $pdo): void
     if (count($visualIdx) === 0) {
         $pdo->exec('ALTER TABLE products ADD UNIQUE KEY uq_prod_visual_id (visual_id)');
     }
+    $overrideExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'image_setup_override'")->fetchAll();
+    if (count($overrideExists) === 0) {
+        $pdo->exec('ALTER TABLE products ADD COLUMN image_setup_override VARCHAR(512) NULL AFTER shop_display_image');
+    }
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS product_images (
           id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -116,7 +120,7 @@ try {
     $stmt = $pdo->prepare(
         'SELECT p.id, ' . $primaryCategorySql . ' AS category_id, p.name, p.slug, p.visual_id, p.description,
                 p.price_text, p.pack_size, p.banner, p.image, p.video_path, p.video_path_low, p.video_poster,
-                p.detail_lead_image, p.shop_display_image, p.sort_order,
+                p.detail_lead_image, p.shop_display_image, p.image_setup_override, p.sort_order,
                 p.dim_length, p.dim_width, p.dim_height, p.dim_weight,
                 ' . $categoryNamesSql . ' AS category_name, c.slug AS category_slug, c.image AS category_image,
                 c.video_path AS category_video_path, c.video_path_low AS category_video_path_low,

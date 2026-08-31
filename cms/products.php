@@ -72,6 +72,10 @@ function product_ensure_detail_schema(PDO $pdo): void
     if (count($visualIdx) === 0) {
         $pdo->exec('ALTER TABLE products ADD UNIQUE KEY uq_prod_visual_id (visual_id)');
     }
+    $overrideExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'image_setup_override'")->fetchAll();
+    if (count($overrideExists) === 0) {
+        $pdo->exec('ALTER TABLE products ADD COLUMN image_setup_override VARCHAR(512) NULL AFTER shop_display_image');
+    }
     $skipFrameExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'skip_image_auto_frame'")->fetchAll();
     if (count($skipFrameExists) === 0) {
         $pdo->exec('ALTER TABLE products ADD COLUMN skip_image_auto_frame TINYINT(1) NOT NULL DEFAULT 0 AFTER shop_display_image');
@@ -155,6 +159,41 @@ function product_replace_gallery(PDO $pdo, int $productId, array $slides): void
             $index,
         ]);
     }
+}
+
+/** @return list<string> */
+function product_parse_image_setup_override(string $raw): array
+{
+    $paths = [];
+    foreach (explode('#', $raw) as $part) {
+        $name = trim($part);
+        if ($name === '') {
+            continue;
+        }
+        $basename = basename(str_replace('\\', '/', $name));
+        if ($basename === '' || $basename === '.' || $basename === '..') {
+            continue;
+        }
+        $paths[] = '/uploads/' . $basename;
+    }
+    return $paths;
+}
+
+/** @return list<string> */
+function product_missing_upload_basenames(array $paths): array
+{
+    $uploadsDir = cms_uploads_root();
+    $missing = [];
+    foreach ($paths as $path) {
+        $basename = basename(str_replace('\\', '/', $path));
+        if ($basename === '') {
+            continue;
+        }
+        if (!is_file($uploadsDir . DIRECTORY_SEPARATOR . $basename)) {
+            $missing[] = $basename;
+        }
+    }
+    return $missing;
 }
 
 function product_normalize_image_picker(string $value): ?string
@@ -290,10 +329,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $banner = 'none';
         }
         $skipImageAutoFrame = 0;
-        $image = cms_handle_optional_upload(
-            'image',
-            (string) ($_POST['image'] ?? '')
-        );
+        $imageSetupOverride = trim((string) ($_POST['image_setup_override'] ?? ''));
+        $imageSetupOverrideDb = $imageSetupOverride !== '' ? $imageSetupOverride : null;
+        $overrideMissingWarning = '';
+
+        if ($imageSetupOverride !== '') {
+            $overridePaths = product_parse_image_setup_override($imageSetupOverride);
+            if ($overridePaths === []) {
+                throw new RuntimeException('تنظیم تصاویر جایگزین نامعتبر است — حداقل یک نام فایل وارد کنید');
+            }
+            $missing = product_missing_upload_basenames($overridePaths);
+            if ($missing !== []) {
+                $overrideMissingWarning = ' — فایل‌های یافت‌نشده: ' . implode('، ', $missing);
+            }
+            $image = $overridePaths[0];
+            $collectedGallery = [];
+            foreach (array_slice($overridePaths, 1) as $path) {
+                $collectedGallery[] = [
+                    'image' => $path,
+                    'alt_text' => '',
+                ];
+            }
+            $detailLeadImage = null;
+            $shopDisplayImage = null;
+            $videoPoster = null;
+            $galleryCount = count($collectedGallery);
+        } else {
+            $image = cms_handle_optional_upload(
+                'image',
+                (string) ($_POST['image'] ?? '')
+            );
+            $detailLeadImage = product_normalize_image_picker((string) ($_POST['detail_lead_image'] ?? ''));
+            $shopDisplayImage = product_normalize_image_picker((string) ($_POST['shop_display_image'] ?? ''));
+            $videoPoster = product_normalize_image_picker((string) ($_POST['video_poster'] ?? ''));
+            $galleryCount = max(0, (int) ($_POST['gallery_count'] ?? 0));
+            if ($galleryCount > PRODUCT_GALLERY_MAX) {
+                $galleryCount = PRODUCT_GALLERY_MAX;
+            }
+            $collectedGallery = product_collect_gallery_from_post($galleryCount);
+        }
         $videoPath = cms_handle_optional_video_upload(
             'video_path',
             (string) ($_POST['video_path'] ?? ''),
@@ -304,20 +378,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (string) ($_POST['video_path_low'] ?? ''),
             'products/videos'
         );
-        $detailLeadImage = product_normalize_image_picker((string) ($_POST['detail_lead_image'] ?? ''));
-        $shopDisplayImage = product_normalize_image_picker((string) ($_POST['shop_display_image'] ?? ''));
-        $videoPoster = product_normalize_image_picker((string) ($_POST['video_poster'] ?? ''));
         $dimLength = trim((string) ($_POST['dim_length'] ?? ''));
         $dimWidth = trim((string) ($_POST['dim_width'] ?? ''));
         $dimHeight = trim((string) ($_POST['dim_height'] ?? ''));
         $dimWeight = trim((string) ($_POST['dim_weight'] ?? ''));
         $sortOrder = (int) ($_POST['sort_order'] ?? 0);
         $published = isset($_POST['published']) ? 1 : 0;
-        $galleryCount = max(0, (int) ($_POST['gallery_count'] ?? 0));
-        if ($galleryCount > PRODUCT_GALLERY_MAX) {
-            $galleryCount = PRODUCT_GALLERY_MAX;
-        }
-        $collectedGallery = product_collect_gallery_from_post($galleryCount);
 
         if ($categoryIds === [] || $name === '') {
             throw new RuntimeException('دسته محصول و نام الزامی است');
@@ -359,7 +425,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id > 0) {
             $stmt = $pdo->prepare(
                 'UPDATE products SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
-                 video_path=?, video_path_low=?, video_poster=?, detail_lead_image=?, shop_display_image=?, skip_image_auto_frame=?,
+                 video_path=?, video_path_low=?, video_poster=?, detail_lead_image=?, shop_display_image=?, image_setup_override=?, skip_image_auto_frame=?,
                  dim_length=?, dim_width=?, dim_height=?, dim_weight=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
@@ -374,6 +440,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $videoPoster,
                 $detailLeadImage,
                 $shopDisplayImage,
+                $imageSetupOverrideDb,
                 $skipImageAutoFrame,
                 $dimLength !== '' ? $dimLength : null,
                 $dimWidth !== '' ? $dimWidth : null,
@@ -385,9 +452,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $stmt = $pdo->prepare(
                 'INSERT INTO products (name, slug, visual_id, description, price_text, pack_size, banner, image,
-                 video_path, video_path_low, video_poster, detail_lead_image, shop_display_image, skip_image_auto_frame,
+                 video_path, video_path_low, video_poster, detail_lead_image, shop_display_image, image_setup_override, skip_image_auto_frame,
                  dim_length, dim_width, dim_height, dim_weight, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name, $slug, $visualId,
@@ -401,6 +468,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $videoPoster,
                 $detailLeadImage,
                 $shopDisplayImage,
+                $imageSetupOverrideDb,
                 $skipImageAutoFrame,
                 $dimLength !== '' ? $dimLength : null,
                 $dimWidth !== '' ? $dimWidth : null,
@@ -436,7 +504,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         product_replace_gallery($pdo, $productId, $persistGallery);
         $pdo->commit();
 
-        cms_flash($id > 0 ? 'محصول به‌روز شد' : 'محصول اضافه شد');
+        cms_flash(($id > 0 ? 'محصول به‌روز شد' : 'محصول اضافه شد') . $overrideMissingWarning);
         cms_redirect($productsListQs($returnQ, $returnPage));
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -652,10 +720,18 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
     </label>
   </div>
 
+  <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">تنظیم تصاویر</h3>
+  <label class="cms-field"><span class="cms-label">تنظیم تصاویر (جایگزین)</span>
+    <input class="cms-input" name="image_setup_override" dir="ltr"
+      value="<?= cms_h($edit['image_setup_override'] ?? '') ?>"
+      placeholder="RAVI9750.png#st-web.png#app-image.png">
+    <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">نام فایل‌ها را با # جدا کنید. اولین تصویر = تصویر اصلی و اسلاید اول؛ بقیه به ترتیب در اسلایدر. اگر پر باشد، فیلدهای تصویر دستی نادیده گرفته می‌شوند.</span>
+  </label>
+
   <?php cms_image_field('image', 'تصویر اصلی', (string) ($edit['image'] ?? '')); ?>
 
   <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">گالری تصاویر</h3>
-  <p class="cms-muted" style="margin:0 0 .75rem">تصاویر اضافی صفحه محصول. اسلاید اول از طریق «اسلاید اول» قابل تنظیم است؛ تصویر اصلی همیشه در گالری نمایش داده می‌شود.</p>
+  <p class="cms-muted" style="margin:0 0 .75rem">تصاویر اضافی صفحه محصول. اسلاید اول از طریق «اسلاید اول» قابل تنظیم است؛ تصویر اصلی همیشه در گالری نمایش داده می‌شود. در صورت پر بودن «تنظیم تصاویر (جایگزین)»، این بخش نادیده گرفته می‌شود.</p>
   <input type="hidden" name="gallery_count" value="<?= count($gallery) ?>">
   <?php if ($gallery === []): ?>
     <p class="cms-muted">هنوز تصویری در گالری نیست.</p>

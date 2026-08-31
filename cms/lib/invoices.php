@@ -95,22 +95,39 @@ function invoices_totals_from_items(array $items): array
     $lines = [];
     foreach ($items as $item) {
         $qty = max(1, (int) ($item['quantity'] ?? 1));
-        $unit = null;
+        $unitType = isset($item['unit_type']) && (string) $item['unit_type'] === 'pack'
+            ? 'pack'
+            : 'piece';
+        $packSize = isset($item['pack_size']) && $item['pack_size'] !== null
+            ? (int) $item['pack_size']
+            : 0;
+        $piecePrice = null;
         try {
-            $unit = invoices_parse_toman_amount(
+            $piecePrice = invoices_parse_toman_amount(
                 isset($item['price_text']) ? (string) $item['price_text'] : null
             );
         } catch (Throwable $e) {
-            $unit = null;
+            $piecePrice = null;
         }
-        $line = $unit !== null ? $unit * $qty : null;
+
+        $unitPrice = null;
+        $line = null;
+        if ($piecePrice !== null) {
+            if ($unitType === 'pack' && $packSize > 0) {
+                $unitPrice = $piecePrice * $packSize;
+                $line = $unitPrice * $qty;
+            } else {
+                $unitPrice = $piecePrice;
+                $line = $piecePrice * $qty;
+            }
+        }
         if ($line !== null) {
             $total += $line;
         }
         $lines[] = [
-            'unit' => $unit,
+            'unit' => $unitPrice,
             'line' => $line,
-            'unit_label' => $unit !== null ? invoices_format_toman($unit) : '—',
+            'unit_label' => $unitPrice !== null ? invoices_format_toman($unitPrice) : '—',
             'line_label' => $line !== null ? invoices_format_toman($line) : '—',
         ];
     }
