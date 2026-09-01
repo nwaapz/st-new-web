@@ -3,5 +3,5 @@
 3:"$Sreact.suspense"
 4:I[4677,["8500","static/chunks/8500-3953cc33eeceb44e.js","1659","static/chunks/app/warranty/page-8e28fb9dc5b54428.js"],"WarrantyPortalView"]
 5:I[484,[],"OutletBoundary"]
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"warranty-portal","children":["$","div",null,{"className":"warranty-portal__inner","children":[["$","$L2",null,{}],["$","$3",null,{"fallback":["$","p",null,{"className":"branch-portal__empty","children":"در حال آماده‌سازی…"}],"children":["$","$L4",null,{}]}]]}]}],null,["$","$L5",null,{"children":["$","$3",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"Q7_3kynKYfp_WOWVtXLpt"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"warranty-portal","children":["$","div",null,{"className":"warranty-portal__inner","children":[["$","$L2",null,{}],["$","$3",null,{"fallback":["$","p",null,{"className":"branch-portal__empty","children":"در حال آماده‌سازی…"}],"children":["$","$L4",null,{}]}]]}]}],null,["$","$L5",null,{"children":["$","$3",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"in0MJ5h_jsc4vFG5Czs7A"}
 6:null

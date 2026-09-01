@@ -191,6 +191,8 @@ CREATE TABLE IF NOT EXISTS product_series (
   description TEXT NULL,
   price_text VARCHAR(128) NULL,
   image VARCHAR(512) NULL,
+  detail_lead_image VARCHAR(512) NULL,
+  image_setup_override VARCHAR(512) NULL,
   sort_order INT NOT NULL DEFAULT 0,
   published TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -208,6 +210,29 @@ CREATE TABLE IF NOT EXISTS product_series_items (
   KEY idx_series_item_product (product_id),
   CONSTRAINT fk_series_item_series FOREIGN KEY (series_id) REFERENCES product_series (id) ON DELETE CASCADE,
   CONSTRAINT fk_series_item_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS product_series_categories (
+  series_id INT UNSIGNED NOT NULL,
+  category_id INT UNSIGNED NOT NULL,
+  sort_order TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (series_id, category_id),
+  KEY idx_scat_category (category_id),
+  CONSTRAINT fk_scat_series FOREIGN KEY (series_id) REFERENCES product_series (id) ON DELETE CASCADE,
+  CONSTRAINT fk_scat_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS product_series_images (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  series_id INT UNSIGNED NOT NULL,
+  image VARCHAR(512) NOT NULL,
+  alt_text VARCHAR(255) NOT NULL DEFAULT '',
+  sort_order INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  KEY idx_series_images_series (series_id),
+  CONSTRAINT fk_series_image_series
+    FOREIGN KEY (series_id) REFERENCES product_series (id)
+    ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -3,5 +3,5 @@
 3:I[3996,["8500","static/chunks/8500-3953cc33eeceb44e.js","3597","static/chunks/3597-4f3e915282d69065.js","5363","static/chunks/app/customerclub/reminders/page-a1f686f0f31561c3.js"],"RemindersView"]
 4:I[484,[],"OutletBoundary"]
 5:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"mc-page-root","children":["$","$L2",null,{"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$5",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"Q7_3kynKYfp_WOWVtXLpt"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"mc-page-root","children":["$","$L2",null,{"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$5",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"in0MJ5h_jsc4vFG5Czs7A"}
 6:null

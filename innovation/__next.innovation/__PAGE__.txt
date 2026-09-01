@@ -1,6 +1,6 @@
 1:"$Sreact.fragment"
-2:I[2342,["8500","static/chunks/8500-3953cc33eeceb44e.js","2257","static/chunks/2257-eb8d1d676ec661da.js","1720","static/chunks/1720-dcfe703e124273ef.js","3936","static/chunks/app/innovation/page-7d16b380ce7bab00.js"],"ProductsCatalog"]
+2:I[2342,["8500","static/chunks/8500-3953cc33eeceb44e.js","7914","static/chunks/7914-1fd51343eeff11eb.js","1720","static/chunks/1720-bfc3e5ab1d3c6b49.js","3936","static/chunks/app/innovation/page-5a249a5b2d2dc061.js"],"ProductsCatalog"]
 3:I[484,[],"OutletBoundary"]
 4:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"shop-page","children":["$","$L2",null,{}]}],null,["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"Q7_3kynKYfp_WOWVtXLpt"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"shop-page","children":["$","$L2",null,{}]}],null,["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"in0MJ5h_jsc4vFG5Czs7A"}
 5:null

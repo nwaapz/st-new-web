@@ -1,6 +1,6 @@
 1:"$Sreact.fragment"
 2:"$Sreact.suspense"
-3:I[9894,["8500","static/chunks/8500-3953cc33eeceb44e.js","2257","static/chunks/2257-eb8d1d676ec661da.js","4005","static/chunks/app/cart/page-e1a1b332a6fc4e07.js"],"CartView"]
+3:I[9894,["8500","static/chunks/8500-3953cc33eeceb44e.js","7914","static/chunks/7914-1fd51343eeff11eb.js","4005","static/chunks/app/cart/page-2e2e9e21d3ccf635.js"],"CartView"]
 4:I[484,[],"OutletBoundary"]
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"cart-page","children":["$","$2",null,{"fallback":["$","section",null,{"className":"cart","aria-label":"سبد خرید","children":["$","div",null,{"className":"cart__panel","children":["$","div",null,{"className":"cart__status","children":"در حال آماده‌سازی سبد…"}]}]}],"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"Q7_3kynKYfp_WOWVtXLpt"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"cart-page","children":["$","$2",null,{"fallback":["$","section",null,{"className":"cart","aria-label":"سبد خرید","children":["$","div",null,{"className":"cart__panel","children":["$","div",null,{"className":"cart__status","children":"در حال آماده‌سازی سبد…"}]}]}],"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"in0MJ5h_jsc4vFG5Czs7A"}
 5:null

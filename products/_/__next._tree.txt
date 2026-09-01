@@ -1,4 +1,4 @@
-:HL["/test2/_next/static/css/1054ac89e62df6cf.css","style"]
+:HL["/test2/_next/static/css/5ed8827ec421bd8a.css","style"]
 :HL["https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap","style"]
 :HL["/test2/images/header-hero-image-button-metal.png","image"]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"products","param":null,"prefetchHints":0,"slots":{"children":{"name":"slug","param":{"type":"d","key":"_","siblings":null},"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}}}},"staleTime":300,"buildId":"Q7_3kynKYfp_WOWVtXLpt"}
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"products","param":null,"prefetchHints":0,"slots":{"children":{"name":"slug","param":{"type":"d","key":"_","siblings":null},"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}}}},"staleTime":300,"buildId":"in0MJ5h_jsc4vFG5Czs7A"}

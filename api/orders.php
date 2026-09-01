@@ -9,6 +9,7 @@ require_once dirname(__DIR__) . '/cms/lib/branches.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-series-categories.php';
 
 site_auth_prepare_cors();
 
@@ -106,7 +107,7 @@ try {
         $productId = isset($raw['id']) ? (int) $raw['id'] : 0;
         $name = isset($raw['name']) ? trim((string) $raw['name']) : '';
         $quantity = isset($raw['quantity']) ? (int) $raw['quantity'] : 0;
-        if ($productId <= 0 || $name === '' || $quantity < 1) {
+        if ($productId === 0 || $name === '' || $quantity < 1) {
             continue;
         }
         $quantity = min(99, $quantity);
@@ -115,8 +116,9 @@ try {
             : 'piece';
         $clientPack = isset($raw['pack_size']) ? (int) $raw['pack_size'] : 0;
 
+        $isSeriesKit = $productId < 0;
         $snapshot = [
-            'product_id' => $productId,
+            'product_id' => $isSeriesKit ? null : $productId,
             'name' => mb_substr($name, 0, 191),
             'slug' => isset($raw['slug']) ? mb_substr(trim((string) $raw['slug']), 0, 191) : '',
             'price_text' => null,
@@ -145,61 +147,95 @@ try {
             $snapshot['visual_id'] = mb_substr(trim($raw['visual_id']), 0, 64);
         }
 
-        // Prefer live catalog fields when the product still exists.
-        $factoryNamesSql = cms_product_factory_names_sql('p');
-        $modelNamesSql = cms_product_model_names_sql('p');
-        $categoryNamesSql = cms_product_category_names_sql('p');
-        $primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
-        $prodStmt = $pdo->prepare(
-            'SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.pack_size, p.shop_display_image,
-                    COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
-                    ' . $factoryNamesSql . ' AS factory_name,
-                    ' . $modelNamesSql . ' AS model_name,
-                    ' . $categoryNamesSql . ' AS category_name
-             FROM products p
-             ' . $primaryCategoryJoinSql . '
-             WHERE p.id = ?
-             LIMIT 1'
-        );
-        $prodStmt->execute([$productId]);
-        $prod = $prodStmt->fetch();
-        if ($prod) {
-            $snapshot['name'] = (string) $prod['name'];
-            $snapshot['slug'] = (string) ($prod['slug'] ?? '');
-            $snapshot['price_text'] = $prod['price_text'] !== null ? (string) $prod['price_text'] : $snapshot['price_text'];
-            $snapshot['image'] = $prod['display_image'] !== null && (string) $prod['display_image'] !== ''
-                ? (string) $prod['display_image']
-                : ($prod['image'] !== null ? (string) $prod['image'] : $snapshot['image']);
-            $livePack = isset($prod['pack_size']) && $prod['pack_size'] !== null
-                ? (int) $prod['pack_size']
-                : 0;
-            if ($livePack > 0) {
-                $snapshot['pack_size'] = $livePack;
-            } else {
-                $snapshot['pack_size'] = null;
-                $snapshot['unit_type'] = 'piece';
+        if ($isSeriesKit) {
+            $seriesId = -$productId;
+            $categoryNamesSql = cms_series_category_names_sql('s');
+            $seriesStmt = $pdo->prepare(
+                'SELECT s.id, s.name, s.slug, s.visual_id, s.price_text, s.image,
+                        ' . $categoryNamesSql . ' AS category_name
+                 FROM product_series s
+                 WHERE s.id = ? AND s.published = 1
+                 LIMIT 1'
+            );
+            $seriesStmt->execute([$seriesId]);
+            $series = $seriesStmt->fetch();
+            if ($series) {
+                $snapshot['name'] = (string) $series['name'];
+                $snapshot['slug'] = (string) ($series['slug'] ?? '');
+                $snapshot['price_text'] = $series['price_text'] !== null && trim((string) $series['price_text']) !== ''
+                    ? (string) $series['price_text']
+                    : $snapshot['price_text'];
+                $snapshot['image'] = $series['image'] !== null && trim((string) $series['image']) !== ''
+                    ? (string) $series['image']
+                    : $snapshot['image'];
+                $liveCategory = trim((string) ($series['category_name'] ?? ''));
+                $snapshot['category_name'] = $liveCategory !== '' ? $liveCategory : 'سری کیت';
+                if ($series['visual_id'] !== null && trim((string) $series['visual_id']) !== '') {
+                    $snapshot['visual_id'] = (string) $series['visual_id'];
+                }
             }
-            if ($snapshot['unit_type'] === 'pack' && (!$snapshot['pack_size'] || (int) $snapshot['pack_size'] <= 0)) {
-                $snapshot['unit_type'] = 'piece';
-            }
-            $snapshot['factory_name'] = $prod['factory_name'] !== null
-                ? (string) $prod['factory_name']
-                : $snapshot['factory_name'];
-            $snapshot['model_name'] = $prod['model_name'] !== null
-                ? (string) $prod['model_name']
-                : $snapshot['model_name'];
-            $snapshot['category_name'] = $prod['category_name'] !== null
-                ? (string) $prod['category_name']
-                : $snapshot['category_name'];
-            if ($prod['visual_id'] !== null && trim((string) $prod['visual_id']) !== '') {
-                $snapshot['visual_id'] = (string) $prod['visual_id'];
-            }
-        } elseif ($unitType === 'pack' && $clientPack <= 0) {
             $snapshot['unit_type'] = 'piece';
             $snapshot['pack_size'] = null;
         }
 
-        $mergeKey = $productId . ':' . $snapshot['unit_type'];
+        if (!$isSeriesKit) {
+            // Prefer live catalog fields when the product still exists.
+            $factoryNamesSql = cms_product_factory_names_sql('p');
+            $modelNamesSql = cms_product_model_names_sql('p');
+            $categoryNamesSql = cms_product_category_names_sql('p');
+            $primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
+            $prodStmt = $pdo->prepare(
+                'SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.pack_size, p.shop_display_image,
+                        COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
+                        ' . $factoryNamesSql . ' AS factory_name,
+                        ' . $modelNamesSql . ' AS model_name,
+                        ' . $categoryNamesSql . ' AS category_name
+                 FROM products p
+                 ' . $primaryCategoryJoinSql . '
+                 WHERE p.id = ?
+                 LIMIT 1'
+            );
+            $prodStmt->execute([$productId]);
+            $prod = $prodStmt->fetch();
+            if ($prod) {
+                $snapshot['name'] = (string) $prod['name'];
+                $snapshot['slug'] = (string) ($prod['slug'] ?? '');
+                $snapshot['price_text'] = $prod['price_text'] !== null ? (string) $prod['price_text'] : $snapshot['price_text'];
+                $snapshot['image'] = $prod['display_image'] !== null && (string) $prod['display_image'] !== ''
+                    ? (string) $prod['display_image']
+                    : ($prod['image'] !== null ? (string) $prod['image'] : $snapshot['image']);
+                $livePack = isset($prod['pack_size']) && $prod['pack_size'] !== null
+                    ? (int) $prod['pack_size']
+                    : 0;
+                if ($livePack > 0) {
+                    $snapshot['pack_size'] = $livePack;
+                } else {
+                    $snapshot['pack_size'] = null;
+                    $snapshot['unit_type'] = 'piece';
+                }
+                if ($snapshot['unit_type'] === 'pack' && (!$snapshot['pack_size'] || (int) $snapshot['pack_size'] <= 0)) {
+                    $snapshot['unit_type'] = 'piece';
+                }
+                $snapshot['factory_name'] = $prod['factory_name'] !== null
+                    ? (string) $prod['factory_name']
+                    : $snapshot['factory_name'];
+                $snapshot['model_name'] = $prod['model_name'] !== null
+                    ? (string) $prod['model_name']
+                    : $snapshot['model_name'];
+                $snapshot['category_name'] = $prod['category_name'] !== null
+                    ? (string) $prod['category_name']
+                    : $snapshot['category_name'];
+                if ($prod['visual_id'] !== null && trim((string) $prod['visual_id']) !== '') {
+                    $snapshot['visual_id'] = (string) $prod['visual_id'];
+                }
+            } elseif ($unitType === 'pack' && $clientPack <= 0) {
+                $snapshot['unit_type'] = 'piece';
+                $snapshot['pack_size'] = null;
+            }
+        }
+
+        $mergeKey = ($isSeriesKit ? 'series:' . (-$productId) : (string) $productId)
+            . ':' . $snapshot['unit_type'];
         if (isset($normalized[$mergeKey])) {
             $normalized[$mergeKey]['quantity'] = min(
                 99,

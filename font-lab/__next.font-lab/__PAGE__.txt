@@ -1,7 +1,7 @@
 1:"$Sreact.fragment"
-2:I[7945,["8500","static/chunks/8500-3953cc33eeceb44e.js","5085","static/chunks/5085-5d4596c466f26c2b.js","4755","static/chunks/4755-be66e8d6ddf6a672.js","205","static/chunks/205-1755888b15dd7bc7.js","3820","static/chunks/app/font-lab/page-25d02c0c0cffafda.js"],"FontLabAuthGate"]
-3:I[1899,["8500","static/chunks/8500-3953cc33eeceb44e.js","5085","static/chunks/5085-5d4596c466f26c2b.js","4755","static/chunks/4755-be66e8d6ddf6a672.js","205","static/chunks/205-1755888b15dd7bc7.js","3820","static/chunks/app/font-lab/page-25d02c0c0cffafda.js"],"FontLab"]
+2:I[7945,["8500","static/chunks/8500-3953cc33eeceb44e.js","5085","static/chunks/5085-17df7210499f553b.js","4755","static/chunks/4755-be66e8d6ddf6a672.js","205","static/chunks/205-5bef439a54843fd3.js","3820","static/chunks/app/font-lab/page-25d02c0c0cffafda.js"],"FontLabAuthGate"]
+3:I[1899,["8500","static/chunks/8500-3953cc33eeceb44e.js","5085","static/chunks/5085-17df7210499f553b.js","4755","static/chunks/4755-be66e8d6ddf6a672.js","205","static/chunks/205-5bef439a54843fd3.js","3820","static/chunks/app/font-lab/page-25d02c0c0cffafda.js"],"FontLab"]
 4:I[484,[],"OutletBoundary"]
 5:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"children":["$","$L3",null,{}]}],null,["$","$L4",null,{"children":["$","$5",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"Q7_3kynKYfp_WOWVtXLpt"}
+0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"children":["$","$L3",null,{}]}],null,["$","$L4",null,{"children":["$","$5",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"in0MJ5h_jsc4vFG5Czs7A"}
 6:null

@@ -162,6 +162,60 @@ try {
         $log[] = 'product_series_items already exists';
     }
 
+    $seriesDetailLeadCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'detail_lead_image'")->fetchAll();
+    if (count($seriesDetailLeadCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN detail_lead_image VARCHAR(512) NULL AFTER image');
+        $log[] = 'Added product_series.detail_lead_image column';
+    } else {
+        $log[] = 'product_series.detail_lead_image already exists';
+    }
+    $seriesOverrideCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'image_setup_override'")->fetchAll();
+    if (count($seriesOverrideCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN image_setup_override VARCHAR(512) NULL AFTER detail_lead_image');
+        $log[] = 'Added product_series.image_setup_override column';
+    } else {
+        $log[] = 'product_series.image_setup_override already exists';
+    }
+
+    $seriesCategoriesExists = $pdo->query("SHOW TABLES LIKE 'product_series_categories'")->fetchAll();
+    if (count($seriesCategoriesExists) === 0) {
+        $pdo->exec(
+            'CREATE TABLE product_series_categories (
+              series_id INT UNSIGNED NOT NULL,
+              category_id INT UNSIGNED NOT NULL,
+              sort_order TINYINT UNSIGNED NOT NULL DEFAULT 0,
+              PRIMARY KEY (series_id, category_id),
+              KEY idx_scat_category (category_id),
+              CONSTRAINT fk_scat_series FOREIGN KEY (series_id) REFERENCES product_series (id) ON DELETE CASCADE,
+              CONSTRAINT fk_scat_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+        $log[] = 'Created product_series_categories table';
+    } else {
+        $log[] = 'product_series_categories already exists';
+    }
+
+    $seriesImagesExists = $pdo->query("SHOW TABLES LIKE 'product_series_images'")->fetchAll();
+    if (count($seriesImagesExists) === 0) {
+        $pdo->exec(
+            'CREATE TABLE product_series_images (
+              id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+              series_id INT UNSIGNED NOT NULL,
+              image VARCHAR(512) NOT NULL,
+              alt_text VARCHAR(255) NOT NULL DEFAULT \'\',
+              sort_order INT NOT NULL DEFAULT 0,
+              PRIMARY KEY (id),
+              KEY idx_series_images_series (series_id),
+              CONSTRAINT fk_series_image_series
+                FOREIGN KEY (series_id) REFERENCES product_series (id)
+                ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+        $log[] = 'Created product_series_images table';
+    } else {
+        $log[] = 'product_series_images already exists';
+    }
+
     // Shop / site settings
     $settingsExists = $pdo->query("SHOW TABLES LIKE 'site_settings'")->fetchAll();
     if (count($settingsExists) === 0) {

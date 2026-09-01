@@ -7,6 +7,7 @@ require_once dirname(__DIR__) . '/cms/lib/search-text.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-series-categories.php';
 
 function search_add_place(array &$places, array &$seen, string $code, string $label): void
 {
@@ -101,17 +102,25 @@ try {
 
     $series = [];
     try {
+        cms_series_ensure_categories_schema($pdo);
+        $seriesCategorySql = cms_series_category_names_sql('s');
         $stmt = $pdo->prepare(
-            'SELECT id, name, slug, visual_id
-             FROM product_series
-             WHERE published = 1
-               AND (' . search_name_sql('name') . ' LIKE ?
-                    OR ' . search_name_sql('slug') . ' LIKE ?
-                    OR ' . search_name_sql('visual_id') . ' LIKE ?)
-             ORDER BY sort_order ASC, name ASC
+            'SELECT s.id, s.name, s.slug, s.visual_id, ' . $seriesCategorySql . ' AS category_name
+             FROM product_series s
+             WHERE s.published = 1
+               AND (' . search_name_sql('s.name') . ' LIKE ?
+                    OR ' . search_name_sql('s.slug') . ' LIKE ?
+                    OR ' . search_name_sql('s.visual_id') . ' LIKE ?
+                    OR EXISTS (
+                      SELECT 1 FROM product_series_categories sc
+                      JOIN categories c ON c.id = sc.category_id
+                      WHERE sc.series_id = s.id
+                        AND ' . search_name_sql('c.name') . ' LIKE ?
+                    ))
+             ORDER BY s.sort_order ASC, s.name ASC
              LIMIT 5'
         );
-        $stmt->execute([$like, $like, $like]);
+        $stmt->execute([$like, $like, $like, $like]);
         foreach ($stmt->fetchAll() ?: [] as $row) {
             $series[] = [
                 'id' => (int) $row['id'],
@@ -119,6 +128,9 @@ try {
                 'slug' => (string) $row['slug'],
                 'visual_id' => $row['visual_id'] !== null && trim((string) $row['visual_id']) !== ''
                     ? (string) $row['visual_id']
+                    : null,
+                'category_name' => trim((string) ($row['category_name'] ?? '')) !== ''
+                    ? (string) $row['category_name']
                     : null,
             ];
         }
