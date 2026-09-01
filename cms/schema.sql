@@ -187,14 +187,17 @@ CREATE TABLE IF NOT EXISTS product_series (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   name VARCHAR(191) NOT NULL,
   slug VARCHAR(191) NOT NULL,
+  visual_id VARCHAR(64) NULL,
   description TEXT NULL,
+  price_text VARCHAR(128) NULL,
   image VARCHAR(512) NULL,
   sort_order INT NOT NULL DEFAULT 0,
   published TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_series_slug (slug)
+  UNIQUE KEY uq_series_slug (slug),
+  UNIQUE KEY uq_series_visual_id (visual_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS product_series_items (

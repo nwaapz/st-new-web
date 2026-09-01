@@ -79,7 +79,7 @@ cms_layout_start('پس‌زمینه و متن', cms_current_username(), 'website
     <?php cms_image_field('home_series_bg', 'پس‌زمینه', $seriesBg); ?>
     <label class="cms-field">
       <span class="cms-label">متن عمودی</span>
-      <input class="cms-input" name="home_series_side_text" value="<?= cms_h($seriesSideText) ?>" placeholder="{  سری محصولات  }">
+      <input class="cms-input" name="home_series_side_text" value="<?= cms_h($seriesSideText) ?>" placeholder="{  سری کیت ها  }">
     </label>
   </div>
 

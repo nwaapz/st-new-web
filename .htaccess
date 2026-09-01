@@ -24,6 +24,12 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
+  # Product series detail shell (client reads slug from URL).
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{DOCUMENT_ROOT}%{REQUEST_URI}/index.html !-f
+  RewriteRule ^products/series/([^/]+)/?$ products/series/_/index.html [L]
+
   # If a product slug folder was not prebuilt, serve the `_` shell HTML.
   # The client reads the real slug from the browser URL.
   RewriteCond %{REQUEST_FILENAME} !-f

@@ -122,6 +122,28 @@ try {
         $log[] = 'product_series already exists';
     }
 
+    $seriesVisualCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'visual_id'")->fetchAll();
+    if (count($seriesVisualCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN visual_id VARCHAR(64) NULL AFTER slug');
+        $log[] = 'Added product_series.visual_id column';
+    } else {
+        $log[] = 'product_series.visual_id already exists';
+    }
+    $seriesPriceCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'price_text'")->fetchAll();
+    if (count($seriesPriceCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN price_text VARCHAR(128) NULL AFTER description');
+        $log[] = 'Added product_series.price_text column';
+    } else {
+        $log[] = 'product_series.price_text already exists';
+    }
+    $seriesVisualIdx = $pdo->query("SHOW INDEX FROM product_series WHERE Key_name = 'uq_series_visual_id'")->fetchAll();
+    if (count($seriesVisualIdx) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD UNIQUE KEY uq_series_visual_id (visual_id)');
+        $log[] = 'Added unique index uq_series_visual_id';
+    } else {
+        $log[] = 'uq_series_visual_id index already exists';
+    }
+
     $seriesItemsExists = $pdo->query("SHOW TABLES LIKE 'product_series_items'")->fetchAll();
     if (count($seriesItemsExists) === 0) {
         $pdo->exec(

@@ -36,6 +36,7 @@ try {
 
     $empty = [
         'products' => [],
+        'series' => [],
         'categories' => [],
         'factories' => [],
         'car_models' => [],
@@ -96,6 +97,33 @@ try {
         }
     } catch (Throwable $e) {
         $products = [];
+    }
+
+    $series = [];
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT id, name, slug, visual_id
+             FROM product_series
+             WHERE published = 1
+               AND (' . search_name_sql('name') . ' LIKE ?
+                    OR ' . search_name_sql('slug') . ' LIKE ?
+                    OR ' . search_name_sql('visual_id') . ' LIKE ?)
+             ORDER BY sort_order ASC, name ASC
+             LIMIT 5'
+        );
+        $stmt->execute([$like, $like, $like]);
+        foreach ($stmt->fetchAll() ?: [] as $row) {
+            $series[] = [
+                'id' => (int) $row['id'],
+                'name' => (string) $row['name'],
+                'slug' => (string) $row['slug'],
+                'visual_id' => $row['visual_id'] !== null && trim((string) $row['visual_id']) !== ''
+                    ? (string) $row['visual_id']
+                    : null,
+            ];
+        }
+    } catch (Throwable $e) {
+        $series = [];
     }
 
     $categories = [];
@@ -236,6 +264,7 @@ try {
 
     api_json([
         'products' => $products,
+        'series' => $series,
         'categories' => $categories,
         'factories' => $factories,
         'car_models' => $carModels,
