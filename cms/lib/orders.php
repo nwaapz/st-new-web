@@ -385,7 +385,9 @@ function orders_serialize(array $order, array $items, array $events): array
                 : null,
             'name' => (string) $item['name'],
             'slug' => (string) ($item['slug'] ?? ''),
-            'price_text' => $item['price_text'] !== null ? (string) $item['price_text'] : null,
+            'price_text' => cms_call_for_price_enabled()
+                ? null
+                : ($item['price_text'] !== null ? (string) $item['price_text'] : null),
             'image' => $item['image'] !== null ? (string) $item['image'] : null,
             'quantity' => (int) $item['quantity'],
             'unit_type' => isset($item['unit_type']) && (string) $item['unit_type'] === 'pack'

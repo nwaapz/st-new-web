@@ -218,6 +218,23 @@ function product_series_api_enrich(PDO $pdo, array $item, int $seriesId, bool $i
     return $item;
 }
 
+function product_series_api_apply_price_mode(array &$item, bool $callForPrice, string $callLabel): void
+{
+    if ($callForPrice) {
+        if (isset($item['price_text'])) {
+            $item['price_text'] = $callLabel;
+        }
+        if (isset($item['products']) && is_array($item['products'])) {
+            foreach ($item['products'] as &$product) {
+                if (is_array($product)) {
+                    $product['price_text'] = $callLabel;
+                }
+            }
+            unset($product);
+        }
+    }
+}
+
 try {
     $pdo = cms_pdo();
     product_series_api_ensure_schema($pdo);
@@ -258,7 +275,9 @@ try {
         $productIds = array_map('intval', $itemStmt->fetchAll(PDO::FETCH_COLUMN));
         $item = product_series_api_row($row, $productIds);
         $item = product_series_api_enrich($pdo, $item, $seriesId, true);
-        api_json(['item' => $item]);
+        $callForPrice = cms_call_for_price_enabled();
+        product_series_api_apply_price_mode($item, $callForPrice, cms_call_for_price_label());
+        api_json(['item' => $item, 'call_for_price' => $callForPrice]);
     }
 
     $rows = $pdo->query(
@@ -275,16 +294,21 @@ try {
          ORDER BY sort_order ASC, product_id ASC'
     );
 
+    $callForPrice = cms_call_for_price_enabled();
+    $callLabel = cms_call_for_price_label();
+
     $items = [];
     foreach ($rows as $row) {
         $seriesId = (int) $row['id'];
         $itemStmt->execute([$seriesId]);
         $productIds = array_map('intval', $itemStmt->fetchAll(PDO::FETCH_COLUMN));
         $item = product_series_api_row($row, $productIds);
-        $items[] = product_series_api_enrich($pdo, $item, $seriesId, false);
+        $item = product_series_api_enrich($pdo, $item, $seriesId, false);
+        product_series_api_apply_price_mode($item, $callForPrice, $callLabel);
+        $items[] = $item;
     }
 
-    api_json(['items' => $items]);
+    api_json(['items' => $items, 'call_for_price' => $callForPrice]);
 } catch (Throwable $e) {
     api_error('Product series unavailable', 503);
 }

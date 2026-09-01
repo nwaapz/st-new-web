@@ -234,6 +234,10 @@ try {
             }
         }
 
+        if (cms_call_for_price_enabled()) {
+            $snapshot['price_text'] = null;
+        }
+
         $mergeKey = ($isSeriesKit ? 'series:' . (-$productId) : (string) $productId)
             . ':' . $snapshot['unit_type'];
         if (isset($normalized[$mergeKey])) {
