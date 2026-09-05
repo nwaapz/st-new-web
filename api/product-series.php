@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/_common.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-series.php';
 require_once dirname(__DIR__) . '/cms/lib/product-series-categories.php';
 
 function product_series_api_ensure_schema(PDO $pdo): void
@@ -211,6 +212,20 @@ function product_series_api_enrich(PDO $pdo, array $item, int $seriesId, bool $i
     $members = product_series_api_load_members($pdo, $seriesId);
     $item['parts_lines'] = product_series_api_parts_lines($members);
     $item['car_lines'] = product_series_api_car_lines($members);
+    $factoryIds = cms_series_load_factory_ids($pdo, $seriesId);
+    $item['factory_ids'] = $factoryIds;
+    $factoryNames = [];
+    if ($factoryIds !== []) {
+        $placeholders = implode(',', array_fill(0, count($factoryIds), '?'));
+        $factoryStmt = $pdo->prepare(
+            "SELECT id, name FROM factories WHERE id IN ({$placeholders}) ORDER BY sort_order ASC, name ASC"
+        );
+        $factoryStmt->execute($factoryIds);
+        foreach ($factoryStmt->fetchAll() ?: [] as $factoryRow) {
+            $factoryNames[] = (string) $factoryRow['name'];
+        }
+    }
+    $item['factory_name'] = $factoryNames !== [] ? implode(' · ', $factoryNames) : null;
     if ($includeMembers) {
         $item['products'] = $members;
     }
@@ -280,12 +295,27 @@ try {
         api_json(['item' => $item, 'call_for_price' => $callForPrice]);
     }
 
-    $rows = $pdo->query(
+    $carModelId = isset($_GET['car_model_id']) ? (int) $_GET['car_model_id'] : 0;
+    $factoryId = isset($_GET['factory_id']) ? (int) $_GET['factory_id'] : 0;
+
+    $where = ['published = 1'];
+    $listParams = [];
+    if ($carModelId > 0) {
+        $where[] = cms_series_car_model_filter_sql('product_series');
+        $listParams[] = $carModelId;
+    } elseif ($factoryId > 0) {
+        $where[] = cms_series_factory_filter_sql('product_series');
+        $listParams[] = $factoryId;
+    }
+
+    $listStmt = $pdo->prepare(
         "SELECT {$selectCols}
          FROM product_series
-         WHERE published = 1
-         ORDER BY sort_order ASC, name ASC"
-    )->fetchAll();
+         WHERE " . implode(' AND ', $where) . '
+         ORDER BY sort_order ASC, name ASC'
+    );
+    $listStmt->execute($listParams);
+    $rows = $listStmt->fetchAll();
 
     $itemStmt = $pdo->prepare(
         'SELECT product_id
