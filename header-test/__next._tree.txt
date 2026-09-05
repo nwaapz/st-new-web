@@ -1,4 +1,5 @@
-:HL["/test2/_next/static/css/2f096fda9766e103.css","style"]
-:HL["/test2/_next/static/css/e4d40e9c93769744.css","style"]
+:HL["/test2/_next/static/chunks/00jkhlq09pgyi.css","style"]
+:HC["/",""]
+:HL["/test2/_next/static/chunks/0n7fa3z7qdab9.css","style"]
 :HL["https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"header-test","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"QNBqXM5VCStuXLLFUPKgT"}
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"header-test","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"gZR0K7ljHeQoyGTm_UCV0"}
