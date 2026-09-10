@@ -60,7 +60,10 @@ try {
     }
 
     $headerImage = trim(cms_setting_get('branch_portal_header_image', ''));
-    $intro = cms_page_intro_public('branch_portal');
+    $intro = cms_page_intro_get('branch_portal');
+    if ($intro['title'] === 'نمایندگان استارتک') {
+        $intro['title'] = cms_page_intro_defaults()['branch_portal']['title'];
+    }
 
     api_json([
         'items' => $items,

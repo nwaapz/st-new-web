@@ -15,7 +15,7 @@ function cms_page_intro_defaults(): array
 {
     return [
         'branch_portal' => [
-            'title' => 'نمایندگان استارتک',
+            'title' => 'پرتال نمایندگان',
             'explanation' => 'استان را از نقشه یا فهرست انتخاب کنید، شعبه را ببینید و پیام بفرستید.',
         ],
         'warranty' => [
