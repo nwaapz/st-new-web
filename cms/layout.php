@@ -47,6 +47,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
             'orders.php' => 'سفارش‌ها',
+            'sales-users.php' => 'کاربران اپ فروش',
         ];
     } elseif ($section === 'communication') {
         $subNav = [
