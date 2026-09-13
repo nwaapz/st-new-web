@@ -263,6 +263,17 @@ function orders_ensure_schema(PDO $pdo): void
         /* ignore */
     }
 
+    try {
+        $pdo->exec('ALTER TABLE orders ADD COLUMN sales_user_id INT UNSIGNED NULL AFTER user_id');
+    } catch (Throwable $e) {
+        /* ignore if exists */
+    }
+    try {
+        $pdo->exec('ALTER TABLE orders ADD KEY idx_orders_sales_user (sales_user_id)');
+    } catch (Throwable $e) {
+        /* ignore if exists */
+    }
+
     $ready = true;
 }
 
@@ -701,4 +712,700 @@ function orders_save_payment_upload(array $file): string
     }
 
     return '/uploads/' . $name;
+}
+
+/**
+ * Normalize cart line items from client JSON (shared by web + sales app APIs).
+ *
+ * @param list<mixed> $rawItems
+ * @return array<string, array<string, mixed>>
+ */
+function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
+{
+    require_once __DIR__ . '/car-model-factories.php';
+    require_once __DIR__ . '/product-car-models.php';
+    require_once __DIR__ . '/product-categories.php';
+    require_once __DIR__ . '/product-series-categories.php';
+
+    cms_ensure_car_model_factories_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
+
+    $normalized = [];
+    foreach ($rawItems as $raw) {
+        if (!is_array($raw)) {
+            continue;
+        }
+        $productId = isset($raw['id']) ? (int) $raw['id'] : 0;
+        $name = isset($raw['name']) ? trim((string) $raw['name']) : '';
+        $quantity = isset($raw['quantity']) ? (int) $raw['quantity'] : 0;
+        if ($productId === 0 || $name === '' || $quantity < 1) {
+            continue;
+        }
+        $quantity = min(99, $quantity);
+        $unitType = isset($raw['unit_type']) && (string) $raw['unit_type'] === 'pack'
+            ? 'pack'
+            : 'piece';
+        $clientPack = isset($raw['pack_size']) ? (int) $raw['pack_size'] : 0;
+
+        $isSeriesKit = $productId < 0;
+        $snapshot = [
+            'product_id' => $isSeriesKit ? null : $productId,
+            'name' => mb_substr($name, 0, 191),
+            'slug' => isset($raw['slug']) ? mb_substr(trim((string) $raw['slug']), 0, 191) : '',
+            'price_text' => null,
+            'image' => null,
+            'quantity' => $quantity,
+            'unit_type' => $unitType,
+            'pack_size' => $clientPack > 0 ? $clientPack : null,
+            'factory_name' => null,
+            'model_name' => null,
+            'category_name' => null,
+            'visual_id' => null,
+        ];
+
+        if (isset($raw['price_text']) && is_string($raw['price_text']) && trim($raw['price_text']) !== '') {
+            $snapshot['price_text'] = mb_substr(trim($raw['price_text']), 0, 128);
+        }
+        if (isset($raw['image']) && is_string($raw['image']) && trim($raw['image']) !== '') {
+            $snapshot['image'] = mb_substr(trim($raw['image']), 0, 512);
+        }
+        foreach (['factory_name', 'model_name', 'category_name'] as $key) {
+            if (isset($raw[$key]) && is_string($raw[$key]) && trim($raw[$key]) !== '') {
+                $snapshot[$key] = mb_substr(trim($raw[$key]), 0, 191);
+            }
+        }
+        if (isset($raw['visual_id']) && is_string($raw['visual_id']) && trim($raw['visual_id']) !== '') {
+            $snapshot['visual_id'] = mb_substr(trim($raw['visual_id']), 0, 64);
+        }
+
+        if ($isSeriesKit) {
+            $seriesId = -$productId;
+            $categoryNamesSql = cms_series_category_names_sql('s');
+            $seriesStmt = $pdo->prepare(
+                'SELECT s.id, s.name, s.slug, s.visual_id, s.price_text, s.image,
+                        ' . $categoryNamesSql . ' AS category_name
+                 FROM product_series s
+                 WHERE s.id = ? AND s.published = 1
+                 LIMIT 1'
+            );
+            $seriesStmt->execute([$seriesId]);
+            $series = $seriesStmt->fetch();
+            if ($series) {
+                $snapshot['name'] = (string) $series['name'];
+                $snapshot['slug'] = (string) ($series['slug'] ?? '');
+                $snapshot['price_text'] = $series['price_text'] !== null && trim((string) $series['price_text']) !== ''
+                    ? (string) $series['price_text']
+                    : $snapshot['price_text'];
+                $snapshot['image'] = $series['image'] !== null && trim((string) $series['image']) !== ''
+                    ? (string) $series['image']
+                    : $snapshot['image'];
+                $liveCategory = trim((string) ($series['category_name'] ?? ''));
+                $snapshot['category_name'] = $liveCategory !== '' ? $liveCategory : 'سری کیت';
+                if ($series['visual_id'] !== null && trim((string) $series['visual_id']) !== '') {
+                    $snapshot['visual_id'] = (string) $series['visual_id'];
+                }
+            }
+            $snapshot['unit_type'] = 'piece';
+            $snapshot['pack_size'] = null;
+        }
+
+        if (!$isSeriesKit) {
+            $factoryNamesSql = cms_product_factory_names_sql('p');
+            $modelNamesSql = cms_product_model_names_sql('p');
+            $categoryNamesSql = cms_product_category_names_sql('p');
+            $primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
+            $prodStmt = $pdo->prepare(
+                'SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.pack_size, p.shop_display_image,
+                        COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
+                        ' . $factoryNamesSql . ' AS factory_name,
+                        ' . $modelNamesSql . ' AS model_name,
+                        ' . $categoryNamesSql . ' AS category_name
+                 FROM products p
+                 ' . $primaryCategoryJoinSql . '
+                 WHERE p.id = ?
+                 LIMIT 1'
+            );
+            $prodStmt->execute([$productId]);
+            $prod = $prodStmt->fetch();
+            if ($prod) {
+                $snapshot['name'] = (string) $prod['name'];
+                $snapshot['slug'] = (string) ($prod['slug'] ?? '');
+                $snapshot['price_text'] = $prod['price_text'] !== null ? (string) $prod['price_text'] : $snapshot['price_text'];
+                $snapshot['image'] = $prod['display_image'] !== null && (string) $prod['display_image'] !== ''
+                    ? (string) $prod['display_image']
+                    : ($prod['image'] !== null ? (string) $prod['image'] : $snapshot['image']);
+                $livePack = isset($prod['pack_size']) && $prod['pack_size'] !== null
+                    ? (int) $prod['pack_size']
+                    : 0;
+                if ($livePack > 0) {
+                    $snapshot['pack_size'] = $livePack;
+                } else {
+                    $snapshot['pack_size'] = null;
+                    $snapshot['unit_type'] = 'piece';
+                }
+                if ($snapshot['unit_type'] === 'pack' && (!$snapshot['pack_size'] || (int) $snapshot['pack_size'] <= 0)) {
+                    $snapshot['unit_type'] = 'piece';
+                }
+                $snapshot['factory_name'] = $prod['factory_name'] !== null
+                    ? (string) $prod['factory_name']
+                    : $snapshot['factory_name'];
+                $snapshot['model_name'] = $prod['model_name'] !== null
+                    ? (string) $prod['model_name']
+                    : $snapshot['model_name'];
+                $snapshot['category_name'] = $prod['category_name'] !== null
+                    ? (string) $prod['category_name']
+                    : $snapshot['category_name'];
+                if ($prod['visual_id'] !== null && trim((string) $prod['visual_id']) !== '') {
+                    $snapshot['visual_id'] = (string) $prod['visual_id'];
+                }
+            } elseif ($unitType === 'pack' && $clientPack <= 0) {
+                $snapshot['unit_type'] = 'piece';
+                $snapshot['pack_size'] = null;
+            }
+        }
+
+        if (cms_call_for_price_enabled()) {
+            $snapshot['price_text'] = null;
+        }
+
+        $mergeKey = ($isSeriesKit ? 'series:' . (-$productId) : (string) $productId)
+            . ':' . $snapshot['unit_type'];
+        if (isset($normalized[$mergeKey])) {
+            $normalized[$mergeKey]['quantity'] = min(
+                99,
+                (int) $normalized[$mergeKey]['quantity'] + $quantity
+            );
+        } else {
+            $normalized[$mergeKey] = $snapshot;
+        }
+    }
+
+    return $normalized;
+}
+
+/**
+ * @return array{
+ *   branch_id: ?int,
+ *   branch_name: ?string,
+ *   branch_city: ?string,
+ *   branch_province_name: ?string,
+ *   branch_phone: ?string
+ * }
+ */
+function orders_branch_snapshot_for_branch_id(PDO $pdo, int $branchId, string $fallbackPhone = ''): array
+{
+    $snap = [
+        'branch_id' => null,
+        'branch_name' => null,
+        'branch_city' => null,
+        'branch_province_name' => null,
+        'branch_phone' => null,
+    ];
+    if ($branchId <= 0) {
+        return $snap;
+    }
+
+    require_once __DIR__ . '/branches.php';
+    branches_ensure_schema($pdo);
+    $bStmt = $pdo->prepare(
+        'SELECT id, name, city, province_name, phone FROM branches WHERE id = ? LIMIT 1'
+    );
+    $bStmt->execute([$branchId]);
+    $bRow = $bStmt->fetch();
+    if ($bRow) {
+        $snap = [
+            'branch_id' => (int) $bRow['id'],
+            'branch_name' => (string) $bRow['name'],
+            'branch_city' => (string) ($bRow['city'] ?? ''),
+            'branch_province_name' => (string) ($bRow['province_name'] ?? ''),
+            'branch_phone' => (string) ($bRow['phone'] ?? $fallbackPhone),
+        ];
+    }
+    return $snap;
+}
+
+/**
+ * Resolve a site_users row for sales app order FK.
+ *
+ * @param array{id:int,username:string,display_name:string,branch_id:?int} $salesUser
+ * @return array{id:int,phone:string}
+ */
+function orders_resolve_site_user_for_sales(PDO $pdo, array $salesUser): array
+{
+    require_once dirname(__DIR__, 2) . '/api/_auth.php';
+    require_once __DIR__ . '/branches.php';
+
+    site_auth_ensure_schema($pdo);
+    branches_ensure_schema($pdo);
+
+    $phone = '';
+    $branchId = isset($salesUser['branch_id']) && $salesUser['branch_id'] !== null
+        ? (int) $salesUser['branch_id']
+        : 0;
+    if ($branchId > 0) {
+        $bStmt = $pdo->prepare('SELECT phone FROM branches WHERE id = ? LIMIT 1');
+        $bStmt->execute([$branchId]);
+        $branchPhone = trim((string) ($bStmt->fetchColumn() ?: ''));
+        if ($branchPhone !== '') {
+            $phone = $branchPhone;
+        }
+    }
+    if ($phone === '') {
+        $phone = 'sales' . str_pad((string) (int) $salesUser['id'], 10, '0', STR_PAD_LEFT);
+    }
+
+    $find = $pdo->prepare('SELECT id, phone FROM site_users WHERE phone = ? LIMIT 1');
+    $find->execute([$phone]);
+    $row = $find->fetch();
+    if ($row) {
+        if ($branchId > 0) {
+            $pdo->prepare('UPDATE site_users SET branch_id = ? WHERE id = ?')
+                ->execute([$branchId, (int) $row['id']]);
+        }
+        return ['id' => (int) $row['id'], 'phone' => (string) $row['phone']];
+    }
+
+    $pdo->prepare('INSERT INTO site_users (phone, branch_id) VALUES (?, ?)')
+        ->execute([$phone, $branchId > 0 ? $branchId : null]);
+    $userId = (int) $pdo->lastInsertId();
+    return ['id' => $userId, 'phone' => $phone];
+}
+
+/**
+ * @param array<string, array<string, mixed>> $normalized
+ * @param array{
+ *   branch_id: ?int,
+ *   branch_name: ?string,
+ *   branch_city: ?string,
+ *   branch_province_name: ?string,
+ *   branch_phone: ?string
+ * } $branchSnap
+ */
+function orders_create_from_normalized(
+    PDO $pdo,
+    int $userId,
+    string $phone,
+    array $normalized,
+    array $branchSnap,
+    ?int $salesUserId,
+    string $submitNote
+): int {
+    if ($normalized === []) {
+        throw new InvalidArgumentException('اقلام سفارش نامعتبر است');
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $publicCode = orders_generate_public_code($pdo);
+        $ins = $pdo->prepare(
+            'INSERT INTO orders (
+               public_code, user_id, sales_user_id, phone, status,
+               branch_id, branch_name, branch_city, branch_province_name, branch_phone
+             ) VALUES (?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
+        );
+        $ins->execute([
+            $publicCode,
+            $userId,
+            $salesUserId,
+            $phone,
+            $branchSnap['branch_id'],
+            $branchSnap['branch_name'],
+            $branchSnap['branch_city'],
+            $branchSnap['branch_province_name'],
+            $branchSnap['branch_phone'],
+        ]);
+        $orderId = (int) $pdo->lastInsertId();
+
+        $itemIns = $pdo->prepare(
+            'INSERT INTO order_items
+              (order_id, product_id, name, slug, price_text, image, quantity,
+               unit_type, pack_size, factory_name, model_name, category_name, visual_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($normalized as $item) {
+            $itemIns->execute([
+                $orderId,
+                $item['product_id'],
+                $item['name'],
+                $item['slug'],
+                $item['price_text'],
+                $item['image'],
+                $item['quantity'],
+                $item['unit_type'],
+                $item['pack_size'],
+                $item['factory_name'],
+                $item['model_name'],
+                $item['category_name'],
+                $item['visual_id'] ?? null,
+            ]);
+        }
+
+        orders_add_event($pdo, $orderId, null, 'submitted', 'client', $submitNote);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    if (!function_exists('admin_push_notify_new_order')) {
+        $pushLib = __DIR__ . '/admin-push.php';
+        if (is_readable($pushLib)) {
+            require_once $pushLib;
+        }
+    }
+    if (function_exists('admin_push_notify_new_order')) {
+        try {
+            admin_push_notify_new_order($pdo, $orderId);
+        } catch (Throwable $pushErr) {
+            error_log('[orders_create_from_normalized] push failed: ' . $pushErr->getMessage());
+        }
+    }
+
+    return $orderId;
+}
+
+/**
+ * @return array{
+ *   items: list<array<string, mixed>>,
+ *   total: int,
+ *   page: int,
+ *   per_page: int,
+ *   total_pages: int,
+ *   submitted_count: int
+ * }
+ */
+function orders_admin_list(
+    PDO $pdo,
+    string $scope = 'customers',
+    string $statusFilter = 'all',
+    string $searchQ = '',
+    int $page = 1,
+    int $pageSize = 20
+): array {
+    $allStatuses = orders_all_statuses();
+    if ($statusFilter !== 'all' && !in_array($statusFilter, $allStatuses, true)) {
+        $statusFilter = 'all';
+    }
+    if ($scope !== 'branches' && $scope !== 'customers') {
+        $scope = 'customers';
+    }
+    $isBranchScope = $scope === 'branches';
+    $scopeSql = $isBranchScope ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
+
+    if ($page < 1) {
+        $page = 1;
+    }
+    if ($pageSize < 1) {
+        $pageSize = 20;
+    }
+
+    $where = [$scopeSql];
+    $params = [];
+    if ($statusFilter !== 'all') {
+        $where[] = 'o.status = ?';
+        $params[] = $statusFilter;
+    }
+    if ($searchQ !== '') {
+        $like = '%' . $searchQ . '%';
+        $searchParts = [
+            'o.phone LIKE ?',
+            'o.public_code LIKE ?',
+            'COALESCE(o.branch_phone, \'\') LIKE ?',
+        ];
+        $params[] = $like;
+        $params[] = $like;
+        $params[] = $like;
+        if (ctype_digit($searchQ)) {
+            $searchParts[] = 'o.id = ?';
+            $params[] = (int) $searchQ;
+        }
+        $where[] = '(' . implode(' OR ', $searchParts) . ')';
+    }
+    $whereSql = implode(' AND ', $where);
+
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE {$whereSql}");
+    $countStmt->execute($params);
+    $totalRows = (int) $countStmt->fetchColumn();
+    $totalPages = max(1, (int) ceil($totalRows / $pageSize));
+    if ($page > $totalPages) {
+        $page = $totalPages;
+    }
+    $offset = ($page - 1) * $pageSize;
+
+    $sql = "SELECT o.*,
+            (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+            FROM orders o
+            WHERE {$whereSql}
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT " . (int) $pageSize . ' OFFSET ' . (int) $offset;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll() ?: [];
+
+    $submittedStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM orders o WHERE {$scopeSql} AND o.status = 'submitted'"
+    );
+    $submittedStmt->execute();
+    $submittedCount = (int) $submittedStmt->fetchColumn();
+
+    $items = [];
+    foreach ($rows as $row) {
+        $items[] = [
+            'id' => (int) $row['id'],
+            'public_code' => (string) $row['public_code'],
+            'phone' => (string) $row['phone'],
+            'status' => (string) $row['status'],
+            'branch_id' => isset($row['branch_id']) && $row['branch_id'] !== null
+                ? (int) $row['branch_id']
+                : null,
+            'branch_name' => isset($row['branch_name']) && $row['branch_name'] !== null
+                ? (string) $row['branch_name']
+                : null,
+            'branch_phone' => isset($row['branch_phone']) && $row['branch_phone'] !== null
+                ? (string) $row['branch_phone']
+                : null,
+            'item_count' => (int) ($row['item_count'] ?? 0),
+            'created_at' => (string) $row['created_at'],
+            'updated_at' => (string) $row['updated_at'],
+        ];
+    }
+
+    return [
+        'items' => $items,
+        'total' => $totalRows,
+        'page' => $page,
+        'per_page' => $pageSize,
+        'total_pages' => $totalPages,
+        'submitted_count' => $submittedCount,
+    ];
+}
+
+/**
+ * Apply a CMS admin order action (shared by CMS page and mobile API).
+ *
+ * @param array<string, string> $prices item_id => price_text
+ * @return array{message: string, invoice_warning: ?string}
+ */
+function orders_admin_apply_action(
+    PDO $pdo,
+    int $orderId,
+    string $action,
+    string $message = '',
+    array $prices = [],
+    string $preInvoiceDueAt = ''
+): array {
+    require_once __DIR__ . '/invoices.php';
+
+    if ($orderId <= 0) {
+        throw new RuntimeException('سفارش نامعتبر');
+    }
+    $order = orders_get_by_id($pdo, $orderId);
+    if ($order === null) {
+        throw new RuntimeException('سفارش یافت نشد');
+    }
+
+    $current = (string) $order['status'];
+    $allowed = orders_allowed_transitions();
+    $invoiceWarning = null;
+    $resultMessage = 'وضعیت سفارش به‌روز شد';
+
+    if ($action === 'warn_payment') {
+        if ($current !== 'payment_proof_sent') {
+            throw new RuntimeException('هشدار فقط برای سفارش‌های دارای مدارک پرداخت مجاز است');
+        }
+        if ($message === '') {
+            throw new RuntimeException('متن هشدار درباره نقص مدارک الزامی است');
+        }
+        $pdo->beginTransaction();
+        $upd = $pdo->prepare(
+            "UPDATE orders SET payment_warning = ?, payment_warning_state = 'open' WHERE id = ?"
+        );
+        $upd->execute([$message, $orderId]);
+        orders_add_event(
+            $pdo,
+            $orderId,
+            'payment_proof_sent',
+            'payment_proof_sent',
+            'admin',
+            'هشدار نقص مدارک: ' . $message
+        );
+        $pdo->commit();
+        orders_admin_notify_sales_client($pdo, $orderId, 'warn_payment', $message);
+        return ['message' => 'هشدار نقص مدارک برای مشتری ارسال شد', 'invoice_warning' => null];
+    }
+
+    if ($action === 'save_prices') {
+        if (!in_array($current, ['submitted', 'accepted', 'payment_proof_sent'], true)) {
+            throw new RuntimeException('در این وضعیت امکان ویرایش قیمت نیست');
+        }
+        if ($prices === []) {
+            throw new RuntimeException('قیمت‌ها نامعتبر است');
+        }
+        $upd = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
+        $changed = 0;
+        foreach ($prices as $itemId => $priceRaw) {
+            $itemId = (int) $itemId;
+            if ($itemId <= 0) {
+                continue;
+            }
+            try {
+                $normalized = invoices_normalize_price_text((string) $priceRaw);
+            } catch (InvalidArgumentException $e) {
+                throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
+            }
+            $upd->execute([$normalized, $itemId, $orderId]);
+            $changed += $upd->rowCount() > 0 ? 1 : 0;
+        }
+        return [
+            'message' => $changed > 0 ? 'قیمت‌های تومان ذخیره شد' : 'تغییری در قیمت‌ها ثبت نشد',
+            'invoice_warning' => null,
+        ];
+    }
+
+    if ($action === 'accept') {
+        if ($current !== 'submitted') {
+            throw new RuntimeException('تأیید انبار فقط برای سفارش تازه ثبت‌شده مجاز است');
+        }
+        if ($prices === []) {
+            throw new RuntimeException('قبل از تأیید انبار، قیمت تومان همه اقلام را وارد کنید');
+        }
+        $pdo->beginTransaction();
+        $updPrice = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
+        foreach ($prices as $itemId => $priceRaw) {
+            $itemId = (int) $itemId;
+            if ($itemId <= 0) {
+                continue;
+            }
+            try {
+                $normalized = invoices_normalize_price_text((string) $priceRaw);
+            } catch (InvalidArgumentException $e) {
+                throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
+            }
+            if ($normalized === null || $normalized === '') {
+                throw new RuntimeException('قیمت تومان همه اقلام برای تأیید انبار الزامی است');
+            }
+            $updPrice->execute([$normalized, $itemId, $orderId]);
+        }
+        $pricedItems = orders_fetch_items($pdo, $orderId);
+        if ($pricedItems === []) {
+            throw new RuntimeException('سفارش بدون قلم است');
+        }
+        foreach ($pricedItems as $item) {
+            $parsed = invoices_parse_toman_amount(
+                isset($item['price_text']) ? (string) $item['price_text'] : null
+            );
+            if ($parsed === null) {
+                throw new RuntimeException('قبل از تأیید انبار، قیمت تومان همه اقلام را وارد کنید');
+            }
+        }
+        $dueAt = trim($preInvoiceDueAt);
+        if ($dueAt === '') {
+            $dueAt = date('Y-m-d', strtotime('+7 days'));
+        }
+        invoices_issue_pre($pdo, $orderId, $dueAt);
+        $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
+        $upd->execute(['accepted', $orderId]);
+        orders_add_event(
+            $pdo,
+            $orderId,
+            $current,
+            'accepted',
+            'admin',
+            $message !== '' ? $message : 'تأیید انبار و ارسال خودکار پیش‌فاکتور'
+        );
+        $pdo->commit();
+        orders_admin_notify_sales_client($pdo, $orderId, 'accepted', $message);
+        return ['message' => 'انبار تأیید شد و پیش‌فاکتور برای مشتری ارسال شد', 'invoice_warning' => null];
+    }
+
+    if ($action === 'issue_pre_invoice') {
+        if (!in_array($current, ['accepted', 'payment_proof_sent'], true)) {
+            throw new RuntimeException('ابتدا انبار را با قیمت‌گذاری تأیید کنید؛ پیش‌فاکتور هنگام تأیید انبار ارسال می‌شود');
+        }
+        if ($prices !== []) {
+            $upd = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
+            foreach ($prices as $itemId => $priceRaw) {
+                $itemId = (int) $itemId;
+                if ($itemId <= 0) {
+                    continue;
+                }
+                try {
+                    $normalized = invoices_normalize_price_text((string) $priceRaw);
+                } catch (InvalidArgumentException $e) {
+                    throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
+                }
+                $upd->execute([$normalized, $itemId, $orderId]);
+            }
+        }
+        $dueAt = trim($preInvoiceDueAt);
+        invoices_issue_pre($pdo, $orderId, $dueAt);
+        return [
+            'message' => 'پیش‌فاکتور صادر شد و در پیگیری سفارش مشتری قابل دریافت است',
+            'invoice_warning' => null,
+        ];
+    }
+
+    $nextMap = [
+        'reject' => 'rejected',
+        'mark_paid' => 'paid',
+        'mark_shipped' => 'shipped',
+        'mark_not_received' => 'not_received',
+        'mark_returned' => 'returned_to_origin',
+        'mark_lost' => 'lost',
+        'mark_received' => 'received',
+    ];
+    if (!isset($nextMap[$action])) {
+        throw new RuntimeException('عملیات نامعتبر');
+    }
+    $next = $nextMap[$action];
+    $allowedNext = $allowed[$current] ?? [];
+    if (!in_array($next, $allowedNext, true)) {
+        throw new RuntimeException('این تغییر وضعیت مجاز نیست');
+    }
+    if ($action === 'reject' && $message === '') {
+        throw new RuntimeException('علت رد انبار (مثلاً موجود نبودن کالا) الزامی است');
+    }
+
+    $pdo->beginTransaction();
+    if ($next === 'paid') {
+        $upd = $pdo->prepare(
+            'UPDATE orders SET status = ?, payment_warning = NULL, payment_warning_state = NULL WHERE id = ?'
+        );
+    } else {
+        $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
+    }
+    $upd->execute([$next, $orderId]);
+    orders_add_event($pdo, $orderId, $current, $next, 'admin', $message !== '' ? $message : null);
+    $pdo->commit();
+
+    if ($next === 'paid') {
+        try {
+            invoices_issue_final($pdo, $orderId);
+            $resultMessage = 'پرداخت تأیید و فاکتور نهایی صادر شد';
+        } catch (Throwable $invErr) {
+            $invoiceWarning = $invErr->getMessage();
+            $resultMessage = 'پرداخت تأیید شد اما صدور فاکتور نهایی ناموفق بود';
+        }
+    } elseif ($next === 'rejected') {
+        $resultMessage = 'سفارش رد و بایگانی شد — برای مشتری بسته شده است';
+    } elseif ($next === 'received') {
+        $resultMessage = 'تحویل تأیید شد — سفارش تمام شد';
+    }
+
+    orders_admin_notify_sales_client($pdo, $orderId, $next, $message);
+
+    return ['message' => $resultMessage, 'invoice_warning' => $invoiceWarning];
+}
+
+function orders_sales_user_owns_order(array $order, int $salesUserId): bool
+{
+    if ($salesUserId <= 0) {
+        return false;
+    }
+    return isset($order['sales_user_id'])
+        && $order['sales_user_id'] !== null
+        && (int) $order['sales_user_id'] === $salesUserId;
 }

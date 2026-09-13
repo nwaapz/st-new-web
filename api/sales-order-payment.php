@@ -2,14 +2,13 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/_common.php';
-require_once __DIR__ . '/_auth.php';
+require_once __DIR__ . '/_sales_auth.php';
 require_once dirname(__DIR__) . '/cms/lib/orders.php';
 
-site_auth_prepare_cors();
+sales_auth_prepare_cors();
 
 try {
     $pdo = cms_pdo();
-    site_auth_ensure_schema($pdo);
     orders_ensure_schema($pdo);
 
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
@@ -24,10 +23,12 @@ try {
         api_error('Method not allowed', 405);
     }
 
-    $user = site_auth_current_user($pdo);
-    if ($user === null) {
+    $salesUser = sales_auth_current_user($pdo);
+    if ($salesUser === null) {
         api_error('برای ارسال مدارک پرداخت وارد شوید', 401);
     }
+
+    $salesUserId = (int) $salesUser['id'];
 
     $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
     $isMultipart = strpos($contentType, 'multipart/form-data') !== false;
@@ -52,7 +53,6 @@ try {
             }
         }
 
-        // Support files / files[] / file field names from FormData.
         $bag = null;
         foreach (['files', 'files[]', 'file'] as $key) {
             if (isset($_FILES[$key]) && is_array($_FILES[$key])) {
@@ -84,7 +84,7 @@ try {
             }
         }
     } else {
-        $body = site_auth_request_json();
+        $body = sales_auth_request_json();
         $orderId = isset($body['order_id']) ? (int) $body['order_id'] : (isset($body['id']) ? (int) $body['id'] : 0);
         $note = isset($body['note']) ? trim((string) $body['note']) : '';
         if (isset($body['keep_files']) && is_array($body['keep_files'])) {
@@ -101,7 +101,7 @@ try {
     }
 
     $order = orders_get_by_id($pdo, $orderId);
-    if ($order === null || (int) $order['user_id'] !== (int) $user['id']) {
+    if ($order === null || !orders_sales_user_owns_order($order, $salesUserId)) {
         api_error('سفارش یافت نشد', 404);
     }
 
@@ -224,7 +224,7 @@ try {
                 'accepted',
                 'payment_proof_sent',
                 'client',
-                'مدارک پرداخت توسط مشتری ارسال شد'
+                'مدارک پرداخت توسط اپ فروش ارسال شد'
             );
         } elseif ($hadOpenWarning) {
             orders_add_event(
@@ -233,7 +233,7 @@ try {
                 'payment_proof_sent',
                 'payment_proof_sent',
                 'client',
-                'مشتری به آخرین هشدار با مدارک زیر پاسخ داد'
+                'اپ فروش به آخرین هشدار با مدارک زیر پاسخ داد'
             );
         } elseif ($status === 'payment_proof_sent') {
             orders_add_event(
@@ -242,7 +242,7 @@ try {
                 'payment_proof_sent',
                 'payment_proof_sent',
                 'client',
-                'مدارک پرداخت توسط مشتری به‌روزرسانی شد'
+                'مدارک پرداخت توسط اپ فروش به‌روزرسانی شد'
             );
         }
 
@@ -267,7 +267,7 @@ try {
     try {
         admin_push_notify_payment_proof($pdo, $orderId);
     } catch (Throwable $e) {
-        error_log('[order-payment] push failed: ' . $e->getMessage());
+        error_log('[sales-order-payment] push failed: ' . $e->getMessage());
     }
 
     $fresh = orders_get_by_id($pdo, $orderId);
@@ -284,7 +284,7 @@ try {
         ),
     ]);
 } catch (Throwable $e) {
-    error_log('[order-payment] ' . $e->getMessage());
+    error_log('[sales-order-payment] ' . $e->getMessage());
     $msg = $e->getMessage();
     if (
         strpos($msg, 'فقط') === 0
