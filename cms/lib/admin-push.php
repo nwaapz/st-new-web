@@ -30,11 +30,19 @@ function admin_push_ensure_schema(PDO $pdo): void
 
 function admin_push_service_account_path(): ?string
 {
+    $libDir = __DIR__;
     $candidates = [
-        dirname(__DIR__, 2) . '/deploy/firebase-service-account.json',
-        dirname(__DIR__) . '/cms/firebase-service-account.json',
+        dirname($libDir, 3) . '/deploy/firebase-service-account.json',
+        dirname($libDir, 2) . '/deploy/firebase-service-account.json',
+        dirname($libDir) . '/firebase-service-account.json',
+        dirname($libDir, 2) . '/cms/firebase-service-account.json',
     ];
+    $seen = [];
     foreach ($candidates as $path) {
+        if (isset($seen[$path])) {
+            continue;
+        }
+        $seen[$path] = true;
         if (is_readable($path)) {
             return $path;
         }
@@ -262,13 +270,25 @@ function admin_push_notify_order_activity(PDO $pdo, int $orderId, string $activi
         'activity' => $activityType,
     ];
 
-    $tokens = admin_push_all_tokens($pdo);
-    if ($tokens === []) {
+    if (admin_push_service_account_path() === null) {
+        error_log('[admin-push] firebase-service-account.json not found — place it in deploy/ or cms/ on the server');
         return;
     }
 
+    $tokens = admin_push_all_tokens($pdo);
+    if ($tokens === []) {
+        error_log('[admin-push] no admin FCM tokens registered — open admin app, log in, allow notifications');
+        return;
+    }
+
+    $sent = 0;
     foreach ($tokens as $token) {
-        admin_push_send_to_token($token, $copy['title'], $copy['body'], $data);
+        if (admin_push_send_to_token($token, $copy['title'], $copy['body'], $data)) {
+            $sent++;
+        }
+    }
+    if ($sent === 0) {
+        error_log('[admin-push] FCM send failed for all ' . count($tokens) . ' token(s), activity=' . $activityType);
     }
 }
 
