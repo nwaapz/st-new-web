@@ -21,6 +21,7 @@ try {
     cms_ensure_car_model_factories_schema($pdo);
     cms_ensure_product_car_models_schema($pdo);
     cms_ensure_product_categories_schema($pdo);
+    cms_series_ensure_categories_schema($pdo);
 
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
@@ -346,9 +347,13 @@ try {
     }
 
     if (!function_exists('admin_push_notify_new_order')) {
-        $pushLib = dirname(__DIR__) . '/cms/lib/admin-push.php';
-        if (is_readable($pushLib)) {
-            require_once $pushLib;
+        try {
+            $pushLib = dirname(__DIR__) . '/cms/lib/admin-push.php';
+            if (is_readable($pushLib)) {
+                require_once $pushLib;
+            }
+        } catch (Throwable $loadErr) {
+            error_log('[orders] push lib load failed: ' . $loadErr->getMessage());
         }
     }
     if (function_exists('admin_push_notify_new_order')) {
@@ -368,6 +373,6 @@ try {
         ),
     ], 201);
 } catch (Throwable $e) {
-    error_log('[orders] ' . $e->getMessage());
+    error_log('[orders] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
     api_error('خطای سرور', 500);
 }

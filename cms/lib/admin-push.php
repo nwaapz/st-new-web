@@ -285,35 +285,42 @@ function admin_push_message_for_client_activity(array $order, string $activityTy
         : '';
     $codeLabel = $publicCode !== '' ? $publicCode : '—';
 
-    return match ($activityType) {
-        'submitted', 'new_order' => [
+    if ($activityType === 'submitted' || $activityType === 'new_order') {
+        return [
             'title' => 'سفارش جدید',
             'body' => $branchName !== ''
                 ? 'کد ' . $codeLabel . ' — نماینده: ' . $branchName
                 : 'کد ' . $codeLabel . ' — مشتری وب: ' . $phone,
             'type' => 'new_order',
-        ],
-        'payment_proof' => [
+        ];
+    }
+    if ($activityType === 'payment_proof') {
+        return [
             'title' => 'مدارک پرداخت جدید',
             'body' => 'سفارش ' . $codeLabel . ' — ' . $phone,
             'type' => 'payment_proof',
-        ],
-        'payment_proof_update' => [
+        ];
+    }
+    if ($activityType === 'payment_proof_update') {
+        return [
             'title' => 'به‌روزرسانی مدارک پرداخت',
             'body' => 'سفارش ' . $codeLabel . ' — ' . $phone,
             'type' => 'payment_proof_update',
-        ],
-        'payment_warning_answered' => [
+        ];
+    }
+    if ($activityType === 'payment_warning_answered') {
+        return [
             'title' => 'پاسخ مشتری به هشدار پرداخت',
             'body' => 'سفارش ' . $codeLabel . ' — مدارک جدید ارسال شد',
             'type' => 'payment_warning_answered',
-        ],
-        default => [
-            'title' => 'فعالیت سفارش',
-            'body' => $message !== '' ? $message : ('سفارش ' . $codeLabel),
-            'type' => 'order_activity',
-        ],
-    };
+        ];
+    }
+
+    return [
+        'title' => 'فعالیت سفارش',
+        'body' => $message !== '' ? $message : ('سفارش ' . $codeLabel),
+        'type' => 'order_activity',
+    ];
 }
 
 function admin_push_notify_new_order(PDO $pdo, int $orderId): void

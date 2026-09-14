@@ -223,6 +223,9 @@ function orders_ensure_schema(PDO $pdo): void
         if (!isset($prodCols['pack_size'])) {
             $pdo->exec('ALTER TABLE products ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
         }
+        if (!isset($prodCols['shop_display_image'])) {
+            $pdo->exec('ALTER TABLE products ADD COLUMN shop_display_image VARCHAR(512) NULL');
+        }
     } catch (Throwable $e) {
         /* ignore */
     }
