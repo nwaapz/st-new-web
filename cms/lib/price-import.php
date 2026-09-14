@@ -1605,3 +1605,82 @@ function price_import_apply_batch(
         'applied_indices' => $appliedIndices,
     ];
 }
+
+/**
+ * Admin mobile: update price_text only for existing products matched by visual_id.
+ *
+ * @param list<array<string, mixed>> $parsedRows
+ * @return array{
+ *   total_rows:int,
+ *   updated:int,
+ *   skipped:list<array{visual_id:string,name:string,excel_row:int,reason:string}>
+ * }
+ */
+function price_import_apply_prices_only(PDO $pdo, array $parsedRows): array
+{
+    $updated = 0;
+    $skipped = [];
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($parsedRows as $row) {
+            $visualId = trim((string) ($row['visual_id'] ?? ''));
+            $name = trim((string) ($row['name'] ?? ''));
+            $excelRow = (int) ($row['excel_row'] ?? 0);
+            $priceText = trim((string) ($row['price_text'] ?? ''));
+
+            $skip = static function (string $reason) use (&$skipped, $visualId, $name, $excelRow): void {
+                $skipped[] = [
+                    'visual_id' => $visualId,
+                    'name' => $name,
+                    'excel_row' => $excelRow,
+                    'reason' => $reason,
+                ];
+            };
+
+            if ($visualId === '') {
+                $skip('کد کالا خالی است');
+                continue;
+            }
+            if ($priceText === '') {
+                $skip('قیمت نامعتبر یا خالی است');
+                continue;
+            }
+
+            $existing = price_import_find_product_by_visual_id($pdo, $visualId);
+            if ($existing === null) {
+                $skip('محصول با این کد در سایت یافت نشد — فقط قیمت محصولات موجود به‌روز می‌شود');
+                continue;
+            }
+
+            if ($name === '') {
+                $name = (string) ($existing['name'] ?? '');
+            }
+
+            $existingPrice = trim((string) ($existing['price_text'] ?? ''));
+            if ($existingPrice === $priceText) {
+                $skip('قیمت تغییر نکرد');
+                continue;
+            }
+
+            try {
+                $stmt = $pdo->prepare('UPDATE products SET price_text = ? WHERE id = ?');
+                $stmt->execute([$priceText, (int) $existing['id']]);
+                $updated++;
+            } catch (Throwable $e) {
+                $skip($e->getMessage());
+            }
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+
+    return [
+        'total_rows' => count($parsedRows),
+        'updated' => $updated,
+        'skipped' => $skipped,
+    ];
+}

@@ -419,6 +419,7 @@ if ($viewOrder) {
             <?php if ($isBranchScope): ?>
               <th>استان</th>
               <th>شهر</th>
+              <th>کاربر اپ</th>
               <th>نماینده</th>
               <th>موبایل</th>
             <?php else: ?>
@@ -443,6 +444,7 @@ if ($viewOrder) {
             <?php if ($isBranchScope): ?>
               <td><?= cms_h((string) ($item['branch_province_name'] ?? '')) ?></td>
               <td><?= cms_h((string) ($item['branch_city'] ?? '')) ?></td>
+              <td><?= cms_h((string) ($item['sales_user_name'] ?? '—')) ?></td>
               <td><?= cms_h((string) ($item['branch_name'] ?? '')) ?></td>
               <td dir="ltr"><?= cms_h((string) ($item['branch_phone'] ?: $item['phone'])) ?></td>
             <?php else: ?>
@@ -587,6 +589,7 @@ if ($viewOrder) {
             <div><dt>تاریخ</dt><dd dir="ltr"><?= cms_h((string) $viewOrder['created_at']) ?></dd></div>
             <div><dt>موبایل</dt><dd dir="ltr"><?= cms_h((string) ($viewOrder['branch_phone'] ?: $viewOrder['phone'])) ?></dd></div>
             <?php if (!empty($viewOrder['branch_id'])): ?>
+              <div><dt>کاربر اپ</dt><dd><?= cms_h((string) ($viewOrder['sales_user_name'] ?? '—')) ?></dd></div>
               <div><dt>نماینده</dt><dd><?= cms_h((string) ($viewOrder['branch_name'] ?? '')) ?></dd></div>
               <div><dt>استان / شهر</dt><dd><?= cms_h(trim((string) ($viewOrder['branch_province_name'] ?? '') . ' / ' . (string) ($viewOrder['branch_city'] ?? ''), ' /')) ?></dd></div>
             <?php endif; ?>

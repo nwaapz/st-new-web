@@ -273,6 +273,14 @@ function orders_ensure_schema(PDO $pdo): void
     } catch (Throwable $e) {
         /* ignore if exists */
     }
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM orders LIKE 'sales_user_name'")->fetchAll();
+        if (count($col) === 0) {
+            $pdo->exec('ALTER TABLE orders ADD COLUMN sales_user_name VARCHAR(128) NULL AFTER sales_user_id');
+        }
+    } catch (Throwable $e) {
+        /* ignore */
+    }
 
     $ready = true;
 }
@@ -466,6 +474,13 @@ function orders_serialize(array $order, array $items, array $events): array
             : null,
         'branch_phone' => isset($order['branch_phone']) && $order['branch_phone'] !== null
             ? (string) $order['branch_phone']
+            : null,
+        'sales_user_id' => isset($order['sales_user_id']) && $order['sales_user_id'] !== null
+            ? (int) $order['sales_user_id']
+            : null,
+        'sales_user_name' => isset($order['sales_user_name']) && $order['sales_user_name'] !== null
+            && trim((string) $order['sales_user_name']) !== ''
+            ? (string) $order['sales_user_name']
             : null,
         'status' => (string) $order['status'],
         'payment_note' => $paymentNote !== '' ? $paymentNote : null,
@@ -995,19 +1010,28 @@ function orders_create_from_normalized(
         throw new InvalidArgumentException('اقلام سفارش نامعتبر است');
     }
 
+    $salesUserName = null;
+    if ($salesUserId !== null && $salesUserId > 0) {
+        if (!function_exists('sales_users_display_name_for_id')) {
+            require_once __DIR__ . '/sales-users.php';
+        }
+        $salesUserName = sales_users_display_name_for_id($pdo, $salesUserId);
+    }
+
     $pdo->beginTransaction();
     try {
         $publicCode = orders_generate_public_code($pdo);
         $ins = $pdo->prepare(
             'INSERT INTO orders (
-               public_code, user_id, sales_user_id, phone, status,
+               public_code, user_id, sales_user_id, sales_user_name, phone, status,
                branch_id, branch_name, branch_city, branch_province_name, branch_phone
-             ) VALUES (?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
+             ) VALUES (?, ?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
         );
         $ins->execute([
             $publicCode,
             $userId,
             $salesUserId,
+            $salesUserName,
             $phone,
             $branchSnap['branch_id'],
             $branchSnap['branch_name'],
@@ -1114,7 +1138,9 @@ function orders_admin_list(
             'o.phone LIKE ?',
             'o.public_code LIKE ?',
             'COALESCE(o.branch_phone, \'\') LIKE ?',
+            'COALESCE(o.sales_user_name, \'\') LIKE ?',
         ];
+        $params[] = $like;
         $params[] = $like;
         $params[] = $like;
         $params[] = $like;
@@ -1166,6 +1192,12 @@ function orders_admin_list(
                 : null,
             'branch_phone' => isset($row['branch_phone']) && $row['branch_phone'] !== null
                 ? (string) $row['branch_phone']
+                : null,
+            'sales_user_id' => isset($row['sales_user_id']) && $row['sales_user_id'] !== null
+                ? (int) $row['sales_user_id']
+                : null,
+            'sales_user_name' => isset($row['sales_user_name']) && $row['sales_user_name'] !== null
+                ? (string) $row['sales_user_name']
                 : null,
             'item_count' => (int) ($row['item_count'] ?? 0),
             'created_at' => (string) $row['created_at'],

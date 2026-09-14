@@ -15,10 +15,8 @@ $edit = null;
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
 
 if (isset($_GET['edit'])) {
-    $stmt = $pdo->prepare('SELECT * FROM sales_users WHERE id = ? LIMIT 1');
-    $stmt->execute([(int) $_GET['edit']]);
-    $edit = $stmt->fetch() ?: null;
-    if (!$edit) {
+    $edit = sales_users_get($pdo, (int) $_GET['edit']);
+    if ($edit === null) {
         cms_flash('کاربر فروش یافت نشد', 'error');
         cms_redirect('sales-users.php');
     }
@@ -26,118 +24,42 @@ if (isset($_GET['edit'])) {
 }
 
 if (isset($_GET['delete'])) {
-    $stmt = $pdo->prepare('DELETE FROM sales_users WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
-    cms_flash('کاربر فروش حذف شد');
-    cms_redirect('sales-users.php');
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $id = (int) ($_POST['id'] ?? 0);
     try {
-        $username = sales_users_normalize_username((string) ($_POST['username'] ?? ''));
-        $displayName = trim((string) ($_POST['display_name'] ?? ''));
-        $password = (string) ($_POST['password'] ?? '');
-        $branchId = (int) ($_POST['branch_id'] ?? 0);
-        $published = isset($_POST['published']) ? 1 : 0;
-
-        if ($username === '' || !sales_users_is_valid_username($username)) {
-            throw new RuntimeException('نام کاربری معتبر نیست (۳ تا ۶۴ کاراکتر، حروف انگلیسی و عدد)');
-        }
-        if ($displayName === '') {
-            throw new RuntimeException('نام نمایشی الزامی است');
-        }
-
-        $dup = $pdo->prepare('SELECT id FROM sales_users WHERE username = ? AND id <> ? LIMIT 1');
-        $dup->execute([$username, $id]);
-        if ($dup->fetch()) {
-            throw new RuntimeException('این نام کاربری قبلاً ثبت شده است');
-        }
-
-        if ($branchId > 0) {
-            $branchCheck = $pdo->prepare('SELECT id FROM branches WHERE id = ? LIMIT 1');
-            $branchCheck->execute([$branchId]);
-            if (!$branchCheck->fetch()) {
-                throw new RuntimeException('نماینده انتخاب‌شده نامعتبر است');
-            }
-        } else {
-            $branchId = 0;
-        }
-
-        if ($id > 0) {
-            if ($password !== '') {
-                if (strlen($password) < 6) {
-                    throw new RuntimeException('رمز عبور باید حداقل ۶ کاراکتر باشد');
-                }
-                $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare(
-                    'UPDATE sales_users
-                     SET username = ?, display_name = ?, password_hash = ?, branch_id = ?, published = ?
-                     WHERE id = ?'
-                );
-                $stmt->execute([
-                    $username,
-                    $displayName,
-                    $hash,
-                    $branchId > 0 ? $branchId : null,
-                    $published,
-                    $id,
-                ]);
-            } else {
-                $stmt = $pdo->prepare(
-                    'UPDATE sales_users
-                     SET username = ?, display_name = ?, branch_id = ?, published = ?
-                     WHERE id = ?'
-                );
-                $stmt->execute([
-                    $username,
-                    $displayName,
-                    $branchId > 0 ? $branchId : null,
-                    $published,
-                    $id,
-                ]);
-            }
-            cms_flash('کاربر فروش به‌روز شد');
-        } else {
-            if ($password === '' || strlen($password) < 6) {
-                throw new RuntimeException('رمز عبور باید حداقل ۶ کاراکتر باشد');
-            }
-            $hash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare(
-                'INSERT INTO sales_users (username, password_hash, display_name, branch_id, published)
-                 VALUES (?, ?, ?, ?, ?)'
-            );
-            $stmt->execute([
-                $username,
-                $hash,
-                $displayName,
-                $branchId > 0 ? $branchId : null,
-                $published,
-            ]);
-            cms_flash('کاربر فروش اضافه شد');
-        }
+        sales_users_delete($pdo, (int) $_GET['delete']);
+        cms_flash('کاربر فروش حذف شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
     }
     cms_redirect('sales-users.php');
 }
 
-$users = $pdo->query(
-    'SELECT s.id, s.username, s.display_name, s.published, s.created_at, b.name AS branch_name
-     FROM sales_users s
-     LEFT JOIN branches b ON b.id = s.branch_id
-     ORDER BY s.username ASC'
-)->fetchAll() ?: [];
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $id = (int) ($_POST['id'] ?? 0);
+    try {
+        $branchId = (int) ($_POST['branch_id'] ?? 0);
+        sales_users_save($pdo, [
+            'id' => $id,
+            'username' => (string) ($_POST['username'] ?? ''),
+            'display_name' => (string) ($_POST['display_name'] ?? ''),
+            'password' => (string) ($_POST['password'] ?? ''),
+            'branch_id' => $branchId > 0 ? $branchId : null,
+            'published' => isset($_POST['published']),
+        ]);
+        cms_flash($id > 0 ? 'کاربر فروش به‌روز شد' : 'کاربر فروش اضافه شد');
+    } catch (Throwable $e) {
+        cms_flash($e->getMessage(), 'error');
+    }
+    cms_redirect('sales-users.php');
+}
 
-$branches = $pdo->query(
-    'SELECT id, name, city FROM branches WHERE published = 1 ORDER BY sort_order ASC, name ASC'
-)->fetchAll() ?: [];
+$users = sales_users_list($pdo);
+$branches = sales_users_branch_options($pdo);
 
 cms_layout_start('کاربران اپ فروش', cms_current_username(), 'shop');
 ?>
 <h1 style="margin-top:0">کاربران اپ فروش</h1>
 <p class="cms-muted">
-  حساب‌های ورود اپ اندروید با <strong>نام کاربری و رمز عبور</strong> (بدون OTP).
+  حساب‌های ورود اپ اندroid. نام نمایشی در سفارش‌ها برای ادمین دیده می‌شود.
 </p>
 
 <div class="cms-btn-row">
@@ -156,14 +78,15 @@ cms_layout_start('کاربران اپ فروش', cms_current_username(), 'shop')
              autocomplete="off">
     </label>
     <label class="cms-field">
-      <span class="cms-label">نام نمایشی</span>
+      <span class="cms-label">نام نمایشی (در سفارش‌ها)</span>
       <input class="cms-input" name="display_name" required
              value="<?= cms_h((string) ($edit['display_name'] ?? '')) ?>">
     </label>
     <label class="cms-field">
-      <span class="cms-label"><?= $edit ? 'رمز عبور جدید (خالی = بدون تغییر)' : 'رمز عبور' ?></span>
-      <input class="cms-input" type="password" name="password" dir="ltr"
-             <?= $edit ? '' : 'required' ?> autocomplete="new-password">
+      <span class="cms-label"><?= $edit ? 'رمز عبور (خالی = بدون تغییر)' : 'رمز عبور' ?></span>
+      <input class="cms-input" type="text" name="password" dir="ltr"
+             value="<?= cms_h((string) ($edit['password'] ?? '')) ?>"
+             <?= $edit ? '' : 'required' ?> autocomplete="off">
     </label>
     <label class="cms-field">
       <span class="cms-label">نماینده مرتبط (اختیاری)</span>
@@ -179,7 +102,7 @@ cms_layout_start('کاربران اپ فروش', cms_current_username(), 'shop')
     </label>
     <label class="cms-field cms-field--inline">
       <input type="checkbox" name="published" value="1"
-        <?= !isset($edit['published']) || (int) $edit['published'] === 1 ? 'checked' : '' ?>>
+        <?= !isset($edit['published']) || ($edit['published'] ?? true) ? 'checked' : '' ?>>
       <span>فعال</span>
     </label>
     <div class="cms-btn-row">
@@ -198,8 +121,9 @@ cms_layout_start('کاربران اپ فروش', cms_current_username(), 'shop')
     <table class="cms-table">
       <thead>
         <tr>
-          <th>نام کاربری</th>
           <th>نام نمایشی</th>
+          <th>نام کاربری</th>
+          <th>رمز عبور</th>
           <th>نماینده</th>
           <th>وضعیت</th>
           <th></th>
@@ -208,10 +132,11 @@ cms_layout_start('کاربران اپ فروش', cms_current_username(), 'shop')
       <tbody>
         <?php foreach ($users as $user): ?>
           <tr>
-            <td dir="ltr"><?= cms_h((string) $user['username']) ?></td>
             <td><?= cms_h((string) $user['display_name']) ?></td>
+            <td dir="ltr"><?= cms_h((string) $user['username']) ?></td>
+            <td dir="ltr"><?= cms_h((string) ($user['password'] ?: '—')) ?></td>
             <td><?= cms_h((string) ($user['branch_name'] ?? '—')) ?></td>
-            <td><?= (int) $user['published'] === 1 ? 'فعال' : 'غیرفعال' ?></td>
+            <td><?= ($user['published'] ?? true) ? 'فعال' : 'غیرفعال' ?></td>
             <td class="cms-table__actions">
               <a href="sales-users.php?edit=<?= (int) $user['id'] ?>">ویرایش</a>
               <a href="sales-users.php?delete=<?= (int) $user['id'] ?>"

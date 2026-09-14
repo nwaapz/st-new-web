@@ -240,29 +240,26 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
     return false;
 }
 
-function admin_push_notify_new_order(PDO $pdo, int $orderId): void
+function admin_push_notify_order_activity(PDO $pdo, int $orderId, string $activityType, string $message = ''): void
 {
     if ($orderId <= 0) {
         return;
+    }
+    if (!function_exists('orders_get_by_id')) {
+        require_once __DIR__ . '/orders.php';
     }
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
         return;
     }
 
+    $copy = admin_push_message_for_client_activity($order, $activityType, $message);
     $publicCode = (string) ($order['public_code'] ?? '');
-    $phone = (string) ($order['phone'] ?? '');
-    $branchName = isset($order['branch_name']) && $order['branch_name'] !== null
-        ? trim((string) $order['branch_name'])
-        : '';
-    $source = $branchName !== '' ? 'نماینده: ' . $branchName : 'مشتری وب/فروش';
-
-    $title = 'سفارش جدید';
-    $body = 'کد ' . $publicCode . ' — ' . $phone . ' (' . $source . ')';
     $data = [
         'order_id' => (string) $orderId,
-        'type' => 'new_order',
+        'type' => (string) ($copy['type'] ?? $activityType),
         'public_code' => $publicCode,
+        'activity' => $activityType,
     ];
 
     $tokens = admin_push_all_tokens($pdo);
@@ -271,6 +268,55 @@ function admin_push_notify_new_order(PDO $pdo, int $orderId): void
     }
 
     foreach ($tokens as $token) {
-        admin_push_send_to_token($token, $title, $body, $data);
+        admin_push_send_to_token($token, $copy['title'], $copy['body'], $data);
     }
+}
+
+/**
+ * @param array<string, mixed> $order
+ * @return array{title: string, body: string, type: string}
+ */
+function admin_push_message_for_client_activity(array $order, string $activityType, string $message = ''): array
+{
+    $publicCode = (string) ($order['public_code'] ?? '');
+    $phone = (string) ($order['phone'] ?? '');
+    $branchName = isset($order['branch_name']) && $order['branch_name'] !== null
+        ? trim((string) $order['branch_name'])
+        : '';
+    $codeLabel = $publicCode !== '' ? $publicCode : '—';
+
+    return match ($activityType) {
+        'submitted', 'new_order' => [
+            'title' => 'سفارش جدید',
+            'body' => $branchName !== ''
+                ? 'کد ' . $codeLabel . ' — نماینده: ' . $branchName
+                : 'کد ' . $codeLabel . ' — مشتری وب: ' . $phone,
+            'type' => 'new_order',
+        ],
+        'payment_proof' => [
+            'title' => 'مدارک پرداخت جدید',
+            'body' => 'سفارش ' . $codeLabel . ' — ' . $phone,
+            'type' => 'payment_proof',
+        ],
+        'payment_proof_update' => [
+            'title' => 'به‌روزرسانی مدارک پرداخت',
+            'body' => 'سفارش ' . $codeLabel . ' — ' . $phone,
+            'type' => 'payment_proof_update',
+        ],
+        'payment_warning_answered' => [
+            'title' => 'پاسخ مشتری به هشدار پرداخت',
+            'body' => 'سفارش ' . $codeLabel . ' — مدارک جدید ارسال شد',
+            'type' => 'payment_warning_answered',
+        ],
+        default => [
+            'title' => 'فعالیت سفارش',
+            'body' => $message !== '' ? $message : ('سفارش ' . $codeLabel),
+            'type' => 'order_activity',
+        ],
+    };
+}
+
+function admin_push_notify_new_order(PDO $pdo, int $orderId): void
+{
+    admin_push_notify_order_activity($pdo, $orderId, 'submitted');
 }

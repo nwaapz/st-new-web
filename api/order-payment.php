@@ -264,8 +264,14 @@ try {
     if (!function_exists('admin_push_notify_payment_proof')) {
         require_once dirname(__DIR__) . '/cms/lib/sales-push.php';
     }
+    $pushActivity = 'payment_proof';
+    if ($status === 'payment_proof_sent' && !$hadOpenWarning) {
+        $pushActivity = 'payment_proof_update';
+    } elseif ($hadOpenWarning) {
+        $pushActivity = 'payment_warning_answered';
+    }
     try {
-        admin_push_notify_payment_proof($pdo, $orderId);
+        admin_push_notify_payment_proof($pdo, $orderId, $pushActivity);
     } catch (Throwable $e) {
         error_log('[order-payment] push failed: ' . $e->getMessage());
     }

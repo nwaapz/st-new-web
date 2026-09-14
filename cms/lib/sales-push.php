@@ -164,30 +164,9 @@ function sales_push_notify_status_change(
     }
 }
 
-function admin_push_notify_payment_proof(PDO $pdo, int $orderId): void
+function admin_push_notify_payment_proof(PDO $pdo, int $orderId, string $activityType = 'payment_proof'): void
 {
-    if ($orderId <= 0) {
-        return;
-    }
-    $order = orders_get_by_id($pdo, $orderId);
-    if ($order === null) {
-        return;
-    }
-
-    $publicCode = (string) ($order['public_code'] ?? '');
-    $phone = (string) ($order['phone'] ?? '');
-    $title = 'مدارک پرداخت جدید';
-    $body = 'سفارش ' . $publicCode . ' — ' . $phone;
-    $data = [
-        'order_id' => (string) $orderId,
-        'type' => 'payment_proof',
-        'public_code' => $publicCode,
-    ];
-
-    $tokens = admin_push_all_tokens($pdo);
-    foreach ($tokens as $token) {
-        admin_push_send_to_token($token, $title, $body, $data);
-    }
+    admin_push_notify_order_activity($pdo, $orderId, $activityType);
 }
 
 function orders_admin_notify_sales_client(PDO $pdo, int $orderId, string $notifyType, string $message = ''): void

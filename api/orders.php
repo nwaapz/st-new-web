@@ -345,6 +345,20 @@ try {
         api_error('خطا در ایجاد سفارش', 500);
     }
 
+    if (!function_exists('admin_push_notify_new_order')) {
+        $pushLib = dirname(__DIR__) . '/cms/lib/admin-push.php';
+        if (is_readable($pushLib)) {
+            require_once $pushLib;
+        }
+    }
+    if (function_exists('admin_push_notify_new_order')) {
+        try {
+            admin_push_notify_new_order($pdo, $orderId);
+        } catch (Throwable $pushErr) {
+            error_log('[orders] push failed: ' . $pushErr->getMessage());
+        }
+    }
+
     api_json([
         'ok' => true,
         'order' => orders_serialize(
