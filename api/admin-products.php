@@ -39,13 +39,15 @@ try {
         $q = trim((string) ($_GET['q'] ?? ''));
         $page = max(1, (int) ($_GET['page'] ?? 1));
         $categoryId = max(0, (int) ($_GET['category_id'] ?? 0));
-        $list = admin_products_list($pdo, $q, $page, $categoryId);
+        $carModelId = max(0, (int) ($_GET['car_model_id'] ?? 0));
+        $list = admin_products_list($pdo, $q, $page, $categoryId, $carModelId);
         api_json([
             'ok' => true,
             'products' => $list['items'],
             'total' => $list['total'],
             'page' => $list['page'],
             'total_pages' => $list['total_pages'],
+            'search_intent' => $list['search_intent'],
         ]);
     }
 

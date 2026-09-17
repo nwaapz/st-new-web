@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/admin-common.php';
+require_once __DIR__ . '/search-text.php';
+require_once __DIR__ . '/shop-search-intent.php';
 require_once __DIR__ . '/product-categories.php';
 require_once __DIR__ . '/product-car-models.php';
 
@@ -76,27 +78,94 @@ function admin_products_replace_gallery(PDO $pdo, int $productId, array $slides)
 }
 
 /**
- * @return array{items:list<array<string,mixed>>,total:int,page:int,total_pages:int}
+ * @return array{
+ *   items:list<array<string,mixed>>,
+ *   total:int,
+ *   page:int,
+ *   total_pages:int,
+ *   search_intent:?array<string,mixed>
+ * }
  */
-function admin_products_list(PDO $pdo, string $q = '', int $page = 1, int $categoryId = 0): array
-{
+function admin_products_list(
+    PDO $pdo,
+    string $q = '',
+    int $page = 1,
+    int $categoryId = 0,
+    int $carModelId = 0
+): array {
     admin_products_ensure_schema($pdo);
+    cms_ensure_car_model_factories_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
+
     $page = max(1, $page);
     $categoryId = max(0, $categoryId);
-    $q = trim($q);
-    $where = '1=1';
-    $params = [];
-    if ($q !== '') {
-        $where .= ' AND (p.name LIKE ? OR p.visual_id LIKE ? OR p.slug LIKE ?)';
-        $like = '%' . $q . '%';
-        $params = [$like, $like, $like];
-    }
+    $carModelId = max(0, $carModelId);
+    $rawQ = trim($q);
+    $q = search_normalize($rawQ);
+    $categoryIds = [];
     if ($categoryId > 0) {
-        $where .= ' AND ' . cms_product_category_filter_sql('p');
-        $params[] = $categoryId;
+        $categoryIds[] = $categoryId;
     }
 
-    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM products p WHERE {$where}");
+    $searchIntent = null;
+    if ($q !== '') {
+        $intent = shop_search_parse_intent($pdo, $q, [
+            'skip_car' => $carModelId > 0,
+            'skip_factory' => true,
+            'skip_categories' => $categoryId > 0,
+        ]);
+        if ($carModelId <= 0 && !empty($intent['car_model_id'])) {
+            $carModelId = (int) $intent['car_model_id'];
+        }
+        if ($categoryId <= 0 && !empty($intent['category_ids'])) {
+            $categoryIds = array_values(array_unique(array_map('intval', $intent['category_ids'])));
+        }
+        $q = search_normalize((string) ($intent['remainder'] ?? ''));
+        $searchIntent = shop_search_intent_for_response($intent);
+        $searchIntent['matched'] = $intent['matched'] ?? [];
+    }
+
+    $where = ['1=1'];
+    $params = [];
+
+    if ($carModelId > 0 && $categoryIds !== []) {
+        $where[] = cms_product_car_category_pair_filter_sql('p', count($categoryIds));
+        $params[] = $carModelId;
+        foreach ($categoryIds as $catId) {
+            $params[] = $catId;
+        }
+        foreach ($categoryIds as $catId) {
+            $params[] = $catId;
+        }
+    } else {
+        if ($categoryIds !== []) {
+            $where[] = cms_product_effective_category_in_filter_sql('p', count($categoryIds));
+            foreach ($categoryIds as $catId) {
+                $params[] = $catId;
+            }
+            foreach ($categoryIds as $catId) {
+                $params[] = $catId;
+            }
+        }
+        if ($carModelId > 0) {
+            $where[] = cms_product_car_model_filter_sql('p');
+            $params[] = $carModelId;
+        }
+    }
+
+    if ($q !== '') {
+        $like = '%' . search_like_escape($q) . '%';
+        $modelNamesSqlForQ = cms_product_model_names_sql('p');
+        $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR '
+            . search_name_sql('p.visual_id') . ' LIKE ? OR '
+            . cms_product_any_category_name_search_sql('p', search_name_sql('c_s.name') . ' LIKE ?') . ' OR '
+            . $modelNamesSqlForQ . ' LIKE ?)';
+        array_push($params, $like, $like, $like, $like);
+    }
+
+    $whereSql = implode(' AND ', $where);
+
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM products p WHERE {$whereSql}");
     $countStmt->execute($params);
     $total = (int) $countStmt->fetchColumn();
     $totalPages = max(1, (int) ceil($total / ADMIN_PRODUCTS_PAGE_SIZE));
@@ -109,7 +178,7 @@ function admin_products_list(PDO $pdo, string $q = '', int $page = 1, int $categ
                    " . cms_product_category_names_sql('p') . " AS category_names,
                    " . cms_product_model_names_sql('p') . " AS car_model_names
             FROM products p
-            WHERE {$where}
+            WHERE {$whereSql}
             ORDER BY p.sort_order ASC, p.name ASC
             LIMIT " . ADMIN_PRODUCTS_PAGE_SIZE . " OFFSET {$offset}";
     $stmt = $pdo->prepare($sql);
@@ -135,6 +204,7 @@ function admin_products_list(PDO $pdo, string $q = '', int $page = 1, int $categ
         'total' => $total,
         'page' => $page,
         'total_pages' => $totalPages,
+        'search_intent' => $searchIntent,
     ];
 }
 
