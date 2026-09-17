@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/admin-common.php';
 require_once __DIR__ . '/product-categories.php';
+require_once __DIR__ . '/product-car-models.php';
 
 const ADMIN_PRODUCT_GALLERY_MAX = 12;
 const ADMIN_PRODUCTS_PAGE_SIZE = 20;
@@ -77,10 +78,11 @@ function admin_products_replace_gallery(PDO $pdo, int $productId, array $slides)
 /**
  * @return array{items:list<array<string,mixed>>,total:int,page:int,total_pages:int}
  */
-function admin_products_list(PDO $pdo, string $q = '', int $page = 1): array
+function admin_products_list(PDO $pdo, string $q = '', int $page = 1, int $categoryId = 0): array
 {
     admin_products_ensure_schema($pdo);
     $page = max(1, $page);
+    $categoryId = max(0, $categoryId);
     $q = trim($q);
     $where = '1=1';
     $params = [];
@@ -88,6 +90,10 @@ function admin_products_list(PDO $pdo, string $q = '', int $page = 1): array
         $where .= ' AND (p.name LIKE ? OR p.visual_id LIKE ? OR p.slug LIKE ?)';
         $like = '%' . $q . '%';
         $params = [$like, $like, $like];
+    }
+    if ($categoryId > 0) {
+        $where .= ' AND ' . cms_product_category_filter_sql('p');
+        $params[] = $categoryId;
     }
 
     $countStmt = $pdo->prepare("SELECT COUNT(*) FROM products p WHERE {$where}");
@@ -100,7 +106,8 @@ function admin_products_list(PDO $pdo, string $q = '', int $page = 1): array
     $offset = ($page - 1) * ADMIN_PRODUCTS_PAGE_SIZE;
 
     $sql = "SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.published, p.sort_order,
-                   " . cms_product_category_names_sql('p') . " AS category_names
+                   " . cms_product_category_names_sql('p') . " AS category_names,
+                   " . cms_product_model_names_sql('p') . " AS car_model_names
             FROM products p
             WHERE {$where}
             ORDER BY p.sort_order ASC, p.name ASC
@@ -117,6 +124,7 @@ function admin_products_list(PDO $pdo, string $q = '', int $page = 1): array
             'price_text' => (string) ($row['price_text'] ?? ''),
             'image' => (string) ($row['image'] ?? ''),
             'category_names' => (string) ($row['category_names'] ?? ''),
+            'car_model_names' => (string) ($row['car_model_names'] ?? ''),
             'sort_order' => (int) ($row['sort_order'] ?? 0),
             'published' => (int) ($row['published'] ?? 0) === 1,
         ];

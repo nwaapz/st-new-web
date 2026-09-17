@@ -28,7 +28,7 @@ function admin_auth_session_start(): void
     session_name(ADMIN_AUTH_SESSION_NAME);
     session_set_cookie_params([
         'lifetime' => ADMIN_AUTH_TTL_SECONDS,
-        'path' => admin_auth_cookie_path(),
+        'path' => '/',
         'secure' => admin_auth_cookie_secure(),
         'httponly' => true,
         'samesite' => 'Lax',
@@ -76,7 +76,7 @@ function admin_auth_refresh_session_cookie(): void
     }
     setcookie(session_name(), $id, [
         'expires' => time() + ADMIN_AUTH_TTL_SECONDS,
-        'path' => admin_auth_cookie_path(),
+        'path' => '/',
         'secure' => admin_auth_cookie_secure(),
         'httponly' => true,
         'samesite' => 'Lax',
@@ -90,7 +90,7 @@ function admin_auth_logout(): void
     if (session_id() !== '') {
         setcookie(session_name(), '', [
             'expires' => time() - 42000,
-            'path' => admin_auth_cookie_path(),
+            'path' => '/',
             'secure' => admin_auth_cookie_secure(),
             'httponly' => true,
             'samesite' => 'Lax',
@@ -136,10 +136,13 @@ function admin_auth_attempt_login(PDO $pdo, string $username, string $password):
         return null;
     }
 
-    $stmt = $pdo->prepare('SELECT id, username, password_hash FROM admin_users WHERE username = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, username, password_hash, is_active FROM admin_users WHERE username = ? LIMIT 1');
     $stmt->execute([$username]);
     $row = $stmt->fetch();
     if (!$row || !password_verify($password, (string) $row['password_hash'])) {
+        return null;
+    }
+    if (isset($row['is_active']) && (int) $row['is_active'] !== 1) {
         return null;
     }
 
