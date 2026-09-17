@@ -48,11 +48,14 @@ function order_cheques_event_labels(): array
 
 function order_cheques_result_label(?string $result): string
 {
-    return match ($result) {
-        'funded' => 'وصول شد',
-        'bounced' => 'برگشت خورد',
-        default => 'در انتظار بانک',
-    };
+    switch ($result) {
+        case 'funded':
+            return 'وصول شد';
+        case 'bounced':
+            return 'برگشت خورد';
+        default:
+            return 'در انتظار بانک';
+    }
 }
 
 function order_cheques_normalize_date(string $raw, string $label = 'تاریخ'): string
@@ -235,13 +238,18 @@ function order_cheques_sms_body(string $notifyType, string $publicCode, string $
     $due = order_cheques_format_date($dueOn);
     $serialBit = $serial !== '' ? ' (شماره ' . $serial . ')' : '';
 
-    return match ($notifyType) {
-        'cheque_received' => 'چک سفارش ' . $code . $serialBit . ' دریافت شد. سررسید: ' . $due,
-        'cheque_due_soon' => 'یادآوری: سررسید چک سفارش ' . $code . $serialBit . ' دو روز دیگر است (' . $due . ').',
-        'cheque_funded' => 'چک سفارش ' . $code . $serialBit . ' در بانک وصول شد.',
-        'cheque_bounced' => 'چک سفارش ' . $code . $serialBit . ' در بانک برگشت خورد.',
-        default => 'به‌روزرسانی چک سفارش ' . $code,
-    };
+    switch ($notifyType) {
+        case 'cheque_received':
+            return 'چک سفارش ' . $code . $serialBit . ' دریافت شد. سررسید: ' . $due;
+        case 'cheque_due_soon':
+            return 'یادآوری: سررسید چک سفارش ' . $code . $serialBit . ' دو روز دیگر است (' . $due . ').';
+        case 'cheque_funded':
+            return 'چک سفارش ' . $code . $serialBit . ' در بانک وصول شد.';
+        case 'cheque_bounced':
+            return 'چک سفارش ' . $code . $serialBit . ' در بانک برگشت خورد.';
+        default:
+            return 'به‌روزرسانی چک سفارش ' . $code;
+    }
 }
 
 /**

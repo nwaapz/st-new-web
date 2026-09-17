@@ -160,11 +160,14 @@ function analytics_orders_channel(array $order): string
 
 function analytics_orders_channel_label(string $channel): string
 {
-    return match ($channel) {
-        'sales_app' => 'اپ فروش',
-        'branch' => 'نماینده',
-        default => 'فروشگاه',
-    };
+    switch ($channel) {
+        case 'sales_app':
+            return 'اپ فروش';
+        case 'branch':
+            return 'نماینده';
+        default:
+            return 'فروشگاه';
+    }
 }
 
 /**

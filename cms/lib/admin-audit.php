@@ -40,6 +40,7 @@ function admin_audit_action_labels(): array
     return [
         'order.accept' => 'تأیید انبار سفارش',
         'order.reject' => 'رد سفارش',
+        'order.cancel' => 'لغو سفارش',
         'order.mark_paid' => 'تأیید پرداخت',
         'order.mark_shipped' => 'ارسال مرسوله',
         'order.mark_not_received' => 'عدم دریافت مرسوله',
@@ -259,17 +260,26 @@ function admin_audit_entity_href(?string $entityType, ?int $entityId): ?string
         return null;
     }
 
-    return match ($entityType) {
-        'order' => 'orders.php?id=' . $entityId,
-        'product' => 'products.php?edit=' . $entityId,
-        'category' => 'categories.php?edit=' . $entityId,
-        'factory' => 'factories.php?edit=' . $entityId,
-        'car_model' => 'car-models.php?edit=' . $entityId,
-        'product_series' => 'product-series.php?edit=' . $entityId,
-        'sales_user' => 'sales-users.php?edit=' . $entityId,
-        'admin_user' => 'admin-users.php?edit=' . $entityId,
-        default => null,
-    };
+    switch ($entityType) {
+        case 'order':
+            return 'orders.php?id=' . $entityId;
+        case 'product':
+            return 'products.php?edit=' . $entityId;
+        case 'category':
+            return 'categories.php?edit=' . $entityId;
+        case 'factory':
+            return 'factories.php?edit=' . $entityId;
+        case 'car_model':
+            return 'car-models.php?edit=' . $entityId;
+        case 'product_series':
+            return 'product-series.php?edit=' . $entityId;
+        case 'sales_user':
+            return 'sales-users.php?edit=' . $entityId;
+        case 'admin_user':
+            return 'admin-users.php?edit=' . $entityId;
+        default:
+            return null;
+    }
 }
 
 function orders_admin_audit(PDO $pdo, array $order, string $action, ?array $detail = null): void
@@ -279,32 +289,77 @@ function orders_admin_audit(PDO $pdo, array $order, string $action, ?array $deta
     $code = (string) ($order['public_code'] ?? '—');
     $orderId = (int) ($order['id'] ?? 0);
 
-    $verb = match ($action) {
-        'accept' => 'سفارش ' . $code . ' را تأیید انبار کرد',
-        'reject' => 'سفارش ' . $code . ' را رد انبار کرد',
-        'mark_paid' => 'پرداخت سفارش ' . $code . ' را تأیید کرد',
-        'mark_shipped' => 'سفارش ' . $code . ' را ارسال کرد',
-        'mark_not_received' => 'سفارش ' . $code . ' را «هنوز دریافت نشده» ثبت کرد',
-        'mark_returned' => 'مرسوله سفارش ' . $code . ' را «برگشت به مبدأ» ثبت کرد',
-        'mark_lost' => 'مرسوله سفارش ' . $code . ' را «مفقود» ثبت کرد',
-        'mark_received' => 'دریافت سفارش ' . $code . ' را تأیید کرد',
-        'warn_payment' => 'برای سفارش ' . $code . ' هشدار نقص مدارک فرستاد',
-        'save_prices' => 'قیمت‌های سفارش ' . $code . ' را ذخیره کرد',
-        'issue_pre_invoice' => 'پیش‌فاکتور سفارش ' . $code . ' را صادر کرد',
-        'issue_final_invoice' => 'فاکتور نهایی سفارش ' . $code . ' را صادر کرد',
-        'add_cheque' => 'چک جدید برای سفارش ' . $code . ' ثبت کرد',
-        'set_cheque_result' => 'نتیجه چک سفارش ' . $code . ' را ثبت کرد',
-        'delete_cheque' => 'چک سفارش ' . $code . ' را حذف کرد',
-        default => 'سفارش ' . $code . ' را به‌روز کرد',
-    };
+    switch ($action) {
+        case 'accept':
+            $verb = 'سفارش ' . $code . ' را تأیید انبار کرد';
+            break;
+        case 'reject':
+            $verb = 'سفارش ' . $code . ' را رد انبار کرد';
+            break;
+        case 'cancel':
+            $verb = 'سفارش ' . $code . ' را لغو کرد';
+            break;
+        case 'mark_paid':
+            $verb = 'پرداخت سفارش ' . $code . ' را تأیید کرد';
+            break;
+        case 'mark_shipped':
+            $verb = 'سفارش ' . $code . ' را ارسال کرد';
+            break;
+        case 'mark_not_received':
+            $verb = 'سفارش ' . $code . ' را «هنوز دریافت نشده» ثبت کرد';
+            break;
+        case 'mark_returned':
+            $verb = 'مرسوله سفارش ' . $code . ' را «برگشت به مبدأ» ثبت کرد';
+            break;
+        case 'mark_lost':
+            $verb = 'مرسوله سفارش ' . $code . ' را «مفقود» ثبت کرد';
+            break;
+        case 'mark_received':
+            $verb = 'دریافت سفارش ' . $code . ' را تأیید کرد';
+            break;
+        case 'warn_payment':
+            $verb = 'برای سفارش ' . $code . ' هشدار نقص مدارک فرستاد';
+            break;
+        case 'save_prices':
+            $verb = 'قیمت‌های سفارش ' . $code . ' را ذخیره کرد';
+            break;
+        case 'issue_pre_invoice':
+            $verb = 'پیش‌فاکتور سفارش ' . $code . ' را صادر کرد';
+            break;
+        case 'issue_final_invoice':
+            $verb = 'فاکتور نهایی سفارش ' . $code . ' را صادر کرد';
+            break;
+        case 'add_cheque':
+            $verb = 'چک جدید برای سفارش ' . $code . ' ثبت کرد';
+            break;
+        case 'set_cheque_result':
+            $verb = 'نتیجه چک سفارش ' . $code . ' را ثبت کرد';
+            break;
+        case 'delete_cheque':
+            $verb = 'چک سفارش ' . $code . ' را حذف کرد';
+            break;
+        default:
+            $verb = 'سفارش ' . $code . ' را به‌روز کرد';
+            break;
+    }
 
-    $auditAction = match ($action) {
-        'add_cheque' => 'order.cheque.add',
-        'set_cheque_result' => 'order.cheque.result',
-        'delete_cheque' => 'order.cheque.delete',
-        'issue_final_invoice' => 'order.issue_final_invoice',
-        default => 'order.' . $action,
-    };
+    switch ($action) {
+        case 'add_cheque':
+            $auditAction = 'order.cheque.add';
+            break;
+        case 'set_cheque_result':
+            $auditAction = 'order.cheque.result';
+            break;
+        case 'delete_cheque':
+            $auditAction = 'order.cheque.delete';
+            break;
+        case 'issue_final_invoice':
+            $auditAction = 'order.issue_final_invoice';
+            break;
+        default:
+            $auditAction = 'order.' . $action;
+            break;
+    }
 
     cms_admin_audit($pdo, $auditAction, [
         'entity_type' => 'order',

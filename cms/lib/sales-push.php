@@ -93,60 +93,75 @@ function sales_push_message_for_status(string $publicCode, string $notifyType, s
     $labels = orders_status_labels();
     $code = $publicCode !== '' ? $publicCode : '—';
 
-    return match ($notifyType) {
-        'accepted' => [
-            'title' => 'تأیید انبار',
-            'body' => 'سفارش ' . $code . ' تأیید شد. پیش‌فاکتور آماده است.',
-        ],
-        'rejected' => [
-            'title' => 'رد انبار',
-            'body' => 'سفارش ' . $code . ' رد شد.' . ($message !== '' ? ' ' . $message : ''),
-        ],
-        'cancelled' => [
-            'title' => 'لغو سفارش',
-            'body' => 'سفارش ' . $code . ' لغو شد.' . ($message !== '' ? ' ' . $message : ''),
-        ],
-        'warn_payment' => [
-            'title' => 'نقص مدارک پرداخت',
-            'body' => 'سفارش ' . $code . ': ' . ($message !== '' ? $message : 'لطفاً مدارک را اصلاح کنید.'),
-        ],
-        'paid' => [
-            'title' => 'پرداخت تأیید شد',
-            'body' => 'سفارش ' . $code . ' پرداخت شد.',
-        ],
-        'shipped' => [
-            'title' => 'ارسال مرسوله',
-            'body' => 'سفارش ' . $code . ' ارسال شد.',
-        ],
-        'received' => [
-            'title' => 'تحویل شد',
-            'body' => 'سفارش ' . $code . ' دریافت شد — تمام.',
-        ],
-        'not_received', 'returned_to_origin', 'lost' => [
-            'title' => 'پیگیری مرسوله',
-            'body' => 'سفارش ' . $code . ': ' . ($labels[$notifyType] ?? $notifyType),
-        ],
-        'cheque_due_soon' => [
-            'title' => 'یادآوری سررسید چک',
-            'body' => $message !== '' ? $message : ('سررسید چک سفارش ' . $code . ' نزدیک است.'),
-        ],
-        'cheque_received' => [
-            'title' => 'دریافت چک',
-            'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' دریافت شد.'),
-        ],
-        'cheque_funded' => [
-            'title' => 'وصول چک',
-            'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' وصول شد.'),
-        ],
-        'cheque_bounced' => [
-            'title' => 'برگشت چک',
-            'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' برگشت خورد.'),
-        ],
-        default => [
-            'title' => 'به‌روزرسانی سفارش',
-            'body' => 'سفارش ' . $code . ' به‌روز شد.',
-        ],
-    };
+    switch ($notifyType) {
+        case 'accepted':
+            return [
+                'title' => 'تأیید انبار',
+                'body' => 'سفارش ' . $code . ' تأیید شد. پیش‌فاکتور آماده است.',
+            ];
+        case 'rejected':
+            return [
+                'title' => 'رد انبار',
+                'body' => 'سفارش ' . $code . ' رد شد.' . ($message !== '' ? ' ' . $message : ''),
+            ];
+        case 'cancelled':
+            return [
+                'title' => 'لغو سفارش',
+                'body' => 'سفارش ' . $code . ' لغو شد.' . ($message !== '' ? ' ' . $message : ''),
+            ];
+        case 'warn_payment':
+            return [
+                'title' => 'نقص مدارک پرداخت',
+                'body' => 'سفارش ' . $code . ': ' . ($message !== '' ? $message : 'لطفاً مدارک را اصلاح کنید.'),
+            ];
+        case 'paid':
+            return [
+                'title' => 'پرداخت تأیید شد',
+                'body' => 'سفارش ' . $code . ' پرداخت شد.',
+            ];
+        case 'shipped':
+            return [
+                'title' => 'ارسال مرسوله',
+                'body' => 'سفارش ' . $code . ' ارسال شد.',
+            ];
+        case 'received':
+            return [
+                'title' => 'تحویل شد',
+                'body' => 'سفارش ' . $code . ' دریافت شد — تمام.',
+            ];
+        case 'not_received':
+        case 'returned_to_origin':
+        case 'lost':
+            return [
+                'title' => 'پیگیری مرسوله',
+                'body' => 'سفارش ' . $code . ': ' . ($labels[$notifyType] ?? $notifyType),
+            ];
+        case 'cheque_due_soon':
+            return [
+                'title' => 'یادآوری سررسید چک',
+                'body' => $message !== '' ? $message : ('سررسید چک سفارش ' . $code . ' نزدیک است.'),
+            ];
+        case 'cheque_received':
+            return [
+                'title' => 'دریافت چک',
+                'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' دریافت شد.'),
+            ];
+        case 'cheque_funded':
+            return [
+                'title' => 'وصول چک',
+                'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' وصول شد.'),
+            ];
+        case 'cheque_bounced':
+            return [
+                'title' => 'برگشت چک',
+                'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' برگشت خورد.'),
+            ];
+        default:
+            return [
+                'title' => 'به‌روزرسانی سفارش',
+                'body' => 'سفارش ' . $code . ' به‌روز شد.',
+            ];
+    }
 }
 
 function sales_push_notify_status_change(
