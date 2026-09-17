@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -40,14 +41,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'approve') {
             $stmt = $pdo->prepare('UPDATE product_reviews SET status = \'approved\' WHERE id = ?');
             $stmt->execute([$reviewId]);
+            cms_audit_simple($pdo, 'product_review.moderate', cms_current_username() . ' نظر #' . $reviewId . ' را تأیید کرد', 'product_review', $reviewId, null);
             cms_flash('نظر تأیید شد');
         } elseif ($action === 'reject') {
             $stmt = $pdo->prepare('UPDATE product_reviews SET status = \'rejected\' WHERE id = ?');
             $stmt->execute([$reviewId]);
+            cms_audit_simple($pdo, 'product_review.moderate', cms_current_username() . ' نظر #' . $reviewId . ' را رد کرد', 'product_review', $reviewId, null);
             cms_flash('نظر رد شد');
         } elseif ($action === 'delete') {
             $stmt = $pdo->prepare('DELETE FROM product_reviews WHERE id = ?');
             $stmt->execute([$reviewId]);
+            cms_audit_simple($pdo, 'product_review.moderate', cms_current_username() . ' نظر #' . $reviewId . ' را حذف کرد', 'product_review', $reviewId, null);
             cms_flash('نظر حذف شد');
         } else {
             throw new RuntimeException('عملیات نامعتبر');

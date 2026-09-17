@@ -5,6 +5,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/mechanics.php';
 require_once __DIR__ . '/lib/jalali.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -24,6 +25,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mechanic_status_actio
     $returnQ = trim((string) ($_POST['return_q'] ?? $searchQ));
     try {
         $msg = mechanics_apply_status_action($pdo, $id, $action, $note);
+        $mech = mechanics_find_by_id($pdo, $id);
+        $workshop = $mech !== null ? (string) ($mech['workshop_name'] ?? '—') : '—';
+        $actionLabel = mechanics_action_labels()[$action] ?? $action;
+        cms_audit_simple(
+            $pdo,
+            'content.save',
+            cms_current_username() . ' وضعیت تعمیرگاه «' . $workshop . '» را «' . $actionLabel . '» کرد',
+            'mechanic',
+            $id,
+            $workshop
+        );
         cms_flash($msg);
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');

@@ -5,6 +5,8 @@ declare(strict_types=1);
  * Shared order schema + helpers for CMS and public API.
  */
 
+require_once __DIR__ . '/order-cheques.php';
+
 function orders_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
@@ -18,7 +20,7 @@ function orders_ensure_schema(PDO $pdo): void
           public_code VARCHAR(32) NOT NULL,
           user_id INT UNSIGNED NOT NULL,
           phone VARCHAR(20) NOT NULL,
-          status ENUM('submitted','accepted','rejected','payment_proof_sent','paid','shipped','not_received','returned_to_origin','lost','received') NOT NULL DEFAULT 'submitted',
+          status ENUM('submitted','accepted','rejected','cancelled','payment_proof_sent','paid','shipped','not_received','returned_to_origin','lost','received') NOT NULL DEFAULT 'submitted',
           payment_note TEXT NULL,
           payment_file VARCHAR(512) NULL,
           payment_files TEXT NULL,
@@ -69,12 +71,27 @@ function orders_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
+    try {
+        $eventCols = $pdo->query('SHOW COLUMNS FROM order_events')->fetchAll() ?: [];
+        $eventColNames = [];
+        foreach ($eventCols as $row) {
+            $eventColNames[(string) ($row['Field'] ?? '')] = true;
+        }
+        if (!isset($eventColNames['admin_user_id'])) {
+            $pdo->exec(
+                'ALTER TABLE order_events ADD COLUMN admin_user_id INT UNSIGNED NULL AFTER actor'
+            );
+        }
+    } catch (Throwable $e) {
+        /* ignore */
+    }
+
     // Upgrade existing installs: ENUM + payment columns.
     try {
         $pdo->exec(
             "ALTER TABLE orders
              MODIFY COLUMN status ENUM(
-               'submitted','accepted','rejected','payment_proof_sent','paid','shipped',
+               'submitted','accepted','rejected','cancelled','payment_proof_sent','paid','shipped',
                'not_received','returned_to_origin','lost','received'
              ) NOT NULL DEFAULT 'submitted'"
         );
@@ -285,6 +302,9 @@ function orders_ensure_schema(PDO $pdo): void
         /* ignore */
     }
 
+    require_once __DIR__ . '/order-cheques.php';
+    order_cheques_ensure_schema($pdo);
+
     $ready = true;
 }
 
@@ -295,6 +315,7 @@ function orders_status_labels(): array
         'submitted' => 'ارسال‌شده از مشتری',
         'accepted' => 'تأیید انبار',
         'rejected' => 'بایگانی — رد انبار',
+        'cancelled' => 'لغو شده',
         'payment_proof_sent' => 'مدارک پرداخت ارسال شد',
         'paid' => 'پرداخت شده',
         'shipped' => 'ارسال مرسوله',
@@ -302,6 +323,10 @@ function orders_status_labels(): array
         'returned_to_origin' => 'برگشت به مبدأ',
         'lost' => 'مفقود',
         'received' => 'دریافت‌شده — تمام',
+        'cheque_received' => 'دریافت چک',
+        'cheque_due_soon' => 'یادآوری سررسید چک',
+        'cheque_funded' => 'وصول چک',
+        'cheque_bounced' => 'برگشت چک',
     ];
 }
 
@@ -312,6 +337,7 @@ function orders_all_statuses(): array
         'submitted',
         'accepted',
         'rejected',
+        'cancelled',
         'payment_proof_sent',
         'paid',
         'shipped',
@@ -330,9 +356,10 @@ function orders_all_statuses(): array
 function orders_allowed_transitions(): array
 {
     return [
-        'submitted' => ['accepted', 'rejected'],
-        'accepted' => [],
+        'submitted' => ['accepted', 'rejected', 'cancelled'],
+        'accepted' => ['cancelled'],
         'rejected' => [],
+        'cancelled' => [],
         'payment_proof_sent' => ['paid'],
         'paid' => ['shipped'],
         'shipped' => ['not_received', 'returned_to_origin', 'lost', 'received'],
@@ -343,10 +370,26 @@ function orders_allowed_transitions(): array
     ];
 }
 
-/** Rejected warehouse orders are closed/archived (no further actions). */
+/** Rejected or cancelled orders are closed/archived (no further actions). */
 function orders_is_archived(string $status): bool
 {
-    return $status === 'rejected';
+    return $status === 'rejected' || $status === 'cancelled';
+}
+
+/** @return list<string> */
+function orders_cancel_statuses(): array
+{
+    return ['submitted', 'accepted'];
+}
+
+function orders_can_cancel(string $status): bool
+{
+    return in_array($status, orders_cancel_statuses(), true);
+}
+
+function orders_chat_send_allowed(string $status): bool
+{
+    return !in_array($status, ['cancelled', 'rejected', 'received'], true);
 }
 
 /** Delivery confirmed by admin — order is finished. */
@@ -373,6 +416,169 @@ function orders_active_statuses(): array
         'not_received',
         'returned_to_origin',
         'lost',
+    ];
+}
+
+/** @return array<string, string> */
+function orders_list_bucket_labels(): array
+{
+    return [
+        'ongoing' => 'در حال انجام',
+        'finished' => 'تمام‌شده',
+        'canceled' => 'لغو شده',
+    ];
+}
+
+/** @return list<string> */
+function orders_list_bucket_keys(): array
+{
+    return array_keys(orders_list_bucket_labels());
+}
+
+function orders_normalize_search_query(string $q): string
+{
+    $q = trim($q);
+    $q = strtr($q, [
+        '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+        '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+        '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+    ]);
+    $q = ltrim($q, "# \t");
+
+    return trim($q);
+}
+
+function orders_search_is_identifier(string $q): bool
+{
+    if ($q === '') {
+        return false;
+    }
+    if (preg_match('/^ST[-_]?[A-Za-z0-9_-]+$/i', $q)) {
+        return true;
+    }
+    // Order ids are short; 10–11 digit values are treated as phone numbers.
+    return ctype_digit($q) && strlen($q) <= 9;
+}
+
+function orders_normalize_list_status(string $statusFilter, string $default = 'all'): string
+{
+    $statusFilter = trim($statusFilter);
+    if ($statusFilter === '') {
+        return $default;
+    }
+    if ($statusFilter === 'all' || in_array($statusFilter, orders_list_bucket_keys(), true)) {
+        return $statusFilter;
+    }
+    if (in_array($statusFilter, orders_all_statuses(), true)) {
+        return $statusFilter;
+    }
+
+    return $default;
+}
+
+/**
+ * @return array{sql: ?string, params: list<mixed>}
+ */
+function orders_list_status_clause(string $statusFilter): array
+{
+    if ($statusFilter === 'all' || $statusFilter === '') {
+        return ['sql' => null, 'params' => []];
+    }
+    if ($statusFilter === 'ongoing') {
+        $statuses = orders_active_statuses();
+        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+
+        return ['sql' => "o.status IN ({$placeholders})", 'params' => $statuses];
+    }
+    if ($statusFilter === 'finished') {
+        return ['sql' => 'o.status = ?', 'params' => ['received']];
+    }
+    if ($statusFilter === 'canceled') {
+        return ['sql' => 'o.status = ?', 'params' => ['cancelled']];
+    }
+    if (in_array($statusFilter, orders_all_statuses(), true)) {
+        return ['sql' => 'o.status = ?', 'params' => [$statusFilter]];
+    }
+
+    return ['sql' => null, 'params' => []];
+}
+
+/**
+ * @return array{sql: ?string, params: list<mixed>, is_identifier: bool, q: string}
+ */
+function orders_list_search_clause(string $searchQ): array
+{
+    $searchQ = orders_normalize_search_query($searchQ);
+    if ($searchQ === '') {
+        return ['sql' => null, 'params' => [], 'is_identifier' => false, 'q' => ''];
+    }
+    $like = '%' . $searchQ . '%';
+    $parts = [
+        'o.phone LIKE ?',
+        'o.public_code LIKE ?',
+        "COALESCE(o.branch_phone, '') LIKE ?",
+        "COALESCE(o.sales_user_name, '') LIKE ?",
+        'CAST(o.id AS CHAR) LIKE ?',
+    ];
+    $params = [$like, $like, $like, $like, $like];
+    if (ctype_digit($searchQ)) {
+        $parts[] = 'o.id = ?';
+        $params[] = (int) $searchQ;
+    }
+
+    return [
+        'sql' => '(' . implode(' OR ', $parts) . ')',
+        'params' => $params,
+        'is_identifier' => orders_search_is_identifier($searchQ),
+        'q' => $searchQ,
+    ];
+}
+
+/**
+ * @return array{
+ *   sql: string,
+ *   params: list<mixed>,
+ *   scope: string,
+ *   scope_sql: string,
+ *   status_filter: string,
+ *   search_q: string
+ * }
+ */
+function orders_admin_list_where(
+    string $scope,
+    string $statusFilter,
+    string $searchQ,
+    string $defaultStatus = 'all'
+): array {
+    if ($scope !== 'branches' && $scope !== 'customers') {
+        $scope = 'customers';
+    }
+    $statusFilter = orders_normalize_list_status($statusFilter, $defaultStatus);
+    $search = orders_list_search_clause($searchQ);
+    $scopeSql = $scope === 'branches' ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
+    $where = [$scopeSql];
+    $params = [];
+
+    if (!$search['is_identifier']) {
+        $status = orders_list_status_clause($statusFilter);
+        if ($status['sql'] !== null) {
+            $where[] = $status['sql'];
+            $params = array_merge($params, $status['params']);
+        }
+    }
+    if ($search['sql'] !== null) {
+        $where[] = $search['sql'];
+        $params = array_merge($params, $search['params']);
+    }
+
+    return [
+        'sql' => implode(' AND ', $where),
+        'params' => $params,
+        'scope' => $scope,
+        'scope_sql' => $scopeSql,
+        'status_filter' => $statusFilter,
+        'search_q' => $search['q'],
     ];
 }
 
@@ -437,6 +643,9 @@ function orders_serialize(array $order, array $items, array $events): array
                 ? (string) $event['message']
                 : null,
             'actor' => (string) $event['actor'],
+            'admin_username' => isset($event['admin_username']) && $event['admin_username'] !== null
+                ? (string) $event['admin_username']
+                : null,
             'created_at' => (string) $event['created_at'],
         ];
     }
@@ -456,6 +665,13 @@ function orders_serialize(array $order, array $items, array $events): array
     }
     if (!in_array($warningState, ['open', 'answered'], true)) {
         $warningState = '';
+    }
+
+    $cheques = [];
+    try {
+        $cheques = order_cheques_fetch(cms_pdo(), (int) $order['id']);
+    } catch (Throwable $e) {
+        $cheques = [];
     }
 
     return [
@@ -520,6 +736,8 @@ function orders_serialize(array $order, array $items, array $events): array
             static fn(array $row): int => (int) $row['quantity'],
             $serializedItems
         )),
+        'cheques' => $cheques,
+        'cheques_all_funded' => order_cheques_all_funded($cheques),
     ];
 }
 
@@ -599,7 +817,11 @@ function orders_fetch_items(PDO $pdo, int $orderId): array
 function orders_fetch_events(PDO $pdo, int $orderId): array
 {
     $stmt = $pdo->prepare(
-        'SELECT * FROM order_events WHERE order_id = ? ORDER BY id ASC'
+        'SELECT e.*, a.username AS admin_username
+         FROM order_events e
+         LEFT JOIN admin_users a ON a.id = e.admin_user_id
+         WHERE e.order_id = ?
+         ORDER BY e.id ASC'
     );
     $stmt->execute([$orderId]);
     return $stmt->fetchAll() ?: [];
@@ -611,12 +833,26 @@ function orders_add_event(
     ?string $fromStatus,
     string $toStatus,
     string $actor,
-    ?string $message
+    ?string $message,
+    ?int $adminUserId = null
 ): void {
+    if ($actor === 'admin' && $adminUserId === null) {
+        if (!function_exists('cms_current_admin_id')) {
+            $authPath = dirname(__DIR__) . '/auth.php';
+            if (is_readable($authPath)) {
+                require_once $authPath;
+            }
+        }
+        if (function_exists('cms_current_admin_id')) {
+            $currentId = cms_current_admin_id();
+            $adminUserId = $currentId > 0 ? $currentId : null;
+        }
+    }
+
     $msg = $message !== null ? trim($message) : '';
     $stmt = $pdo->prepare(
-        'INSERT INTO order_events (order_id, from_status, to_status, message, actor)
-         VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO order_events (order_id, from_status, to_status, message, actor, admin_user_id)
+         VALUES (?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
         $orderId,
@@ -624,6 +860,7 @@ function orders_add_event(
         $toStatus,
         $msg !== '' ? $msg : null,
         $actor,
+        $adminUserId,
     ]);
 }
 
@@ -1112,15 +1349,11 @@ function orders_admin_list(
     int $page = 1,
     int $pageSize = 20
 ): array {
-    $allStatuses = orders_all_statuses();
-    if ($statusFilter !== 'all' && !in_array($statusFilter, $allStatuses, true)) {
-        $statusFilter = 'all';
-    }
-    if ($scope !== 'branches' && $scope !== 'customers') {
-        $scope = 'customers';
-    }
-    $isBranchScope = $scope === 'branches';
-    $scopeSql = $isBranchScope ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
+    $listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'all');
+    $scope = $listWhere['scope'];
+    $scopeSql = $listWhere['scope_sql'];
+    $whereSql = $listWhere['sql'];
+    $params = $listWhere['params'];
 
     if ($page < 1) {
         $page = 1;
@@ -1128,32 +1361,6 @@ function orders_admin_list(
     if ($pageSize < 1) {
         $pageSize = 20;
     }
-
-    $where = [$scopeSql];
-    $params = [];
-    if ($statusFilter !== 'all') {
-        $where[] = 'o.status = ?';
-        $params[] = $statusFilter;
-    }
-    if ($searchQ !== '') {
-        $like = '%' . $searchQ . '%';
-        $searchParts = [
-            'o.phone LIKE ?',
-            'o.public_code LIKE ?',
-            'COALESCE(o.branch_phone, \'\') LIKE ?',
-            'COALESCE(o.sales_user_name, \'\') LIKE ?',
-        ];
-        $params[] = $like;
-        $params[] = $like;
-        $params[] = $like;
-        $params[] = $like;
-        if (ctype_digit($searchQ)) {
-            $searchParts[] = 'o.id = ?';
-            $params[] = (int) $searchQ;
-        }
-        $where[] = '(' . implode(' OR ', $searchParts) . ')';
-    }
-    $whereSql = implode(' AND ', $where);
 
     $countStmt = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE {$whereSql}");
     $countStmt->execute($params);
@@ -1219,6 +1426,67 @@ function orders_admin_list(
 }
 
 /**
+ * Cancel an order before payment (client or admin).
+ *
+ * @return array{message: string}
+ */
+function orders_cancel(PDO $pdo, array $order, string $actor, string $message = ''): array
+{
+    require_once __DIR__ . '/admin-audit.php';
+
+    $orderId = (int) ($order['id'] ?? 0);
+    if ($orderId <= 0) {
+        throw new RuntimeException('سفارش نامعتبر');
+    }
+
+    $current = (string) ($order['status'] ?? '');
+    if (!orders_can_cancel($current)) {
+        throw new RuntimeException('در این وضعیت امکان لغو سفارش نیست');
+    }
+
+    if ($actor === 'admin' && trim($message) === '') {
+        throw new RuntimeException('علت لغو سفارش الزامی است');
+    }
+
+    $message = trim($message);
+    $eventMessage = $message !== '' ? $message : null;
+    if ($actor === 'client' && $eventMessage === null) {
+        $eventMessage = 'سفارش توسط مشتری لغو شد';
+    }
+
+    $pdo->beginTransaction();
+    $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
+    $upd->execute(['cancelled', $orderId]);
+    orders_add_event($pdo, $orderId, $current, 'cancelled', $actor, $eventMessage);
+    $pdo->commit();
+
+    if ($actor === 'admin') {
+        orders_admin_audit($pdo, $order, 'cancel');
+    }
+
+    orders_admin_notify_sales_client($pdo, $orderId, 'cancelled', $message);
+
+    if ($actor === 'client') {
+        if (!function_exists('admin_push_notify_order_activity')) {
+            $pushLib = __DIR__ . '/admin-push.php';
+            if (is_readable($pushLib)) {
+                require_once $pushLib;
+            }
+        }
+        if (function_exists('admin_push_notify_order_activity')) {
+            try {
+                $preview = $message !== '' ? $message : 'مشتری سفارش را لغو کرد';
+                admin_push_notify_order_activity($pdo, $orderId, 'order_cancelled', $preview);
+            } catch (Throwable $e) {
+                error_log('[orders_cancel] admin push failed: ' . $e->getMessage());
+            }
+        }
+    }
+
+    return ['message' => 'سفارش لغو شد'];
+}
+
+/**
  * Apply a CMS admin order action (shared by CMS page and mobile API).
  *
  * @param array<string, string> $prices item_id => price_text
@@ -1230,9 +1498,12 @@ function orders_admin_apply_action(
     string $action,
     string $message = '',
     array $prices = [],
-    string $preInvoiceDueAt = ''
+    string $preInvoiceDueAt = '',
+    array $cheque = []
 ): array {
     require_once __DIR__ . '/invoices.php';
+    require_once __DIR__ . '/order-cheques.php';
+    require_once __DIR__ . '/admin-audit.php';
 
     if ($orderId <= 0) {
         throw new RuntimeException('سفارش نامعتبر');
@@ -1240,6 +1511,30 @@ function orders_admin_apply_action(
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
         throw new RuntimeException('سفارش یافت نشد');
+    }
+
+    if ($action === 'add_cheque') {
+        $result = order_cheques_add($pdo, $order, $cheque);
+        orders_admin_audit($pdo, $order, 'add_cheque');
+
+        return $result;
+    }
+    if ($action === 'set_cheque_result') {
+        $chequeId = (int) ($cheque['id'] ?? 0);
+        $result = trim((string) ($cheque['bank_result'] ?? ''));
+
+        $out = order_cheques_set_result($pdo, $order, $chequeId, $result);
+        orders_admin_audit($pdo, $order, 'set_cheque_result', ['bank_result' => $result]);
+
+        return $out;
+    }
+    if ($action === 'delete_cheque') {
+        $chequeId = (int) ($cheque['id'] ?? 0);
+
+        $out = order_cheques_delete($pdo, $order, $chequeId);
+        orders_admin_audit($pdo, $order, 'delete_cheque');
+
+        return $out;
     }
 
     $current = (string) $order['status'];
@@ -1269,6 +1564,8 @@ function orders_admin_apply_action(
         );
         $pdo->commit();
         orders_admin_notify_sales_client($pdo, $orderId, 'warn_payment', $message);
+        orders_admin_audit($pdo, $order, 'warn_payment');
+
         return ['message' => 'هشدار نقص مدارک برای مشتری ارسال شد', 'invoice_warning' => null];
     }
 
@@ -1294,6 +1591,8 @@ function orders_admin_apply_action(
             $upd->execute([$normalized, $itemId, $orderId]);
             $changed += $upd->rowCount() > 0 ? 1 : 0;
         }
+        orders_admin_audit($pdo, $order, 'save_prices', ['changed' => $changed]);
+
         return [
             'message' => $changed > 0 ? 'قیمت‌های تومان ذخیره شد' : 'تغییری در قیمت‌ها ثبت نشد',
             'invoice_warning' => null,
@@ -1353,6 +1652,8 @@ function orders_admin_apply_action(
         );
         $pdo->commit();
         orders_admin_notify_sales_client($pdo, $orderId, 'accepted', $message);
+        orders_admin_audit($pdo, $order, 'accept');
+
         return ['message' => 'انبار تأیید شد و پیش‌فاکتور برای مشتری ارسال شد', 'invoice_warning' => null];
     }
 
@@ -1377,10 +1678,16 @@ function orders_admin_apply_action(
         }
         $dueAt = trim($preInvoiceDueAt);
         invoices_issue_pre($pdo, $orderId, $dueAt);
+        orders_admin_audit($pdo, $order, 'issue_pre_invoice');
+
         return [
             'message' => 'پیش‌فاکتور صادر شد و در پیگیری سفارش مشتری قابل دریافت است',
             'invoice_warning' => null,
         ];
+    }
+
+    if ($action === 'cancel') {
+        return orders_cancel($pdo, $order, 'admin', $message);
     }
 
     $nextMap = [
@@ -1419,6 +1726,7 @@ function orders_admin_apply_action(
     if ($next === 'paid') {
         try {
             invoices_issue_final($pdo, $orderId);
+            orders_admin_audit($pdo, $order, 'issue_final_invoice');
             $resultMessage = 'پرداخت تأیید و فاکتور نهایی صادر شد';
         } catch (Throwable $invErr) {
             $invoiceWarning = $invErr->getMessage();
@@ -1426,9 +1734,13 @@ function orders_admin_apply_action(
         }
     } elseif ($next === 'rejected') {
         $resultMessage = 'سفارش رد و بایگانی شد — برای مشتری بسته شده است';
+    } elseif ($next === 'cancelled') {
+        $resultMessage = 'سفارش لغو شد';
     } elseif ($next === 'received') {
         $resultMessage = 'تحویل تأیید شد — سفارش تمام شد';
     }
+
+    orders_admin_audit($pdo, $order, $action);
 
     orders_admin_notify_sales_client($pdo, $orderId, $next, $message);
 

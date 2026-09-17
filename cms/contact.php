@@ -5,6 +5,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/contact.php';
 require_once __DIR__ . '/lib/bale.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -24,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_contact_public']
         $existingHero = cms_setting_get('contact_hero_image', '');
         $hero = cms_handle_optional_upload('contact_hero_image', $existingHero);
         cms_setting_set('contact_hero_image', $hero);
+        cms_audit_content($pdo, 'تماس با ما');
         cms_flash('اطلاعات تماس ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -45,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_contact_bot'])) 
         cms_setting_set('contact_llm_model', trim((string) ($_POST['contact_llm_model'] ?? '')));
         cms_setting_set('contact_llm_prompt', trim((string) ($_POST['contact_llm_prompt'] ?? '')));
         contact_ensure_webhook_secret();
+        cms_audit_settings($pdo, 'ربات بله');
         cms_flash('تنظیمات ربات بله ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');

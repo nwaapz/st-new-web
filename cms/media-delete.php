@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/lib/uploads.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 
@@ -28,6 +29,14 @@ try {
     }
 
     cms_delete_upload_file($path);
+    cms_audit_simple(
+        cms_pdo(),
+        'media.delete',
+        cms_current_username() . ' فایل «' . basename($path) . '» را حذف کرد',
+        'media',
+        null,
+        $path
+    );
 
     echo json_encode([
         'ok' => true,

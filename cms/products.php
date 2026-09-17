@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 require_once __DIR__ . '/lib/car-model-factories.php';
 require_once __DIR__ . '/lib/product-car-models.php';
 require_once __DIR__ . '/lib/product-categories.php';
@@ -289,8 +290,15 @@ if (isset($_GET['edit'])) {
 if (isset($_GET['delete'])) {
     $deleteQ = trim((string) ($_GET['q'] ?? ''));
     $deletePage = max(1, (int) ($_GET['page'] ?? 1));
+    $delId = (int) $_GET['delete'];
+    $delStmt = $pdo->prepare('SELECT id, name FROM products WHERE id = ? LIMIT 1');
+    $delStmt->execute([$delId]);
+    $delRow = $delStmt->fetch();
     $stmt = $pdo->prepare('DELETE FROM products WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
+    $stmt->execute([$delId]);
+    if ($delRow) {
+        cms_audit_catalog_delete($pdo, 'product.delete', 'product', $delId, (string) $delRow['name']);
+    }
     cms_flash('محصول حذف شد');
     cms_redirect($productsListQs($deleteQ, $deletePage));
 }
@@ -504,6 +512,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         product_replace_gallery($pdo, $productId, $persistGallery);
         $pdo->commit();
 
+        cms_audit_catalog_save(
+            $pdo,
+            'product.save',
+            'product',
+            $productId,
+            $name,
+            $id > 0
+        );
         cms_flash(($id > 0 ? 'محصول به‌روز شد' : 'محصول اضافه شد') . $overrideMissingWarning);
         cms_redirect($productsListQs($returnQ, $returnPage));
     } catch (Throwable $e) {

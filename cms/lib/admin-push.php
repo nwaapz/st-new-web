@@ -335,6 +335,13 @@ function admin_push_message_for_client_activity(array $order, string $activityTy
             'type' => 'payment_warning_answered',
         ];
     }
+    if ($activityType === 'order_cancelled' || $activityType === 'cancelled') {
+        return [
+            'title' => 'لغو سفارش',
+            'body' => $message !== '' ? $message : ('سفارش ' . $codeLabel . ' توسط مشتری لغو شد'),
+            'type' => 'order_cancelled',
+        ];
+    }
 
     return [
         'title' => 'فعالیت سفارش',
@@ -346,4 +353,40 @@ function admin_push_message_for_client_activity(array $order, string $activityTy
 function admin_push_notify_new_order(PDO $pdo, int $orderId): void
 {
     admin_push_notify_order_activity($pdo, $orderId, 'submitted');
+}
+
+function admin_push_notify_order_message(PDO $pdo, int $orderId, string $senderName, string $body): void
+{
+    if ($orderId <= 0) {
+        return;
+    }
+    if (!function_exists('orders_get_by_id')) {
+        require_once __DIR__ . '/orders.php';
+    }
+    $order = orders_get_by_id($pdo, $orderId);
+    if ($order === null) {
+        return;
+    }
+
+    $publicCode = (string) ($order['public_code'] ?? '');
+    $preview = mb_strlen($body) > 120 ? mb_substr($body, 0, 117) . '…' : $body;
+    $data = [
+        'order_id' => (string) $orderId,
+        'type' => 'order_chat',
+        'public_code' => $publicCode,
+    ];
+
+    if (admin_push_service_account_path() === null) {
+        return;
+    }
+
+    $tokens = admin_push_all_tokens($pdo);
+    foreach ($tokens as $token) {
+        admin_push_send_to_token(
+            $token,
+            'پیام سفارش ' . $publicCode,
+            $senderName . ': ' . $preview,
+            $data
+        );
+    }
 }

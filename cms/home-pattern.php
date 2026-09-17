@@ -4,8 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/home-pattern.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
+$pdo = cms_pdo();
 
 $config = home_pattern_load();
 
@@ -13,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_home_pattern']))
     try {
         $config = home_pattern_collect_from_post((string) ($config['image'] ?? ''));
         home_pattern_save($config);
+        cms_audit_settings($pdo, 'الگوی تکرارشونده صفحه اصلی');
         cms_flash('تنظیمات الگوی تکرارشونده ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');

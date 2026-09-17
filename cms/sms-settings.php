@@ -4,8 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/melipayamak.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
+$pdo = cms_pdo();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_sms_settings'])) {
     $enabled = isset($_POST['sms_enabled']) ? '1' : '0';
@@ -23,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_sms_settings']))
             cms_setting_set('sms_password', $password);
         }
         cms_flash('تنظیمات پیامک ذخیره شد');
+        cms_audit_settings($pdo, 'پیامک');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
     }
@@ -36,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_seller_credit'])
         cms_setting_set('seller_credit_toman_per_score', (string) $tomanPerScore);
         cms_setting_set('seller_credit_sms_cost_toman', (string) $smsCost);
         cms_flash('تنظیمات اعتبار فروشنده ذخیره شد');
+        cms_audit_settings($pdo, 'اعتبار فروشنده');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
     }

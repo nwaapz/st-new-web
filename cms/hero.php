@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -160,6 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $slides = hero_collect_from_post($count);
         hero_replace_all($pdo, $slides);
+        cms_audit_content($pdo, 'صفحه اصلی — هیرو');
         cms_flash('هیرو ذخیره شد');
         cms_redirect('hero.php');
     } catch (Throwable $e) {

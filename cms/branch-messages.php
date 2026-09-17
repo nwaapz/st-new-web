@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/messages.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 require_once dirname(__DIR__) . '/api/_auth.php';
 
 cms_require_login();
@@ -32,6 +33,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         messages_add($pdo, $userId, $body, 'admin', $ctx);
         messages_mark_client_messages_read($pdo, $userId);
+        cms_audit_simple(
+            $pdo,
+            'branch_message.reply',
+            cms_current_username() . ' به پیام نماینده پاسخ داد',
+            'message',
+            $userId,
+            null
+        );
         cms_flash('پاسخ نمایندگی ارسال شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -83,7 +92,7 @@ if ($viewUserId > 0) {
 
 $listHref = $nameQuery !== '' ? 'branch-messages.php?q=' . rawurlencode($nameQuery) : 'branch-messages.php';
 
-cms_layout_start('پیام نمایندگان', cms_current_username(), 'communication');
+cms_layout_start('پیام نمایندگان', cms_current_username(), 'customers');
 ?>
 <div class="cms-page-head">
   <div>

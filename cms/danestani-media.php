@@ -4,8 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/page-intros.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
+$pdo = cms_pdo();
 $pdo = cms_pdo();
 
 const DANESTANI_SLIDE_MAX = 12;
@@ -41,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_page_intro'])) {
             (string) ($_POST['intro_title'] ?? ''),
             (string) ($_POST['intro_explanation'] ?? '')
         );
+        cms_audit_content($pdo, 'تکنولوژی — متن هدر');
         cms_flash('متن هدر تکنولوژی ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');

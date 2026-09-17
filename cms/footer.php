@@ -4,8 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/footer.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
+$pdo = cms_pdo();
 
 $networks = footer_networks();
 
@@ -68,6 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         footer_save_config($config);
+        cms_audit_content($pdo, 'پاورقی');
         cms_flash('پاورقی ذخیره شد');
         cms_redirect('footer.php');
     } catch (Throwable $e) {

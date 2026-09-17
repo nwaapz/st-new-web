@@ -54,6 +54,17 @@ cms_layout_start('تنظیمات پیشرفته', cms_current_username(), 'advan
 </div>
 
 <div class="cms-panel" style="margin-top:1.5rem">
+  <h2>مدیران CMS</h2>
+  <p class="cms-muted" style="margin:0 0 .75rem">
+    افزودن حساب‌های دیگر برای ورود به پنل و مشاهده اینکه چه کسی چه اقدامی انجام داده است.
+  </p>
+  <div class="cms-btn-row">
+    <a class="cms-btn" href="admin-users.php">مدیران CMS</a>
+    <a class="cms-btn cms-btn--secondary" href="admin-activity.php">فعالیت مدیران</a>
+  </div>
+</div>
+
+<div class="cms-panel" style="margin-top:1.5rem">
   <h2>پیامک (ملی‌پیامک)</h2>
   <p class="cms-muted" style="margin:0 0 .75rem">
     نام کاربری، رمز و شماره خط برای ارسال پیامک (مثل OTP در آینده). فقط از پنل مدیریت قابل ویرایش است.

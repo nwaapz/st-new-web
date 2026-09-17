@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -21,8 +22,15 @@ if (isset($_GET['edit'])) {
 }
 
 if (isset($_GET['delete'])) {
+    $delId = (int) $_GET['delete'];
+    $delStmt = $pdo->prepare('SELECT id, name FROM factories WHERE id = ? LIMIT 1');
+    $delStmt->execute([$delId]);
+    $delRow = $delStmt->fetch();
     $stmt = $pdo->prepare('DELETE FROM factories WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
+    $stmt->execute([$delId]);
+    if ($delRow) {
+        cms_audit_catalog_delete($pdo, 'factory.delete', 'factory', $delId, (string) $delRow['name']);
+    }
     cms_flash('کارخانه حذف شد');
     cms_redirect('factories.php');
 }
@@ -50,12 +58,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'UPDATE factories SET name=?, slug=?, description=?, image=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([$name, $slug, $description !== '' ? $description : null, $image !== '' ? $image : null, $sortOrder, $published, $id]);
+            cms_audit_catalog_save($pdo, 'factory.save', 'factory', $id, $name, true);
             cms_flash('کارخانه به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
                 'INSERT INTO factories (name, slug, description, image, sort_order, published) VALUES (?,?,?,?,?,?)'
             );
             $stmt->execute([$name, $slug, $description !== '' ? $description : null, $image !== '' ? $image : null, $sortOrder, $published]);
+            $newId = (int) $pdo->lastInsertId();
+            cms_audit_catalog_save($pdo, 'factory.save', 'factory', $newId, $name, false);
             cms_flash('کارخانه اضافه شد');
         }
         cms_redirect('factories.php');

@@ -4,8 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/mechanic-catalog.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
+$pdo = cms_pdo();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_mechanic_services'])) {
     try {
@@ -60,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mechanic_service
             'mechanic_catalog_intervals',
             json_encode($overrides, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         );
+        cms_audit_settings($pdo, 'دوره سرویس باشگاه مشتریان');
         cms_flash('دوره سرویس‌ها ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');

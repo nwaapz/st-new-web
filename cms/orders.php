@@ -13,13 +13,13 @@ orders_ensure_schema($pdo);
 
 $statusLabels = orders_status_labels();
 $allowed = orders_allowed_transitions();
-$allStatuses = orders_all_statuses();
+$bucketLabels = orders_list_bucket_labels();
 
 $pageSize = 20;
 
-$statusFilter = isset($_GET['status']) ? trim((string) $_GET['status']) : 'all';
-if ($statusFilter !== 'all' && !in_array($statusFilter, $allStatuses, true)) {
-    $statusFilter = 'all';
+$statusFilter = isset($_GET['status']) ? trim((string) $_GET['status']) : 'ongoing';
+if ($statusFilter !== 'all' && !isset($bucketLabels[$statusFilter])) {
+    $statusFilter = 'ongoing';
 }
 
 $scope = isset($_GET['scope']) ? trim((string) $_GET['scope']) : 'customers';
@@ -27,7 +27,6 @@ if ($scope !== 'branches' && $scope !== 'customers') {
     $scope = 'customers';
 }
 $isBranchScope = $scope === 'branches';
-$scopeSql = $isBranchScope ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
 
 $searchQ = isset($_GET['q']) ? trim((string) $_GET['q']) : '';
 $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
@@ -39,7 +38,7 @@ $viewId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 
 $ordersListQs = static function (
     string $scope,
-    string $status = 'all',
+    string $status = 'ongoing',
     string $q = '',
     int $page = 1,
     ?int $id = null
@@ -65,8 +64,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = trim((string) ($_POST['action'] ?? ''));
     $message = trim((string) ($_POST['message'] ?? ''));
     $returnStatus = trim((string) ($_POST['return_status'] ?? $statusFilter));
-    if ($returnStatus !== 'all' && !in_array($returnStatus, $allStatuses, true)) {
-        $returnStatus = 'all';
+    if ($returnStatus !== 'all' && !isset($bucketLabels[$returnStatus])) {
+        $returnStatus = 'ongoing';
     }
     $returnQ = trim((string) ($_POST['return_q'] ?? $searchQ));
     $returnPage = max(1, (int) ($_POST['return_page'] ?? $page));
@@ -80,183 +79,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException('سفارش یافت نشد');
         }
 
-        $current = (string) $order['status'];
+        $prices = [];
+        if (isset($_POST['price']) && is_array($_POST['price'])) {
+            foreach ($_POST['price'] as $itemId => $priceRaw) {
+                $prices[(string) $itemId] = (string) $priceRaw;
+            }
+        }
+        $preInvoiceDueAt = trim((string) ($_POST['pre_invoice_due_at'] ?? ''));
+        $cheque = [
+            'id' => (int) ($_POST['cheque_id'] ?? 0),
+            'received_on' => trim((string) ($_POST['received_on'] ?? '')),
+            'due_on' => trim((string) ($_POST['due_on'] ?? '')),
+            'serial' => trim((string) ($_POST['serial'] ?? '')),
+            'amount_text' => trim((string) ($_POST['amount_text'] ?? '')),
+            'bank_result' => trim((string) ($_POST['bank_result'] ?? '')),
+        ];
 
-        // Warning about incomplete payment docs — stay on payment_proof_sent.
-        if ($action === 'warn_payment') {
-            if ($current !== 'payment_proof_sent') {
-                throw new RuntimeException('هشدار فقط برای سفارش‌های دارای مدارک پرداخت مجاز است');
-            }
-            if ($message === '') {
-                throw new RuntimeException('متن هشدار درباره نقص مدارک الزامی است');
-            }
-            $pdo->beginTransaction();
-            $upd = $pdo->prepare(
-                "UPDATE orders SET payment_warning = ?, payment_warning_state = 'open' WHERE id = ?"
-            );
-            $upd->execute([$message, $orderId]);
-            orders_add_event(
-                $pdo,
-                $orderId,
-                'payment_proof_sent',
-                'payment_proof_sent',
-                'admin',
-                'هشدار نقص مدارک: ' . $message
-            );
-            $pdo->commit();
-            cms_flash('هشدار نقص مدارک برای مشتری ارسال شد');
-        } elseif ($action === 'save_prices') {
-            if (!in_array($current, ['submitted', 'accepted', 'payment_proof_sent'], true)) {
-                throw new RuntimeException('در این وضعیت امکان ویرایش قیمت نیست');
-            }
-            $prices = $_POST['price'] ?? [];
-            if (!is_array($prices)) {
-                throw new RuntimeException('قیمت‌ها نامعتبر است');
-            }
-            $upd = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
-            $changed = 0;
-            foreach ($prices as $itemId => $priceRaw) {
-                $itemId = (int) $itemId;
-                if ($itemId <= 0) {
-                    continue;
-                }
-                try {
-                    $normalized = invoices_normalize_price_text((string) $priceRaw);
-                } catch (InvalidArgumentException $e) {
-                    throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
-                }
-                $upd->execute([$normalized, $itemId, $orderId]);
-                $changed += $upd->rowCount() > 0 ? 1 : 0;
-            }
-            cms_flash($changed > 0 ? 'قیمت‌های تومان ذخیره شد' : 'تغییری در قیمت‌ها ثبت نشد');
-        } elseif ($action === 'accept') {
-            // Warehouse accept always requires prices + auto-issues / sends pre-invoice.
-            if ($current !== 'submitted') {
-                throw new RuntimeException('تأیید انبار فقط برای سفارش تازه ثبت‌شده مجاز است');
-            }
-            $prices = $_POST['price'] ?? [];
-            if (!is_array($prices) || $prices === []) {
-                throw new RuntimeException('قبل از تأیید انبار، قیمت تومان همه اقلام را وارد کنید');
-            }
-            $pdo->beginTransaction();
-            $updPrice = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
-            foreach ($prices as $itemId => $priceRaw) {
-                $itemId = (int) $itemId;
-                if ($itemId <= 0) {
-                    continue;
-                }
-                try {
-                    $normalized = invoices_normalize_price_text((string) $priceRaw);
-                } catch (InvalidArgumentException $e) {
-                    throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
-                }
-                if ($normalized === null || $normalized === '') {
-                    throw new RuntimeException('قیمت تومان همه اقلام برای تأیید انبار الزامی است');
-                }
-                $updPrice->execute([$normalized, $itemId, $orderId]);
-            }
-            $pricedItems = orders_fetch_items($pdo, $orderId);
-            if ($pricedItems === []) {
-                throw new RuntimeException('سفارش بدون قلم است');
-            }
-            foreach ($pricedItems as $item) {
-                $parsed = invoices_parse_toman_amount(
-                    isset($item['price_text']) ? (string) $item['price_text'] : null
-                );
-                if ($parsed === null) {
-                    throw new RuntimeException('قبل از تأیید انبار، قیمت تومان همه اقلام را وارد کنید');
-                }
-            }
-            $dueAt = trim((string) ($_POST['pre_invoice_due_at'] ?? ''));
-            if ($dueAt === '') {
-                $dueAt = date('Y-m-d', strtotime('+7 days'));
-            }
-            invoices_issue_pre($pdo, $orderId, $dueAt);
-            $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
-            $upd->execute(['accepted', $orderId]);
-            $acceptNote = trim((string) ($_POST['message'] ?? ''));
-            orders_add_event(
-                $pdo,
-                $orderId,
-                $current,
-                'accepted',
-                'admin',
-                $acceptNote !== '' ? $acceptNote : 'تأیید انبار و ارسال خودکار پیش‌فاکتور'
-            );
-            $pdo->commit();
-            cms_flash('انبار تأیید شد و پیش‌فاکتور برای مشتری ارسال شد');
-        } elseif ($action === 'issue_pre_invoice') {
-            if (!in_array($current, ['accepted', 'payment_proof_sent'], true)) {
-                throw new RuntimeException('ابتدا انبار را با قیمت‌گذاری تأیید کنید؛ پیش‌فاکتور هنگام تأیید انبار ارسال می‌شود');
-            }
-            // Save any posted prices first so PDF matches the form.
-            $prices = $_POST['price'] ?? [];
-            if (is_array($prices)) {
-                $upd = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
-                foreach ($prices as $itemId => $priceRaw) {
-                    $itemId = (int) $itemId;
-                    if ($itemId <= 0) {
-                        continue;
-                    }
-                    try {
-                        $normalized = invoices_normalize_price_text((string) $priceRaw);
-                    } catch (InvalidArgumentException $e) {
-                        throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
-                    }
-                    $upd->execute([$normalized, $itemId, $orderId]);
-                }
-            }
-            $dueAt = trim((string) ($_POST['pre_invoice_due_at'] ?? ''));
-            invoices_issue_pre($pdo, $orderId, $dueAt);
-            cms_flash('پیش‌فاکتور صادر شد و در پیگیری سفارش مشتری قابل دریافت است');
+        $result = orders_admin_apply_action(
+            $pdo,
+            $orderId,
+            $action,
+            $message,
+            $prices,
+            $preInvoiceDueAt,
+            $cheque
+        );
+        if (!empty($result['invoice_warning'])) {
+            cms_flash($result['message'] . ' — ' . $result['invoice_warning'], 'error');
         } else {
-            $nextMap = [
-                'reject' => 'rejected',
-                'mark_paid' => 'paid',
-                'mark_shipped' => 'shipped',
-                'mark_not_received' => 'not_received',
-                'mark_returned' => 'returned_to_origin',
-                'mark_lost' => 'lost',
-                'mark_received' => 'received',
-            ];
-            if (!isset($nextMap[$action])) {
-                throw new RuntimeException('عملیات نامعتبر');
-            }
-            $next = $nextMap[$action];
-            $allowedNext = $allowed[$current] ?? [];
-            if (!in_array($next, $allowedNext, true)) {
-                throw new RuntimeException('این تغییر وضعیت مجاز نیست');
-            }
-            if ($action === 'reject' && $message === '') {
-                throw new RuntimeException('علت رد انبار (مثلاً موجود نبودن کالا) الزامی است');
-            }
-
-            $pdo->beginTransaction();
-            if ($next === 'paid') {
-                $upd = $pdo->prepare(
-                    'UPDATE orders SET status = ?, payment_warning = NULL, payment_warning_state = NULL WHERE id = ?'
-                );
-            } else {
-                $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
-            }
-            $upd->execute([$next, $orderId]);
-            orders_add_event($pdo, $orderId, $current, $next, 'admin', $message !== '' ? $message : null);
-            $pdo->commit();
-
-            if ($next === 'paid') {
-                try {
-                    invoices_issue_final($pdo, $orderId);
-                    cms_flash('پرداخت تأیید و فاکتور نهایی صادر شد');
-                } catch (Throwable $invErr) {
-                    cms_flash('پرداخت تأیید شد اما صدور فاکتور نهایی ناموفق بود: ' . $invErr->getMessage(), 'error');
-                }
-            } elseif ($next === 'rejected') {
-                cms_flash('سفارش رد و بایگانی شد — برای مشتری بسته شده است');
-            } elseif ($next === 'received') {
-                cms_flash('تحویل تأیید شد — سفارش تمام شد');
-            } else {
-                cms_flash('وضعیت سفارش به‌روز شد');
-            }
+            cms_flash($result['message']);
         }
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -269,51 +120,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($returnScope !== 'branches' && $returnScope !== 'customers') {
         $returnScope = 'customers';
     }
+    $returnTab = trim((string) ($_POST['return_tab'] ?? ''));
+    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'history'];
+    if (!in_array($returnTab, $allowedTabs, true)) {
+        $returnTab = '';
+    }
 
-    cms_redirect($ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, $orderId));
+    $redirectTo = $ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, $orderId);
+    if ($returnTab !== '') {
+        $redirectTo .= '&tab=' . rawurlencode($returnTab);
+    }
+    cms_redirect($redirectTo);
 }
 
 $viewOrder = null;
 $viewItems = [];
 $viewEvents = [];
+$viewCheques = [];
 if ($viewId > 0) {
     $viewOrder = orders_get_by_id($pdo, $viewId);
     if ($viewOrder) {
         $orderIsBranch = !empty($viewOrder['branch_id']);
         $scope = $orderIsBranch ? 'branches' : 'customers';
         $isBranchScope = $orderIsBranch;
-        $scopeSql = $isBranchScope ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
         $viewItems = orders_fetch_items($pdo, $viewId);
         $viewEvents = orders_fetch_events($pdo, $viewId);
+        require_once __DIR__ . '/lib/order-cheques.php';
+        $viewCheques = order_cheques_fetch($pdo, $viewId);
     }
 }
 
 $countCustomers = (int) $pdo->query('SELECT COUNT(*) FROM orders WHERE branch_id IS NULL')->fetchColumn();
 $countBranches = (int) $pdo->query('SELECT COUNT(*) FROM orders WHERE branch_id IS NOT NULL')->fetchColumn();
 
-$where = [$scopeSql];
-$params = [];
-if ($statusFilter !== 'all') {
-    $where[] = 'o.status = ?';
-    $params[] = $statusFilter;
-}
-if ($searchQ !== '') {
-    $like = '%' . $searchQ . '%';
-    $searchParts = [
-        'o.phone LIKE ?',
-        'o.public_code LIKE ?',
-        'COALESCE(o.branch_phone, \'\') LIKE ?',
-    ];
-    $params[] = $like;
-    $params[] = $like;
-    $params[] = $like;
-    if (ctype_digit($searchQ)) {
-        $searchParts[] = 'o.id = ?';
-        $params[] = (int) $searchQ;
-    }
-    $where[] = '(' . implode(' OR ', $searchParts) . ')';
-}
-$whereSql = implode(' AND ', $where);
+$listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'ongoing');
+$scope = $listWhere['scope'];
+$isBranchScope = $scope === 'branches';
+$statusFilter = $listWhere['status_filter'];
+$searchQ = $listWhere['search_q'];
+$whereSql = $listWhere['sql'];
+$params = $listWhere['params'];
 
 $countStmt = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE {$whereSql}");
 $countStmt->execute($params);
@@ -336,7 +182,7 @@ $items = $stmt->fetchAll() ?: [];
 
 $listCloseHref = $ordersListQs($scope, $statusFilter, $searchQ, $page, null);
 
-cms_layout_start('سفارش‌ها', cms_current_username(), 'shop');
+cms_layout_start('سفارش‌ها', cms_current_username(), 'customers');
 
 $defaultDetailTab = 'actions';
 if ($viewOrder) {
@@ -347,6 +193,11 @@ if ($viewOrder) {
         $defaultDetailTab = 'payment';
     } elseif ($st0 === 'paid') {
         $defaultDetailTab = 'invoices';
+    }
+    $tabParam = isset($_GET['tab']) ? trim((string) $_GET['tab']) : '';
+    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'history'];
+    if (in_array($tabParam, $allowedTabs, true)) {
+        $defaultDetailTab = $tabParam;
     }
 }
 ?>
@@ -380,23 +231,22 @@ if ($viewOrder) {
     <label class="cms-orders-toolbar__search">
       <span class="cms-label">جستجو</span>
       <input class="cms-input" type="search" name="q" value="<?= cms_h($searchQ) ?>"
-        placeholder="موبایل یا کد سفارش" autocomplete="off">
+        placeholder="شماره سفارش، کد یا موبایل" autocomplete="off">
     </label>
     <label class="cms-orders-toolbar__status">
       <span class="cms-label">وضعیت</span>
       <select class="cms-select" name="status">
-        <option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>همه</option>
-        <?php foreach ($allStatuses as $st): ?>
-          <option value="<?= cms_h($st) ?>" <?= $statusFilter === $st ? 'selected' : '' ?>>
-            <?= cms_h($statusLabels[$st] ?? $st) ?>
+        <?php foreach ($bucketLabels as $bucket => $bucketLabel): ?>
+          <option value="<?= cms_h($bucket) ?>" <?= $statusFilter === $bucket ? 'selected' : '' ?>>
+            <?= cms_h($bucketLabel) ?>
           </option>
         <?php endforeach; ?>
       </select>
     </label>
     <div class="cms-orders-toolbar__actions">
       <button class="cms-btn" type="submit">اعمال</button>
-      <?php if ($searchQ !== '' || $statusFilter !== 'all'): ?>
-        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($ordersListQs($scope, 'all', '', 1, null)) ?>">پاک کردن</a>
+      <?php if ($searchQ !== '' || $statusFilter !== 'ongoing'): ?>
+        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($ordersListQs($scope, 'ongoing', '', 1, null)) ?>">پاک کردن</a>
       <?php endif; ?>
     </div>
   </form>
@@ -440,7 +290,7 @@ if ($viewOrder) {
               data-href="<?= cms_h($rowHref) ?>"
               tabindex="0"
               role="link">
-            <td dir="ltr"><?= cms_h((string) $item['public_code']) ?></td>
+            <td dir="ltr"><?= cms_h((string) $item['public_code']) ?> <span class="cms-muted">#<?= (int) $item['id'] ?></span></td>
             <?php if ($isBranchScope): ?>
               <td><?= cms_h((string) ($item['branch_province_name'] ?? '')) ?></td>
               <td><?= cms_h((string) ($item['branch_city'] ?? '')) ?></td>
@@ -506,6 +356,8 @@ if ($viewOrder) {
             continue;
         } elseif ($nextStatus === 'rejected') {
             $nextActions[] = ['action' => 'reject', 'label' => 'رد انبار و بایگانی', 'class' => 'cms-btn--ghost'];
+        } elseif ($nextStatus === 'cancelled') {
+            $nextActions[] = ['action' => 'cancel', 'label' => 'لغو سفارش', 'class' => 'cms-btn--ghost'];
         } elseif ($nextStatus === 'paid') {
             $nextActions[] = ['action' => 'mark_paid', 'label' => 'تأیید پرداخت و مرحله بعد', 'class' => ''];
         } elseif ($nextStatus === 'shipped') {
@@ -567,6 +419,7 @@ if ($viewOrder) {
     $orderCode = (string) $viewOrder['public_code'];
     $draftMessage = $cur === 'payment_proof_sent' && $payWarn !== '' ? $payWarn : '';
     $statusTone = orders_is_archived($cur) ? 'danger' : (orders_is_finished($cur) ? 'ok' : (orders_is_parcel_open($cur) ? 'warn' : 'info'));
+    $chatOpen = orders_chat_send_allowed($cur);
     $returnHiddens = static function () use ($statusFilter, $scope, $searchQ, $page): void {
         echo '<input type="hidden" name="return_status" value="' . cms_h($statusFilter) . '">';
         echo '<input type="hidden" name="return_scope" value="' . cms_h($scope) . '">';
@@ -613,6 +466,8 @@ if ($viewOrder) {
             <button type="button" class="cms-vtabs__tab" role="tab" data-tab="items" aria-selected="false">اقلام و قیمت</button>
             <button type="button" class="cms-vtabs__tab" role="tab" data-tab="invoices" aria-selected="false">فاکتورها</button>
             <button type="button" class="cms-vtabs__tab" role="tab" data-tab="payment" aria-selected="false">مدارک پرداخت</button>
+            <button type="button" class="cms-vtabs__tab" role="tab" data-tab="cheques" aria-selected="false">چک‌ها</button>
+            <button type="button" class="cms-vtabs__tab" role="tab" data-tab="chat" aria-selected="false">گفتگو با فروشنده</button>
             <button type="button" class="cms-vtabs__tab" role="tab" data-tab="history" aria-selected="false">تاریخچه</button>
           </nav>
 
@@ -927,6 +782,133 @@ if ($viewOrder) {
               <?php endif; ?>
             </section>
 
+            <section class="cms-vtabs__panel" data-panel="cheques" role="tabpanel" hidden>
+              <h3 class="cms-vtabs__heading">چک‌های پستی</h3>
+              <p class="cms-muted cms-vtabs__hint" style="margin-top:0">
+                روز دریافت چک با پست و سررسید را ثبت کنید. مشتری با پیامک و اعلان اپ مطلع می‌شود.
+                نتیجه بانک (وصول / برگشت) جدا از «تأیید پرداخت» سفارش است.
+              </p>
+              <?php if ($viewCheques !== [] && order_cheques_all_funded($viewCheques) && $cur !== 'paid'): ?>
+                <p class="cms-ok">همه چک‌ها وصول شده‌اند — در صورت تمایل از تب اقدامات، پرداخت را تأیید کنید.</p>
+              <?php endif; ?>
+
+              <?php if ($viewCheques === []): ?>
+                <p class="cms-empty">چکی ثبت نشده.</p>
+              <?php else: ?>
+                <table class="cms-table">
+                  <thead>
+                    <tr>
+                      <th>شماره</th>
+                      <th>مبلغ</th>
+                      <th>دریافت</th>
+                      <th>سررسید</th>
+                      <th>نتیجه</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                  <?php foreach ($viewCheques as $ch): ?>
+                    <tr>
+                      <td dir="ltr"><?= cms_h((string) ($ch['serial'] ?? '—')) ?></td>
+                      <td><?= cms_h((string) ($ch['amount_text'] ?? '—')) ?></td>
+                      <td dir="ltr"><?= cms_h(order_cheques_format_date((string) $ch['received_on'])) ?></td>
+                      <td dir="ltr"><?= cms_h(order_cheques_format_date((string) $ch['due_on'])) ?></td>
+                      <td><?= cms_h((string) $ch['bank_result_label']) ?></td>
+                      <td>
+                        <?php if (($ch['bank_result'] ?? null) === null): ?>
+                          <form method="post" style="display:inline">
+                            <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
+                            <?php $returnHiddens(); ?>
+                            <input type="hidden" name="return_tab" value="cheques">
+                            <input type="hidden" name="action" value="set_cheque_result">
+                            <input type="hidden" name="cheque_id" value="<?= (int) $ch['id'] ?>">
+                            <input type="hidden" name="bank_result" value="funded">
+                            <button class="cms-btn" type="submit">وصول شد</button>
+                          </form>
+                          <form method="post" style="display:inline">
+                            <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
+                            <?php $returnHiddens(); ?>
+                            <input type="hidden" name="return_tab" value="cheques">
+                            <input type="hidden" name="action" value="set_cheque_result">
+                            <input type="hidden" name="cheque_id" value="<?= (int) $ch['id'] ?>">
+                            <input type="hidden" name="bank_result" value="bounced">
+                            <button class="cms-btn cms-btn--ghost" type="submit">برگشت خورد</button>
+                          </form>
+                          <form method="post" style="display:inline" onsubmit="return confirm('حذف این چک؟');">
+                            <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
+                            <?php $returnHiddens(); ?>
+                            <input type="hidden" name="return_tab" value="cheques">
+                            <input type="hidden" name="action" value="delete_cheque">
+                            <input type="hidden" name="cheque_id" value="<?= (int) $ch['id'] ?>">
+                            <button class="cms-btn cms-btn--ghost" type="submit">حذف</button>
+                          </form>
+                        <?php endif; ?>
+                      </td>
+                    </tr>
+                  <?php endforeach; ?>
+                  </tbody>
+                </table>
+              <?php endif; ?>
+
+              <form method="post" class="cms-form" style="margin-top:1.25rem">
+                <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
+                <?php $returnHiddens(); ?>
+                <input type="hidden" name="return_tab" value="cheques">
+                <input type="hidden" name="action" value="add_cheque">
+                <h4 style="margin:0 0 .65rem">ثبت چک جدید</h4>
+                <div class="cms-grid-2">
+                  <label class="cms-field">
+                    <span>تاریخ دریافت</span>
+                    <input class="cms-input" type="date" name="received_on" dir="ltr" value="<?= cms_h(date('Y-m-d')) ?>" required>
+                  </label>
+                  <label class="cms-field">
+                    <span>سررسید چک</span>
+                    <input class="cms-input" type="date" name="due_on" dir="ltr" required>
+                  </label>
+                  <label class="cms-field">
+                    <span>شماره چک (اختیاری)</span>
+                    <input class="cms-input" name="serial" maxlength="64">
+                  </label>
+                  <label class="cms-field">
+                    <span>مبلغ (اختیاری)</span>
+                    <input class="cms-input" name="amount_text" maxlength="128" placeholder="مثلاً ۱۲٬۰۰۰٬۰۰۰ تومان">
+                  </label>
+                </div>
+                <div class="cms-btn-row" style="margin-top:.85rem">
+                  <button class="cms-btn" type="submit">ثبت دریافت چک</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="cms-vtabs__panel" data-panel="chat" role="tabpanel" hidden>
+              <h3 class="cms-vtabs__heading">گفتگوی سفارش با فروشنده</h3>
+              <p class="cms-muted cms-vtabs__hint" style="margin-top:0">
+                پیام‌ها با اپ فروش همگام است. به‌روزرسانی با long-poll (بدون WebSocket).
+                <?php if (!$chatOpen): ?>
+                  <strong>این سفارش بسته شده — فقط مشاهده تاریخچه.</strong>
+                <?php endif; ?>
+              </p>
+              <div
+                id="cms-order-chat"
+                class="cms-order-chat"
+                data-order-id="<?= (int) $viewOrder['id'] ?>"
+                data-chat-open="<?= $chatOpen ? '1' : '0' ?>"
+              >
+                <div id="cms-order-chat-messages" class="cms-order-chat__messages" aria-live="polite"></div>
+                <?php if ($chatOpen): ?>
+                  <form id="cms-order-chat-form" class="cms-order-chat__form">
+                    <label class="cms-field">
+                      <span>پیام</span>
+                      <textarea class="cms-input" id="cms-order-chat-body" rows="3" maxlength="4000" required></textarea>
+                    </label>
+                    <div class="cms-btn-row" style="margin-top:.65rem">
+                      <button class="cms-btn" type="submit">ارسال</button>
+                    </div>
+                  </form>
+                <?php endif; ?>
+              </div>
+            </section>
+
             <section class="cms-vtabs__panel" data-panel="history" role="tabpanel" hidden>
               <h3 class="cms-vtabs__heading">تاریخچه وضعیت</h3>
               <?php if ($viewEvents === []): ?>
@@ -953,7 +935,10 @@ if ($viewOrder) {
                         <?php if ($isClient): ?>
                           <span class="cms-client-msg__badge">مشتری</span>
                         <?php else: ?>
-                          ادمین
+                          <?php
+                            $adminName = trim((string) ($ev['admin_username'] ?? ''));
+                            echo cms_h($adminName !== '' ? $adminName : 'ادمین');
+                          ?>
                         <?php endif; ?>
                       </td>
                       <td dir="ltr"><?= cms_h((string) $ev['created_at']) ?></td>
@@ -1031,6 +1016,13 @@ if ($viewOrder) {
       });
       document.getElementById('order-confirm-submit').addEventListener('click', function () {
         if (!pendingAction) return;
+        if ((pendingAction === 'reject' || pendingAction === 'cancel') && !confirmMsg.value.trim()) {
+          alert(pendingAction === 'reject'
+            ? 'علت رد انبار الزامی است.'
+            : 'علت لغو سفارش الزامی است.');
+          confirmMsg.focus();
+          return;
+        }
         draft.value = confirmMsg.value;
         actionInput.value = pendingAction;
         if (typeof form.requestSubmit === 'function') form.requestSubmit();
@@ -1139,6 +1131,128 @@ if ($viewOrder) {
       t.addEventListener('click', function () { activate(t.getAttribute('data-tab') || 'actions'); });
     });
     activate(def);
+  })();
+  </script>
+  <style>
+    .cms-order-chat__messages {
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+      max-height: 320px;
+      overflow-y: auto;
+      padding: .5rem 0;
+    }
+    .cms-order-chat__bubble {
+      border: 1px solid var(--cms-border, #2e2e2e);
+      border-radius: 10px;
+      padding: .55rem .7rem;
+      background: #1a1a1a;
+    }
+    .cms-order-chat__bubble--mine {
+      background: rgba(230, 126, 34, 0.15);
+    }
+    .cms-order-chat__meta {
+      display: flex;
+      justify-content: space-between;
+      gap: .5rem;
+      font-size: .75rem;
+      color: #9a9a9a;
+      margin-bottom: .25rem;
+    }
+    .cms-order-chat__body {
+      white-space: pre-wrap;
+      font-size: .875rem;
+    }
+  </style>
+  <script>
+  (function () {
+    var root = document.getElementById('cms-order-chat');
+    var list = document.getElementById('cms-order-chat-messages');
+    var form = document.getElementById('cms-order-chat-form');
+    if (!root || !list) return;
+    var orderId = root.getAttribute('data-order-id') || '0';
+    var chatOpen = root.getAttribute('data-chat-open') === '1';
+    var sinceId = 0;
+    var polling = false;
+    var pollTimer = null;
+
+    function renderMessages(items) {
+      items.forEach(function (msg) {
+        if (msg.id <= sinceId) return;
+        sinceId = Math.max(sinceId, msg.id);
+        var div = document.createElement('div');
+        div.className = 'cms-order-chat__bubble' + (msg.actor === 'admin' ? ' cms-order-chat__bubble--mine' : '');
+        div.innerHTML =
+          '<div class="cms-order-chat__meta"><span>' + (msg.sender_name || (msg.actor === 'admin' ? 'انبار' : 'فروشنده')) +
+          '</span><span dir="ltr">' + (msg.created_at || '') + '</span></div>' +
+          '<div class="cms-order-chat__body"></div>';
+        div.querySelector('.cms-order-chat__body').textContent = msg.body || '';
+        list.appendChild(div);
+      });
+      list.scrollTop = list.scrollHeight;
+    }
+
+    function fetchMessages(wait) {
+      var url = 'order-chat.php?order_id=' + encodeURIComponent(orderId) +
+        '&since_id=' + encodeURIComponent(String(sinceId)) + (wait ? '&wait=1&timeout=25' : '');
+      return fetch(url, { credentials: 'same-origin' }).then(function (res) {
+        return res.json();
+      }).then(function (data) {
+        if (data && data.ok && Array.isArray(data.messages)) {
+          renderMessages(data.messages);
+        }
+        return data;
+      });
+    }
+
+    function pollLoop() {
+      if (!polling) return;
+      fetchMessages(true).catch(function () {}).finally(function () {
+        if (polling) pollTimer = setTimeout(pollLoop, 300);
+      });
+    }
+
+    function startPolling() {
+      if (polling) return;
+      polling = true;
+      pollLoop();
+    }
+
+    function stopPolling() {
+      polling = false;
+      if (pollTimer) clearTimeout(pollTimer);
+    }
+
+    fetchMessages(false).then(function () { startPolling(); }).catch(function () {});
+
+    document.querySelectorAll('.cms-vtabs__tab[data-tab="chat"]').forEach(function (tab) {
+      tab.addEventListener('click', function () { startPolling(); });
+    });
+    window.addEventListener('beforeunload', stopPolling);
+
+    if (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var bodyEl = document.getElementById('cms-order-chat-body');
+        var body = bodyEl ? bodyEl.value.trim() : '';
+        if (!body) return;
+        fetch('order-chat.php', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: Number(orderId), body: body }),
+        }).then(function (res) { return res.json(); }).then(function (data) {
+          if (!data || !data.ok) {
+            alert((data && data.error) || 'ارسال پیام ناموفق بود');
+            return;
+          }
+          if (bodyEl) bodyEl.value = '';
+          if (data.message) renderMessages([data.message]);
+        }).catch(function () { alert('ارسال پیام ناموفق بود'); });
+      });
+    }
+
+    if (!chatOpen) stopPolling();
   })();
   </script>
 <?php endif; ?>

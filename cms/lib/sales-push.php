@@ -102,6 +102,10 @@ function sales_push_message_for_status(string $publicCode, string $notifyType, s
             'title' => 'رد انبار',
             'body' => 'سفارش ' . $code . ' رد شد.' . ($message !== '' ? ' ' . $message : ''),
         ],
+        'cancelled' => [
+            'title' => 'لغو سفارش',
+            'body' => 'سفارش ' . $code . ' لغو شد.' . ($message !== '' ? ' ' . $message : ''),
+        ],
         'warn_payment' => [
             'title' => 'نقص مدارک پرداخت',
             'body' => 'سفارش ' . $code . ': ' . ($message !== '' ? $message : 'لطفاً مدارک را اصلاح کنید.'),
@@ -121,6 +125,22 @@ function sales_push_message_for_status(string $publicCode, string $notifyType, s
         'not_received', 'returned_to_origin', 'lost' => [
             'title' => 'پیگیری مرسوله',
             'body' => 'سفارش ' . $code . ': ' . ($labels[$notifyType] ?? $notifyType),
+        ],
+        'cheque_due_soon' => [
+            'title' => 'یادآوری سررسید چک',
+            'body' => $message !== '' ? $message : ('سررسید چک سفارش ' . $code . ' نزدیک است.'),
+        ],
+        'cheque_received' => [
+            'title' => 'دریافت چک',
+            'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' دریافت شد.'),
+        ],
+        'cheque_funded' => [
+            'title' => 'وصول چک',
+            'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' وصول شد.'),
+        ],
+        'cheque_bounced' => [
+            'title' => 'برگشت چک',
+            'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' برگشت خورد.'),
         ],
         default => [
             'title' => 'به‌روزرسانی سفارش',
@@ -184,5 +204,43 @@ function orders_admin_notify_sales_client(PDO $pdo, int $orderId, string $notify
         sales_push_notify_status_change($pdo, $orderId, $notifyType, $message);
     } catch (Throwable $e) {
         error_log('[orders_admin_notify_sales_client] ' . $e->getMessage());
+    }
+}
+
+function sales_push_notify_order_message(PDO $pdo, int $orderId, string $senderName, string $body): void
+{
+    if ($orderId <= 0) {
+        return;
+    }
+    if (!function_exists('orders_get_by_id')) {
+        require_once __DIR__ . '/orders.php';
+    }
+    $order = orders_get_by_id($pdo, $orderId);
+    if ($order === null) {
+        return;
+    }
+    $salesUserId = isset($order['sales_user_id']) && $order['sales_user_id'] !== null
+        ? (int) $order['sales_user_id']
+        : 0;
+    if ($salesUserId <= 0) {
+        return;
+    }
+
+    $publicCode = (string) ($order['public_code'] ?? '');
+    $preview = mb_strlen($body) > 120 ? mb_substr($body, 0, 117) . '…' : $body;
+    $data = [
+        'order_id' => (string) $orderId,
+        'type' => 'order_chat',
+        'public_code' => $publicCode,
+    ];
+
+    $tokens = sales_push_tokens_for_user($pdo, $salesUserId);
+    foreach ($tokens as $token) {
+        admin_push_send_to_token(
+            $token,
+            'پیام سفارش ' . $publicCode,
+            $senderName . ': ' . $preview,
+            $data
+        );
     }
 }

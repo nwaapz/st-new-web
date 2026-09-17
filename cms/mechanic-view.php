@@ -6,6 +6,7 @@ require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/mechanics.php';
 require_once __DIR__ . '/lib/mechanic-catalog.php';
 require_once __DIR__ . '/lib/jalali.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -43,6 +44,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $id > 0) {
             $action = trim((string) ($_POST['action'] ?? ''));
             $note = trim((string) ($_POST['status_note'] ?? ''));
             $msg = mechanics_apply_status_action($pdo, $id, $action, $note);
+            $mech = mechanics_find_by_id($pdo, $id);
+            $workshop = $mech !== null ? (string) ($mech['workshop_name'] ?? '—') : '—';
+            $actionLabel = mechanics_action_labels()[$action] ?? $action;
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' وضعیت تعمیرگاه «' . $workshop . '» را «' . $actionLabel . '» کرد',
+                'mechanic',
+                $id,
+                $workshop
+            );
             cms_flash($msg);
         } elseif (isset($_POST['save_profile'])) {
             $workshop = trim((string) ($_POST['workshop_name'] ?? ''));
@@ -61,6 +73,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $id > 0) {
             }
             mechanics_update_profile($pdo, $id, $workshop, $owner, $city);
             mechanics_set_active_services($pdo, $id, $keys);
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' نمایه تعمیرگاه «' . $workshop . '» را ذخیره کرد',
+                'mechanic',
+                $id,
+                $workshop
+            );
             cms_flash('نمایه تعمیرگاه ذخیره شد');
         } else {
             throw new RuntimeException('عملیات نامعتبر');

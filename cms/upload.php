@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/lib/uploads.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 
@@ -49,6 +50,15 @@ try {
     $path = $kind === 'video'
         ? cms_store_uploaded_video($_FILES['file'], $subdir !== '' ? $subdir : 'about/videos')
         : cms_store_uploaded_image($_FILES['file'], $imageOptions);
+
+    cms_audit_simple(
+        cms_pdo(),
+        'media.upload',
+        cms_current_username() . ' فایل «' . basename($path) . '» را آپلود کرد',
+        'media',
+        null,
+        $path
+    );
 
     echo json_encode([
         'ok' => true,

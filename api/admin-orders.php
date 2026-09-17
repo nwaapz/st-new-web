@@ -72,6 +72,14 @@ try {
     $action = trim((string) ($body['action'] ?? ''));
     $message = trim((string) ($body['message'] ?? ''));
     $preInvoiceDueAt = trim((string) ($body['pre_invoice_due_at'] ?? ''));
+    $cheque = [
+        'id' => (int) ($body['cheque_id'] ?? 0),
+        'received_on' => trim((string) ($body['received_on'] ?? '')),
+        'due_on' => trim((string) ($body['due_on'] ?? '')),
+        'serial' => trim((string) ($body['serial'] ?? '')),
+        'amount_text' => trim((string) ($body['amount_text'] ?? '')),
+        'bank_result' => trim((string) ($body['bank_result'] ?? '')),
+    ];
 
     $prices = [];
     if (isset($body['prices']) && is_array($body['prices'])) {
@@ -84,7 +92,7 @@ try {
         api_error('سفارش و عملیات الزامی است', 400);
     }
 
-    $result = orders_admin_apply_action($pdo, $orderId, $action, $message, $prices, $preInvoiceDueAt);
+    $result = orders_admin_apply_action($pdo, $orderId, $action, $message, $prices, $preInvoiceDueAt, $cheque);
 
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {

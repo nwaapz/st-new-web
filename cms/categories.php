@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/product-categories.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -44,8 +45,15 @@ if (isset($_GET['edit'])) {
 }
 
 if (isset($_GET['delete'])) {
+    $delId = (int) $_GET['delete'];
+    $delStmt = $pdo->prepare('SELECT id, name FROM categories WHERE id = ? LIMIT 1');
+    $delStmt->execute([$delId]);
+    $delRow = $delStmt->fetch();
     $stmt = $pdo->prepare('DELETE FROM categories WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
+    $stmt->execute([$delId]);
+    if ($delRow) {
+        cms_audit_catalog_delete($pdo, 'category.delete', 'category', $delId, (string) $delRow['name']);
+    }
     cms_flash('دسته حذف شد');
     cms_redirect('categories.php');
 }
@@ -97,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $published,
                 $id,
             ]);
+            cms_audit_catalog_save($pdo, 'category.save', 'category', $id, $name, true);
             cms_flash('دسته به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
@@ -113,6 +122,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sortOrder,
                 $published,
             ]);
+            $newId = (int) $pdo->lastInsertId();
+            cms_audit_catalog_save($pdo, 'category.save', 'category', $newId, $name, false);
             cms_flash('دسته اضافه شد');
         }
         cms_redirect('categories.php');

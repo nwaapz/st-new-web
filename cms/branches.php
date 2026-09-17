@@ -6,6 +6,7 @@ require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/iran-provinces.php';
 require_once __DIR__ . '/lib/messages.php';
 require_once __DIR__ . '/lib/branches.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 require_once __DIR__ . '/lib/page-intros.php';
 
 cms_require_login();
@@ -30,8 +31,20 @@ if (isset($_GET['edit'])) {
 }
 
 if (isset($_GET['delete'])) {
+    $deleteId = (int) $_GET['delete'];
+    $stmt = $pdo->prepare('SELECT name FROM branches WHERE id = ?');
+    $stmt->execute([$deleteId]);
+    $deleteName = (string) ($stmt->fetchColumn() ?: 'نماینده');
     $stmt = $pdo->prepare('DELETE FROM branches WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
+    $stmt->execute([$deleteId]);
+    cms_audit_simple(
+        $pdo,
+        'content.save',
+        cms_current_username() . ' نماینده «' . $deleteName . '» را حذف کرد',
+        'branch',
+        $deleteId,
+        $deleteName
+    );
     cms_flash('نماینده حذف شد');
     cms_redirect('branches.php');
 }
@@ -41,6 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_header_image']))
         $existing = cms_setting_get('branch_portal_header_image', '');
         $image = cms_handle_optional_upload('header_image', $existing);
         cms_setting_set('branch_portal_header_image', $image);
+        cms_audit_content($pdo, 'نمایندگان — تصویر هدر');
         cms_flash($image !== '' ? 'تصویر هدر پورتال ذخیره شد' : 'تصویر هدر پورتال حذف شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -55,6 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_page_intro'])) {
             (string) ($_POST['intro_title'] ?? ''),
             (string) ($_POST['intro_explanation'] ?? '')
         );
+        cms_audit_content($pdo, 'نمایندگان — متن هدر');
         cms_flash('متن هدر پورتال نمایندگان ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -115,6 +130,14 @@ if (
                 $published,
                 $id,
             ]);
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' نماینده «' . $name . '» را به‌روز کرد',
+                'branch',
+                $id,
+                $name
+            );
             cms_flash('نماینده به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
@@ -132,6 +155,15 @@ if (
                 $sortOrder,
                 $published,
             ]);
+            $newId = (int) $pdo->lastInsertId();
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' نماینده «' . $name . '» را اضافه کرد',
+                'branch',
+                $newId,
+                $name
+            );
             cms_flash('نماینده اضافه شد');
         }
         cms_redirect('branches.php');

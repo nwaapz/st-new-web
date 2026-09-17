@@ -853,6 +853,13 @@ try {
     $log[] = count($aliasTable) > 0
         ? 'price_import_car_aliases table ready'
         : 'Created price_import_car_aliases table';
+
+    require_once __DIR__ . '/lib/analytics-orders.php';
+    analytics_orders_ensure_schema($pdo);
+    $analyticsCounts = analytics_orders_refresh($pdo);
+    $log[] = 'Analytics facts refreshed: orders=' . $analyticsCounts['orders']
+        . ', lines=' . $analyticsCounts['lines']
+        . ', cheques=' . $analyticsCounts['cheques'];
 } catch (Throwable $e) {
     $ok = false;
     $log[] = 'ERROR: ' . $e->getMessage();

@@ -26,6 +26,18 @@ return [
     // If omitted, a key is generated and stored in site_settings.
     'km_cron_key' => '',
 
+    // Optional secret for GET /api/cheque-reminder-cron.php?key=...
+    // Falls back to km_cron_key, then a generated site_settings key.
+    'cheque_cron_key' => '',
+
     // Skip the 09:00–21:00 customer-club SMS window (localhost is always exempt).
     'sms_test_mode' => false,
+
+    // Power BI Embedded (admin Android analytics screen)
+    'powerbi_enabled' => false,
+    'powerbi_tenant_id' => '',
+    'powerbi_client_id' => '',
+    'powerbi_client_secret' => '',
+    'powerbi_workspace_id' => '',
+    'powerbi_report_id' => '',
 ];

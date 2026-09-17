@@ -2,18 +2,27 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/lib/uploads.php';
+require_once __DIR__ . '/lib/admin-attention.php';
 
 /**
- * @param 'website'|'shop'|'communication'|'advanced'|'' $section
+ * @param 'website'|'shop'|'customers'|'advanced'|'' $section
  */
 function cms_layout_start(string $title, string $username = '', string $section = ''): void
 {
     $script = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
 
+    $attention = cms_admin_attention_counts();
+    $customersBadge = $attention['total'] > 0 ? (string) $attention['total'] : '';
+
     $rootNav = [
         'website.php' => ['label' => 'نمایش وب', 'section' => 'website', 'class' => ''],
         'shop.php' => ['label' => 'فروشگاه', 'section' => 'shop', 'class' => ''],
-        'communication.php' => ['label' => 'ارتباطات', 'section' => 'communication', 'class' => ''],
+        'customers.php' => [
+            'label' => 'امور مشتریان',
+            'section' => 'customers',
+            'class' => '',
+            'badge' => $customersBadge,
+        ],
         'advanced.php' => [
             'label' => 'تنظیمات پیشرفته',
             'section' => 'advanced',
@@ -46,20 +55,22 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'media-library.php' => 'کتابخانه تصاویر',
             'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
-            'orders.php' => 'سفارش‌ها',
-            'sales-users.php' => 'کاربران اپ فروش',
         ];
-    } elseif ($section === 'communication') {
+    } elseif ($section === 'customers') {
         $subNav = [
-            'communication.php' => 'خلاصه',
+            'customers.php' => 'خلاصه',
+            'orders.php' => 'سفارش‌ها',
             'messages.php' => 'پیام‌ها',
             'branch-messages.php' => 'پیام نمایندگان',
             'branch-tickets.php' => 'تیکت نمایندگان',
+            'sales-users.php' => 'کاربران اپ فروش',
         ];
     } elseif ($section === 'advanced') {
         $fontLabHref = rtrim(cms_site_base(), '/') . '/font-lab/';
         $subNav = [
             'advanced.php' => 'خلاصه',
+            'admin-users.php' => 'مدیران CMS',
+            'admin-activity.php' => 'فعالیت مدیران',
             'sms-settings.php' => 'پیامک',
             'mechanic-services.php' => 'دوره سرویس‌ها',
             $fontLabHref => 'Font Lab',
@@ -70,7 +81,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=23">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=24">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';

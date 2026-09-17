@@ -7,6 +7,7 @@ require_once __DIR__ . '/lib/mechanics.php';
 require_once __DIR__ . '/lib/mechanic-broadcasts.php';
 require_once __DIR__ . '/lib/jalali.php';
 require_once __DIR__ . '/lib/seller-credit.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -38,8 +39,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($row === null) {
             throw new RuntimeException('پیام گروهی یافت نشد');
         }
+        $broadcastTitle = trim((string) ($row['title'] ?? ''));
+        if ($broadcastTitle === '') {
+            $broadcastTitle = 'پیام #' . $broadcastId;
+        }
         if ($action === 'approve') {
             mechanic_broadcast_approve($pdo, $row);
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' پیام گروهی «' . $broadcastTitle . '» را تأیید کرد',
+                'mechanic_broadcast',
+                $broadcastId,
+                $broadcastTitle
+            );
             if ($ajax) {
                 $fresh = mechanic_broadcast_find($pdo, $broadcastId);
                 mechanic_broadcasts_cms_json(['ok' => true, 'item' => $fresh]);
@@ -47,6 +60,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_flash('پیام تأیید شد و تعداد پیامک محاسبه شد');
         } elseif ($action === 'reject') {
             mechanic_broadcast_reject($pdo, $row, (string) ($_POST['reject_reason'] ?? ''));
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' پیام گروهی «' . $broadcastTitle . '» را رد کرد',
+                'mechanic_broadcast',
+                $broadcastId,
+                $broadcastTitle
+            );
             cms_flash('پیام رد شد');
         } elseif ($action === 'send_batch') {
             $result = mechanic_broadcast_send_batch($pdo, $broadcastId, 20);
@@ -59,6 +80,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'item' => mechanic_broadcast_serialize($pdo, $fresh, $phoneCustomers),
                 ]);
             }
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' یک دسته از پیام گروهی «' . $broadcastTitle . '» را ارسال کرد',
+                'mechanic_broadcast',
+                $broadcastId,
+                $broadcastTitle
+            );
             if ($result['completed']) {
                 cms_flash('ارسال گروهی تمام شد');
             } elseif (!empty($result['outside_hours'])) {

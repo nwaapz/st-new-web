@@ -27,13 +27,43 @@ function cms_current_username(): string
     return (string) ($_SESSION['cms_username'] ?? '');
 }
 
+function cms_current_admin_id(): int
+{
+    cms_session_start();
+    return (int) ($_SESSION['cms_user_id'] ?? 0);
+}
+
+/**
+ * @return array{id: int, username: string}|null
+ */
+function cms_current_admin(): ?array
+{
+    $id = cms_current_admin_id();
+    if ($id <= 0) {
+        return null;
+    }
+    $username = cms_current_username();
+    if ($username === '') {
+        return null;
+    }
+
+    return ['id' => $id, 'username' => $username];
+}
+
 function cms_attempt_login(string $username, string $password): bool
 {
     $pdo = cms_pdo();
-    $stmt = $pdo->prepare('SELECT id, username, password_hash FROM admin_users WHERE username = ? LIMIT 1');
+    require_once __DIR__ . '/lib/admin-users.php';
+    admin_users_ensure_schema($pdo);
+    $stmt = $pdo->prepare(
+        'SELECT id, username, password_hash, is_active FROM admin_users WHERE username = ? LIMIT 1'
+    );
     $stmt->execute([$username]);
     $user = $stmt->fetch();
     if (!$user || !password_verify($password, $user['password_hash'])) {
+        return false;
+    }
+    if (isset($user['is_active']) && (int) $user['is_active'] !== 1) {
         return false;
     }
 

@@ -3,8 +3,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
+$pdo = cms_pdo();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_home_backgrounds'])) {
     try {
@@ -28,6 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_home_backgrounds
         cms_setting_set('home_series_side_text', trim((string) ($_POST['home_series_side_text'] ?? '')));
         cms_setting_set('home_category_side_text', trim((string) ($_POST['home_category_side_text'] ?? '')));
         cms_setting_set('home_new_products_side_text', trim((string) ($_POST['home_new_products_side_text'] ?? '')));
+        cms_audit_content($pdo, 'صفحه اصلی — پس‌زمینه‌ها');
         cms_flash('پس‌زمینه‌ها و متن‌های صفحه اصلی ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');

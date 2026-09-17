@@ -5,6 +5,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/car-model-factories.php';
 require_once __DIR__ . '/lib/product-car-models.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -30,8 +31,15 @@ if (isset($_GET['edit'])) {
 }
 
 if (isset($_GET['delete'])) {
+    $delId = (int) $_GET['delete'];
+    $delStmt = $pdo->prepare('SELECT id, name FROM car_models WHERE id = ? LIMIT 1');
+    $delStmt->execute([$delId]);
+    $delRow = $delStmt->fetch();
     $stmt = $pdo->prepare('DELETE FROM car_models WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
+    $stmt->execute([$delId]);
+    if ($delRow) {
+        cms_audit_catalog_delete($pdo, 'car_model.delete', 'car_model', $delId, (string) $delRow['name']);
+    }
     cms_flash('مدل حذف شد');
     cms_redirect('car-models.php');
 }
@@ -62,6 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             $stmt->execute([$name, $slug, $description !== '' ? $description : null, $image !== '' ? $image : null, $sortOrder, $published, $id]);
             cms_car_model_save_factory_ids($pdo, $id, $factoryIds);
+            cms_audit_catalog_save($pdo, 'car_model.save', 'car_model', $id, $name, true);
             cms_flash('مدل به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
@@ -70,6 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$name, $slug, $description !== '' ? $description : null, $image !== '' ? $image : null, $sortOrder, $published]);
             $newId = (int) $pdo->lastInsertId();
             cms_car_model_save_factory_ids($pdo, $newId, $factoryIds);
+            cms_audit_catalog_save($pdo, 'car_model.save', 'car_model', $newId, $name, false);
             cms_flash('مدل اضافه شد');
         }
         cms_redirect('car-models.php');

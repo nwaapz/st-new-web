@@ -3,12 +3,35 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/admin-attention.php';
 
 cms_require_login();
+
+$counts = cms_admin_attention_counts();
 
 cms_layout_start('داشبورد', cms_current_username(), '');
 ?>
 <h1 style="margin-top:0">داشبورد مدیریت</h1>
+<p class="cms-muted">وضعیت پیام‌ها و سفارش‌هایی که نیاز به بررسی دارند.</p>
+
+<div class="cms-dash-stats">
+  <a class="cms-dash-stat" href="customers.php">
+    <span class="cms-dash-stat__value"><?= (int) $counts['new_messages'] ?></span>
+    <span class="cms-dash-stat__label">پیام‌های جدید</span>
+    <span class="cms-dash-stat__hint">مشتری، نماینده و تیکت خوانده‌نشده</span>
+  </a>
+  <a class="cms-dash-stat" href="orders.php">
+    <span class="cms-dash-stat__value"><?= (int) $counts['new_orders'] ?></span>
+    <span class="cms-dash-stat__label">سفارش‌های جدید</span>
+    <span class="cms-dash-stat__hint">ارسال‌شده از مشتری — در انتظار انبار</span>
+  </a>
+  <a class="cms-dash-stat" href="orders.php">
+    <span class="cms-dash-stat__value"><?= (int) $counts['client_order_activity'] ?></span>
+    <span class="cms-dash-stat__label">فعالیت مشتری در سفارش</span>
+    <span class="cms-dash-stat__hint">مدارک پرداخت یا پاسخ هشدار</span>
+  </a>
+</div>
+
 <p class="cms-muted">بخش مورد نظر را انتخاب کنید.</p>
 <div class="cms-grid-2">
   <a class="cms-panel cms-hub-card" href="website.php">
@@ -19,9 +42,9 @@ cms_layout_start('داشبورد', cms_current_username(), '');
     <h2>فروشگاه</h2>
     <p class="cms-muted" style="margin:0">خودرو (کارخانه/مدل) + دسته محصول مستقل</p>
   </a>
-  <a class="cms-panel cms-hub-card" href="communication.php">
-    <h2>ارتباطات</h2>
-    <p class="cms-muted" style="margin:0">پیام مشتریان، پیام نمایندگان و تیکت‌ها</p>
+  <a class="cms-panel cms-hub-card" href="customers.php">
+    <h2>امور مشتریان</h2>
+    <p class="cms-muted" style="margin:0">سفارش‌ها، پیام‌ها، تیکت‌ها و کاربران اپ فروش</p>
   </a>
   <a class="cms-panel cms-hub-card cms-hub-card--advanced" href="advanced.php">
     <h2>تنظیمات پیشرفته</h2>

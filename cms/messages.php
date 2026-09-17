@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/messages.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 require_once dirname(__DIR__) . '/api/_auth.php';
 
 cms_require_login();
@@ -28,6 +29,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         messages_add($pdo, $userId, $body, 'admin', ['channel' => 'support']);
         messages_mark_client_messages_read($pdo, $userId);
+        cms_audit_simple(
+            $pdo,
+            'message.reply',
+            cms_current_username() . ' به پیام مشتری پاسخ داد',
+            'message',
+            $userId,
+            null
+        );
         cms_flash('پیام ارسال شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -55,7 +64,7 @@ if ($viewUserId > 0) {
 
 $listHref = $phoneQuery !== '' ? 'messages.php?q=' . rawurlencode($phoneQuery) : 'messages.php';
 
-cms_layout_start('پیام‌ها', cms_current_username(), 'communication');
+cms_layout_start('پیام‌ها', cms_current_username(), 'customers');
 ?>
 <div class="cms-page-head">
   <div>

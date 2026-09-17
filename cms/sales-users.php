@@ -5,6 +5,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/sales-users.php';
 require_once __DIR__ . '/lib/branches.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -25,7 +26,18 @@ if (isset($_GET['edit'])) {
 
 if (isset($_GET['delete'])) {
     try {
+        $deleted = sales_users_get($pdo, (int) $_GET['delete']);
         sales_users_delete($pdo, (int) $_GET['delete']);
+        if ($deleted !== null) {
+            cms_audit_simple(
+                $pdo,
+                'sales_user.delete',
+                cms_current_username() . ' کاربر فروش ' . $deleted['display_name'] . ' را حذف کرد',
+                'sales_user',
+                (int) $deleted['id'],
+                (string) $deleted['username']
+            );
+        }
         cms_flash('کاربر فروش حذف شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -37,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int) ($_POST['id'] ?? 0);
     try {
         $branchId = (int) ($_POST['branch_id'] ?? 0);
-        sales_users_save($pdo, [
+        $savedId = sales_users_save($pdo, [
             'id' => $id,
             'username' => (string) ($_POST['username'] ?? ''),
             'display_name' => (string) ($_POST['display_name'] ?? ''),
@@ -45,6 +57,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'branch_id' => $branchId > 0 ? $branchId : null,
             'published' => isset($_POST['published']),
         ]);
+        $saved = sales_users_get($pdo, $savedId);
+        if ($saved !== null) {
+            cms_audit_simple(
+                $pdo,
+                'sales_user.save',
+                cms_current_username() . ' کاربر فروش ' . $saved['display_name'] . ($id > 0 ? ' را به‌روز کرد' : ' را اضافه کرد'),
+                'sales_user',
+                (int) $saved['id'],
+                (string) $saved['username']
+            );
+        }
         cms_flash($id > 0 ? 'کاربر فروش به‌روز شد' : 'کاربر فروش اضافه شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -55,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $users = sales_users_list($pdo);
 $branches = sales_users_branch_options($pdo);
 
-cms_layout_start('کاربران اپ فروش', cms_current_username(), 'shop');
+cms_layout_start('کاربران اپ فروش', cms_current_username(), 'customers');
 ?>
 <h1 style="margin-top:0">کاربران اپ فروش</h1>
 <p class="cms-muted">

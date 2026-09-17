@@ -4,8 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/hero-mobile.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
+$pdo = cms_pdo();
 $pdo = cms_pdo();
 hero_mobile_ensure_schema($pdo);
 
@@ -165,6 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $slides = hero_mobile_collect_from_post($count);
         hero_mobile_replace_all($pdo, $slides);
+        cms_audit_content($pdo, 'صفحه اصلی — هیرو موبایل');
         cms_flash('هیرو موبایل ذخیره شد');
         cms_redirect('hero-mobile.php');
     } catch (Throwable $e) {

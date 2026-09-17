@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -21,8 +22,20 @@ if (isset($_GET['edit'])) {
 }
 
 if (isset($_GET['delete'])) {
+    $deleteId = (int) $_GET['delete'];
+    $stmt = $pdo->prepare('SELECT title FROM rewards WHERE id = ?');
+    $stmt->execute([$deleteId]);
+    $deleteTitle = (string) ($stmt->fetchColumn() ?: 'جایزه');
     $stmt = $pdo->prepare('DELETE FROM rewards WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
+    $stmt->execute([$deleteId]);
+    cms_audit_simple(
+        $pdo,
+        'content.save',
+        cms_current_username() . ' جایزه «' . $deleteTitle . '» را حذف کرد',
+        'reward',
+        $deleteId,
+        $deleteTitle
+    );
     cms_flash('جایزه حذف شد');
     cms_redirect('rewards.php');
 }
@@ -52,6 +65,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $published,
                 $id,
             ]);
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' جایزه «' . $title . '» را به‌روز کرد',
+                'reward',
+                $id,
+                $title
+            );
             cms_flash('جایزه به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
@@ -64,6 +85,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sortOrder,
                 $published,
             ]);
+            $newId = (int) $pdo->lastInsertId();
+            cms_audit_simple(
+                $pdo,
+                'content.save',
+                cms_current_username() . ' جایزه «' . $title . '» را اضافه کرد',
+                'reward',
+                $newId,
+                $title
+            );
             cms_flash('جایزه اضافه شد');
         }
         cms_redirect('rewards.php');

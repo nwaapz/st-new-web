@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/price-import.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 cms_session_start();
@@ -180,6 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($action === 'clear') {
             unset($_SESSION[PRICE_IMPORT_SESSION_KEY]);
+            cms_audit_simple($pdo, 'price_import.clear', cms_current_username() . ' پیش‌نمایش ورود قیمت را پاک کرد');
             cms_flash('پیش‌نمایش پاک شد');
             cms_redirect('product-price-import.php');
         }
@@ -325,6 +327,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $remaining,
                     !empty($result['errors']) ? ' — ' . count($result['errors']) . ' خطا' : ''
                 ), !empty($result['errors']) && $appliedCount === 0 ? 'error' : 'ok');
+            }
+            if ($appliedCount > 0 || $result['created'] > 0 || $result['updated'] > 0) {
+                cms_audit_simple(
+                    $pdo,
+                    'price_import.apply',
+                    cms_current_username() . ' ورود قیمت را اعمال کرد',
+                    'price_import',
+                    null,
+                    sprintf('%d ایجاد، %d به‌روز', $result['created'], $result['updated'])
+                );
             }
             cms_redirect('product-price-import.php');
         }

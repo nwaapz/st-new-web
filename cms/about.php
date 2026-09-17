@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/page-intros.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -191,8 +192,20 @@ if (isset($_GET['new'])) {
 }
 
 if (isset($_GET['delete'])) {
+    $deleteId = (int) $_GET['delete'];
+    $stmt = $pdo->prepare('SELECT title FROM about_exhibitions WHERE id = ?');
+    $stmt->execute([$deleteId]);
+    $deleteTitle = (string) ($stmt->fetchColumn() ?: 'نمایشگاه');
     $stmt = $pdo->prepare('DELETE FROM about_exhibitions WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
+    $stmt->execute([$deleteId]);
+    cms_audit_simple(
+        $pdo,
+        'content.save',
+        cms_current_username() . ' نمایشگاه «' . $deleteTitle . '» را حذف کرد',
+        'about_exhibition',
+        $deleteId,
+        $deleteTitle
+    );
     cms_flash('نمایشگاه حذف شد');
     cms_redirect('about.php');
 }
@@ -210,6 +223,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_page_intro'])) {
         cms_setting_set('about_hero_image', $hero);
         cms_setting_set('about_cinema_title', trim((string) ($_POST['about_cinema_title'] ?? '')));
         cms_setting_set('about_cinema_subtitle', trim((string) ($_POST['about_cinema_subtitle'] ?? '')));
+        cms_audit_content($pdo, 'درباره ما — متن و تصویر');
         cms_flash('متن و تصویر صفحه درباره ما ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -223,6 +237,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_stats'])) {
             cms_setting_set('about_stat_' . ($i + 1) . '_value', trim((string) ($_POST['stat_value_' . $i] ?? '')));
             cms_setting_set('about_stat_' . ($i + 1) . '_label', trim((string) ($_POST['stat_label_' . $i] ?? '')));
         }
+        cms_audit_content($pdo, 'درباره ما — آمار اعتماد');
         cms_flash('آمار اعتماد ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -241,6 +256,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_chapters'])) {
             cms_setting_set('about_chapter_' . $n . '_image', $image);
             cms_setting_set('about_chapter_' . $n . '_href', trim((string) ($_POST['chapter_href_' . $i] ?? '')));
         }
+        cms_audit_content($pdo, 'درباره ما — فصل‌های داستان');
         cms_flash('فصل‌های داستان برند ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -358,8 +374,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['exhibition_form'])) {
         }
 
         $pdo->beginTransaction();
-        $persist($pdo, $id, $fields, $collected);
+        $exhibitionId = $persist($pdo, $id, $fields, $collected);
         $pdo->commit();
+        cms_audit_simple(
+            $pdo,
+            'content.save',
+            cms_current_username() . ' نمایشگاه «' . $title . '» را ' . ($id > 0 ? 'به‌روز کرد' : 'اضافه کرد'),
+            'about_exhibition',
+            $exhibitionId,
+            $title
+        );
         cms_flash($id > 0 ? 'نمایشگاه به‌روز شد' : 'نمایشگاه اضافه شد');
         cms_redirect('about.php');
     } catch (Throwable $e) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/page-intros.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -12,6 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_price_mode'])) {
     $enabled = isset($_POST['call_for_price']) ? '1' : '0';
     try {
         cms_setting_set('call_for_price', $enabled);
+        cms_audit_settings($pdo, 'فروشگاه — حالت قیمت');
         cms_flash($enabled === '1'
             ? 'قیمت‌ها به «تماس برای قیمت» تغییر کرد'
             : 'نمایش قیمت واقعی فعال شد');
@@ -26,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_header_image']))
         $existing = cms_setting_get('shop_header_image', '');
         $image = cms_handle_optional_upload('header_image', $existing);
         cms_setting_set('shop_header_image', $image);
+        cms_audit_settings($pdo, 'فروشگاه — تصویر هدر');
         cms_flash($image !== '' ? 'تصویر هدر فروشگاه ذخیره شد' : 'تصویر هدر فروشگاه حذف شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -40,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_page_intro'])) {
             (string) ($_POST['intro_title'] ?? ''),
             (string) ($_POST['intro_explanation'] ?? '')
         );
+        cms_audit_content($pdo, 'فروشگاه — متن هدر');
         cms_flash('متن هدر فروشگاه ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -54,7 +58,6 @@ $counts = [
     'product_series' => 0,
     'products' => (int) $pdo->query('SELECT COUNT(*) FROM products')->fetchColumn(),
     'reviews_pending' => 0,
-    'orders_submitted' => 0,
 ];
 
 try {
@@ -66,14 +69,6 @@ try {
 try {
     $counts['reviews_pending'] = (int) $pdo->query(
         "SELECT COUNT(*) FROM product_reviews WHERE status = 'pending'"
-    )->fetchColumn();
-} catch (Throwable $e) {
-    /* table may not exist until migrate-run */
-}
-
-try {
-    $counts['orders_submitted'] = (int) $pdo->query(
-        "SELECT COUNT(*) FROM orders WHERE status = 'submitted'"
     )->fetchColumn();
 } catch (Throwable $e) {
     /* table may not exist until migrate-run */
@@ -177,11 +172,6 @@ cms_layout_start('فروشگاه', cms_current_username(), 'shop');
     <h2>نظرات محصولات</h2>
     <p class="cms-muted" style="margin:0 0 .35rem">در انتظار تأیید</p>
     <p style="font-size:1.6rem;margin:0;font-weight:700"><?= $counts['reviews_pending'] ?></p>
-  </a>
-  <a class="cms-panel cms-hub-card" href="orders.php">
-    <h2>سفارش‌ها</h2>
-    <p class="cms-muted" style="margin:0 0 .35rem">ارسال‌شده از مشتری</p>
-    <p style="font-size:1.6rem;margin:0;font-weight:700"><?= $counts['orders_submitted'] ?></p>
   </a>
 </div>
 <p class="cms-muted" style="margin-top:1rem">اگر دیتابیس قدیمی است یک‌بار <a href="migrate-run.php">آپدیت ساختار</a> را اجرا کنید.</p>

@@ -5,6 +5,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/branches.php';
 require_once __DIR__ . '/lib/branch-tickets.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
 $pdo = cms_pdo();
@@ -32,11 +33,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare(
                 "UPDATE branch_tickets SET status = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             )->execute([$ticketId]);
+            cms_audit_simple(
+                $pdo,
+                'branch_ticket.close',
+                cms_current_username() . ' تیکت #' . $ticketId . ' را بست',
+                'branch_ticket',
+                $ticketId,
+                (string) ($ticket['subject'] ?? '')
+            );
             cms_flash('تیکت بسته شد');
         } elseif ($action === 'reopen') {
             $pdo->prepare(
                 "UPDATE branch_tickets SET status = 'open', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             )->execute([$ticketId]);
+            cms_audit_simple(
+                $pdo,
+                'branch_ticket.reopen',
+                cms_current_username() . ' تیکت #' . $ticketId . ' را باز کرد',
+                'branch_ticket',
+                $ticketId,
+                (string) ($ticket['subject'] ?? '')
+            );
             cms_flash('تیکت دوباره باز شد');
         } else {
             $body = trim((string) ($_POST['body'] ?? ''));
@@ -61,6 +78,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  SET admin_read_at = CURRENT_TIMESTAMP
                  WHERE ticket_id = ? AND actor = 'branch' AND admin_read_at IS NULL"
             )->execute([$ticketId]);
+            cms_audit_simple(
+                $pdo,
+                'branch_ticket.reply',
+                cms_current_username() . ' به تیکت #' . $ticketId . ' پاسخ داد',
+                'branch_ticket',
+                $ticketId,
+                (string) ($ticket['subject'] ?? '')
+            );
             cms_flash('پاسخ ارسال شد');
         }
     } catch (Throwable $e) {
@@ -146,7 +171,7 @@ if ($nameQuery !== '') {
 }
 $listHref = $listQs === [] ? 'branch-tickets.php' : 'branch-tickets.php?' . http_build_query($listQs);
 
-cms_layout_start('تیکت نمایندگان', cms_current_username(), 'communication');
+cms_layout_start('تیکت نمایندگان', cms_current_username(), 'customers');
 ?>
 <div class="cms-page-head">
   <div>

@@ -13,9 +13,29 @@ CREATE TABLE IF NOT EXISTS admin_users (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   username VARCHAR(64) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_admin_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  admin_user_id INT UNSIGNED NULL,
+  admin_username VARCHAR(64) NOT NULL DEFAULT '',
+  action VARCHAR(64) NOT NULL,
+  entity_type VARCHAR(32) NULL,
+  entity_id INT UNSIGNED NULL,
+  entity_label VARCHAR(191) NULL,
+  summary VARCHAR(512) NOT NULL,
+  detail_json TEXT NULL,
+  source VARCHAR(16) NOT NULL DEFAULT 'cms',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_admin_audit_created (created_at),
+  KEY idx_admin_audit_admin (admin_user_id),
+  KEY idx_admin_audit_action (action),
+  KEY idx_admin_audit_entity (entity_type, entity_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS factories (
@@ -335,7 +355,7 @@ CREATE TABLE IF NOT EXISTS orders (
   branch_city VARCHAR(191) NULL,
   branch_province_name VARCHAR(191) NULL,
   branch_phone VARCHAR(20) NULL,
-  status ENUM('submitted','accepted','rejected','payment_proof_sent','paid','shipped','not_received','returned_to_origin','lost','received') NOT NULL DEFAULT 'submitted',
+  status ENUM('submitted','accepted','rejected','cancelled','payment_proof_sent','paid','shipped','not_received','returned_to_origin','lost','received') NOT NULL DEFAULT 'submitted',
   payment_note TEXT NULL,
   payment_file VARCHAR(512) NULL,
   payment_files TEXT NULL,
@@ -389,10 +409,30 @@ CREATE TABLE IF NOT EXISTS order_events (
   to_status VARCHAR(32) NOT NULL,
   message TEXT NULL,
   actor ENUM('client','admin') NOT NULL DEFAULT 'client',
+  admin_user_id INT UNSIGNED NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_order_events_order (order_id),
   CONSTRAINT fk_order_events_order
+    FOREIGN KEY (order_id) REFERENCES orders (id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS order_messages (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  order_id INT UNSIGNED NOT NULL,
+  actor ENUM('admin','sales') NOT NULL,
+  admin_user_id INT UNSIGNED NULL,
+  sales_user_id INT UNSIGNED NULL,
+  admin_name VARCHAR(64) NOT NULL DEFAULT '',
+  sales_name VARCHAR(191) NOT NULL DEFAULT '',
+  body TEXT NOT NULL,
+  admin_read_at TIMESTAMP NULL DEFAULT NULL,
+  sales_read_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_order_messages_order (order_id, id),
+  CONSTRAINT fk_order_messages_order
     FOREIGN KEY (order_id) REFERENCES orders (id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

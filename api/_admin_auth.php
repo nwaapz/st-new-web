@@ -28,7 +28,7 @@ function admin_auth_session_start(): void
     session_name(ADMIN_AUTH_SESSION_NAME);
     session_set_cookie_params([
         'lifetime' => ADMIN_AUTH_TTL_SECONDS,
-        'path' => '/',
+        'path' => admin_auth_cookie_path(),
         'secure' => admin_auth_cookie_secure(),
         'httponly' => true,
         'samesite' => 'Lax',
@@ -42,6 +42,18 @@ function admin_auth_cookie_secure(): bool
         return true;
     }
     return isset($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443';
+}
+
+function admin_auth_cookie_path(): string
+{
+    $script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+    // /test2/api/admin-auth-login.php → /test2/
+    $apiDir = rtrim(dirname($script), '/');
+    $base = rtrim(dirname($apiDir), '/');
+    if ($base === '' || $base === '/' || $base === '.') {
+        return '/';
+    }
+    return $base . '/';
 }
 
 function admin_auth_login(int $userId, string $username): void
@@ -64,7 +76,7 @@ function admin_auth_refresh_session_cookie(): void
     }
     setcookie(session_name(), $id, [
         'expires' => time() + ADMIN_AUTH_TTL_SECONDS,
-        'path' => '/',
+        'path' => admin_auth_cookie_path(),
         'secure' => admin_auth_cookie_secure(),
         'httponly' => true,
         'samesite' => 'Lax',
@@ -78,7 +90,7 @@ function admin_auth_logout(): void
     if (session_id() !== '') {
         setcookie(session_name(), '', [
             'expires' => time() - 42000,
-            'path' => '/',
+            'path' => admin_auth_cookie_path(),
             'secure' => admin_auth_cookie_secure(),
             'httponly' => true,
             'samesite' => 'Lax',

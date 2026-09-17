@@ -6,6 +6,7 @@ require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/product-car-models.php';
 require_once __DIR__ . '/lib/product-categories.php';
 require_once __DIR__ . '/lib/product-series-categories.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 const SERIES_GALLERY_MAX = 12;
 
@@ -185,8 +186,15 @@ if (isset($_GET['edit'])) {
 }
 
 if (isset($_GET['delete'])) {
+    $delId = (int) $_GET['delete'];
+    $delStmt = $pdo->prepare('SELECT id, name FROM product_series WHERE id = ? LIMIT 1');
+    $delStmt->execute([$delId]);
+    $delRow = $delStmt->fetch();
     $stmt = $pdo->prepare('DELETE FROM product_series WHERE id = ?');
-    $stmt->execute([(int) $_GET['delete']]);
+    $stmt->execute([$delId]);
+    if ($delRow) {
+        cms_audit_catalog_delete($pdo, 'product_series.delete', 'product_series', $delId, (string) $delRow['name']);
+    }
     cms_flash('سری حذف شد');
     cms_redirect('product-series.php');
 }
@@ -271,6 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id,
             ]);
             $seriesId = $id;
+            cms_audit_catalog_save($pdo, 'product_series.save', 'product_series', $seriesId, $name, true);
             cms_flash('سری به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
@@ -291,6 +300,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $published,
             ]);
             $seriesId = (int) $pdo->lastInsertId();
+            cms_audit_catalog_save($pdo, 'product_series.save', 'product_series', $seriesId, $name, false);
             cms_flash('سری اضافه شد');
         }
 

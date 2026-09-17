@@ -4,8 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/page-intros.php';
+require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
+$pdo = cms_pdo();
 
 function customerclub_header_width(float $value): int
 {
@@ -38,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_page_intro'])) {
             (string) ($_POST['intro_title'] ?? ''),
             (string) ($_POST['intro_explanation'] ?? '')
         );
+        cms_audit_content($pdo, 'باشگاه مشتریان — متن هدر');
         cms_flash('متن هدر باشگاه مشتریان ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
@@ -54,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_side_panel'])) {
         cms_setting_set('customerclub_side_image', $image);
         cms_setting_set('customerclub_side_text', $text);
         cms_setting_set('customerclub_side_text_size', (string) $textSize);
+        cms_audit_content($pdo, 'باشگاه مشتریان — پنل کناری');
         cms_flash('پنل کناری باشگاه مشتریان ذخیره شد');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
