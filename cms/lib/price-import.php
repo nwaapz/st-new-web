@@ -885,6 +885,17 @@ function price_import_row_issues(
     $issues = [];
     $action = (string) ($row['action'] ?? 'create');
 
+    if ($action === 'update_series') {
+        if (trim((string) ($row['price_text'] ?? '')) === '') {
+            $issues[] = 'قیمت نامعتبر است';
+        }
+
+        return [
+            'ready' => $issues === [],
+            'issues' => $issues,
+        ];
+    }
+
     if (trim((string) ($row['name'] ?? '')) === '' && ($row['action'] ?? '') === 'create') {
         $issues[] = 'نام محصول خالی است';
     }
@@ -932,12 +943,91 @@ function price_import_row_issues(
 /** @param list<array<string, mixed>> $rows */
 function price_import_find_product_by_visual_id(PDO $pdo, string $visualId): ?array
 {
+    $visualId = trim($visualId);
+    if ($visualId === '') {
+        return null;
+    }
     $stmt = $pdo->prepare(
         'SELECT id, name, visual_id, price_text, pack_size, description FROM products WHERE visual_id = ? LIMIT 1'
     );
     $stmt->execute([$visualId]);
     $row = $stmt->fetch();
     return $row ?: null;
+}
+
+function price_import_find_series_by_visual_id(PDO $pdo, string $visualId): ?array
+{
+    $visualId = trim($visualId);
+    if ($visualId === '') {
+        return null;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT id, name, visual_id, price_text FROM product_series WHERE visual_id = ? LIMIT 1'
+    );
+    $stmt->execute([$visualId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/**
+ * @return array{entity:string,id:int,name:string,price_text:string,row:array<string,mixed>}|null
+ */
+function price_import_resolve_by_visual_id(PDO $pdo, string $visualId): ?array
+{
+    $visualId = trim($visualId);
+    if ($visualId === '') {
+        return null;
+    }
+
+    $product = price_import_find_product_by_visual_id($pdo, $visualId);
+    if ($product) {
+        return [
+            'entity' => 'product',
+            'id' => (int) $product['id'],
+            'name' => (string) ($product['name'] ?? ''),
+            'price_text' => (string) ($product['price_text'] ?? ''),
+            'row' => $product,
+        ];
+    }
+
+    $series = price_import_find_series_by_visual_id($pdo, $visualId);
+    if ($series) {
+        return [
+            'entity' => 'series',
+            'id' => (int) $series['id'],
+            'name' => (string) ($series['name'] ?? ''),
+            'price_text' => (string) ($series['price_text'] ?? ''),
+            'row' => $series,
+        ];
+    }
+
+    return null;
+}
+
+/** @param array<string, mixed> $row */
+function price_import_apply_series_price(PDO $pdo, array $row, ?array $existing = null): bool
+{
+    $visualId = trim((string) ($row['visual_id'] ?? ''));
+    if ($visualId === '') {
+        return false;
+    }
+
+    $priceText = trim((string) ($row['price_text'] ?? ''));
+    if ($priceText === '') {
+        return false;
+    }
+
+    if ($existing === null) {
+        $existing = price_import_find_series_by_visual_id($pdo, $visualId);
+    }
+    if (!$existing) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare('UPDATE product_series SET price_text = ? WHERE id = ?');
+    $stmt->execute([$priceText, (int) $existing['id']]);
+
+    return true;
 }
 
 function price_import_car_names_for_ids(array $carModelIds, array $carModels): string
@@ -969,16 +1059,31 @@ function price_import_refresh_session_rows(PDO $pdo, array $rows): array
 
     foreach ($rows as &$row) {
         $productId = (int) ($row['existing_product_id'] ?? 0);
-        if ($productId <= 0 && trim((string) ($row['visual_id'] ?? '')) !== '') {
-            $existing = price_import_find_product_by_visual_id($pdo, (string) $row['visual_id']);
+        $visualId = trim((string) ($row['visual_id'] ?? ''));
+        if ($productId <= 0 && $visualId !== '') {
+            $existing = price_import_find_product_by_visual_id($pdo, $visualId);
             if ($existing) {
                 $productId = (int) $existing['id'];
                 $row['existing_product_id'] = $productId;
                 $row['action'] = 'update';
+                $row['entity_type'] = 'product';
                 $row['existing_name'] = (string) $existing['name'];
                 $row['existing_price_text'] = (string) ($existing['price_text'] ?? '');
                 $row['existing_pack_size'] = $existing['pack_size'] !== null ? (int) $existing['pack_size'] : null;
                 $row['category_id'] = null;
+                unset($row['existing_series_id']);
+            } else {
+                $existingSeries = price_import_find_series_by_visual_id($pdo, $visualId);
+                if ($existingSeries) {
+                    $row['action'] = 'update_series';
+                    $row['entity_type'] = 'series';
+                    $row['existing_series_id'] = (int) $existingSeries['id'];
+                    $row['existing_name'] = (string) $existingSeries['name'];
+                    $row['existing_price_text'] = (string) ($existingSeries['price_text'] ?? '');
+                    $row['skip_cars'] = true;
+                    $row['needs_car_setup'] = false;
+                    unset($row['existing_product_id']);
+                }
             }
         }
         if ($productId > 0) {
@@ -992,12 +1097,13 @@ function price_import_refresh_session_rows(PDO $pdo, array $rows): array
 
     foreach ($rows as $row) {
         $priceFieldsApplied = !empty($row['price_fields_applied']);
+        $action = (string) ($row['action'] ?? 'create');
         $productId = (int) ($row['existing_product_id'] ?? 0);
         $existingCarIds = $productId > 0 ? ($carIdsMap[$productId] ?? []) : [];
-        $skipCars = $productId > 0 && $existingCarIds !== [];
+        $skipCars = $action === 'update_series' || ($productId > 0 && $existingCarIds !== []);
 
         $row['skip_cars'] = $skipCars;
-        $row['needs_car_setup'] = !$skipCars;
+        $row['needs_car_setup'] = $action !== 'update_series' && !$skipCars;
         if ($skipCars) {
             $row['existing_car_ids'] = $existingCarIds;
             $row['existing_car_names'] = price_import_car_names_for_ids($existingCarIds, $carModels);
@@ -1050,9 +1156,16 @@ function price_import_build_preview(PDO $pdo, array $parsedRows): array
     foreach ($parsedRows as $index => $row) {
         $visualId = (string) ($row['visual_id'] ?? '');
         $existing = $existingByVisualId[$visualId] ?? null;
+        $existingSeries = null;
+        if ($existing === null && $visualId !== '') {
+            $existingSeries = price_import_find_series_by_visual_id($pdo, $visualId);
+        }
         $existingProductId = $existing ? (int) $existing['id'] : null;
+        $existingSeriesId = $existingSeries ? (int) $existingSeries['id'] : null;
+        $action = $existing ? 'update' : ($existingSeries ? 'update_series' : 'create');
+        $entityType = $existing ? 'product' : ($existingSeries ? 'series' : 'product');
         $existingCarIds = $existingProductId !== null ? ($existingCarIdsMap[$existingProductId] ?? []) : [];
-        $skipCars = $existing !== null && $existingCarIds !== [];
+        $skipCars = $action === 'update_series' || ($existing !== null && $existingCarIds !== []);
         $carMatches = $skipCars
             ? []
             : price_import_parse_car_string((string) ($row['cars_raw'] ?? ''), $carModels, $aliasMap);
@@ -1072,17 +1185,25 @@ function price_import_build_preview(PDO $pdo, array $parsedRows): array
             'pack_size' => $row['pack_size'] ?? null,
             'warranty' => (string) ($row['warranty'] ?? ''),
             'section_hint' => (string) ($row['section_hint'] ?? ''),
-            'action' => $existing ? 'update' : 'create',
+            'action' => $action,
+            'entity_type' => $entityType,
             'existing_product_id' => $existingProductId,
-            'existing_name' => $existing ? (string) $existing['name'] : null,
-            'existing_price_text' => $existing ? (string) ($existing['price_text'] ?? '') : null,
+            'existing_series_id' => $existingSeriesId,
+            'existing_name' => $existing
+                ? (string) $existing['name']
+                : ($existingSeries ? (string) $existingSeries['name'] : null),
+            'existing_price_text' => $existing
+                ? (string) ($existing['price_text'] ?? '')
+                : ($existingSeries ? (string) ($existingSeries['price_text'] ?? '') : null),
             'existing_pack_size' => $existing ? ($existing['pack_size'] !== null ? (int) $existing['pack_size'] : null) : null,
-            'category_id' => $existing ? null : $suggestedCategoryId,
+            'category_id' => $existing || $existingSeries ? null : $suggestedCategoryId,
             'category_suggested_id' => $suggestedCategoryId,
             'skip_cars' => $skipCars,
-            'needs_car_setup' => !$skipCars,
-            'existing_car_ids' => $skipCars ? $existingCarIds : [],
-            'existing_car_names' => $skipCars ? price_import_car_names_for_ids($existingCarIds, $carModels) : '',
+            'needs_car_setup' => $action !== 'update_series' && !$skipCars,
+            'existing_car_ids' => $skipCars && $existingProductId !== null ? $existingCarIds : [],
+            'existing_car_names' => $skipCars && $existingProductId !== null
+                ? price_import_car_names_for_ids($existingCarIds, $carModels)
+                : '',
             'car_matches' => $carMatches,
             'include' => true,
         ];
@@ -1196,7 +1317,7 @@ function price_import_apply_existing_fields(PDO $pdo, array $row, ?array $existi
         $existing = price_import_find_product_by_visual_id($pdo, $visualId);
     }
     if (!$existing) {
-        return false;
+        return price_import_apply_series_price($pdo, $row);
     }
 
     $productId = (int) $existing['id'];
@@ -1241,6 +1362,21 @@ function price_import_auto_apply_on_upload(PDO $pdo, array $preview, bool $saveA
             $ready = !empty($row['ready']);
             $skipCars = !empty($row['skip_cars']);
             $priceValid = trim((string) ($row['price_text'] ?? '')) !== '';
+
+            if ($action === 'update_series' && $priceValid) {
+                try {
+                    if (price_import_apply_series_price($pdo, $row)) {
+                        $updated++;
+                        $row['price_fields_applied'] = true;
+                    }
+                    $removedIndices[] = $index;
+                    continue;
+                } catch (Throwable $e) {
+                    $errors[] = 'ردیف ' . ($row['visual_id'] ?? '?') . ': ' . $e->getMessage();
+                    $remaining[] = $row;
+                    continue;
+                }
+            }
 
             if ($action === 'update' && $priceValid) {
                 try {
@@ -1577,6 +1713,23 @@ function price_import_apply_batch(
                 continue;
             }
 
+            $action = (string) ($merged['action'] ?? 'create');
+            if ($action === 'update_series') {
+                try {
+                    if (price_import_apply_series_price($pdo, $merged)) {
+                        $updated++;
+                        $appliedIndices[] = $index;
+                    } else {
+                        $skipped++;
+                    }
+                    continue;
+                } catch (Throwable $rowError) {
+                    $errors[] = 'ردیف ' . ($merged['visual_id'] ?? '?') . ': ' . $rowError->getMessage();
+                    $skipped++;
+                    continue;
+                }
+            }
+
             try {
                 $result = price_import_apply_row($pdo, $merged, $saveAliases);
                 if ($result['action'] === 'create') {
@@ -1647,25 +1800,30 @@ function price_import_apply_prices_only(PDO $pdo, array $parsedRows): array
                 continue;
             }
 
-            $existing = price_import_find_product_by_visual_id($pdo, $visualId);
-            if ($existing === null) {
-                $skip('محصول با این کد در سایت یافت نشد — فقط قیمت محصولات موجود به‌روز می‌شود');
+            $resolved = price_import_resolve_by_visual_id($pdo, $visualId);
+            if ($resolved === null) {
+                $skip('محصول یا سری کیت با این کد در سایت یافت نشد — فقط قیمت موارد موجود به‌روز می‌شود');
                 continue;
             }
 
             if ($name === '') {
-                $name = (string) ($existing['name'] ?? '');
+                $name = $resolved['name'];
             }
 
-            $existingPrice = trim((string) ($existing['price_text'] ?? ''));
+            $existingPrice = trim((string) ($resolved['price_text'] ?? ''));
             if ($existingPrice === $priceText) {
                 $skip('قیمت تغییر نکرد');
                 continue;
             }
 
             try {
-                $stmt = $pdo->prepare('UPDATE products SET price_text = ? WHERE id = ?');
-                $stmt->execute([$priceText, (int) $existing['id']]);
+                if ($resolved['entity'] === 'series') {
+                    $stmt = $pdo->prepare('UPDATE product_series SET price_text = ? WHERE id = ?');
+                    $stmt->execute([$priceText, (int) $resolved['id']]);
+                } else {
+                    $stmt = $pdo->prepare('UPDATE products SET price_text = ? WHERE id = ?');
+                    $stmt->execute([$priceText, (int) $resolved['id']]);
+                }
                 $updated++;
             } catch (Throwable $e) {
                 $skip($e->getMessage());

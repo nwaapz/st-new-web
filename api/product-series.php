@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/_common.php';
+require_once dirname(__DIR__) . '/cms/lib/search-text.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-series.php';
@@ -313,8 +314,16 @@ try {
         $categoryIds = array_values(array_unique($categoryIds));
     }
 
+    $q = search_normalize((string) ($_GET['q'] ?? ''));
+
     $where = ['published = 1'];
     $listParams = [];
+    if ($q !== '') {
+        $like = '%' . search_like_escape($q) . '%';
+        $where[] = '(' . search_name_sql('product_series.name') . ' LIKE ? OR '
+            . search_name_sql('product_series.visual_id') . ' LIKE ? OR product_series.slug LIKE ?)';
+        array_push($listParams, $like, $like, $like);
+    }
     if ($categoryIds !== []) {
         $where[] = cms_series_category_in_filter_sql('product_series', count($categoryIds));
         foreach ($categoryIds as $catId) {

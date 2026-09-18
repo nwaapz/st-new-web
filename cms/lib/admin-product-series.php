@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/admin-common.php';
+require_once __DIR__ . '/search-text.php';
 require_once __DIR__ . '/product-series-categories.php';
 require_once __DIR__ . '/admin-products.php';
 
@@ -101,7 +102,8 @@ function admin_product_series_list(PDO $pdo, string $q = '', int $page = 1, int 
     admin_product_series_ensure_schema($pdo);
     $page = max(1, $page);
     $categoryId = max(0, $categoryId);
-    $q = trim($q);
+    $rawQ = trim($q);
+    $q = search_normalize($rawQ);
     $where = '1=1';
     $params = [];
     if ($categoryId > 0) {
@@ -109,9 +111,10 @@ function admin_product_series_list(PDO $pdo, string $q = '', int $page = 1, int 
         $params[] = $categoryId;
     }
     if ($q !== '') {
-        $where .= ' AND (s.name LIKE ? OR s.visual_id LIKE ? OR s.slug LIKE ?)';
-        $like = '%' . $q . '%';
-        $params = [$like, $like, $like];
+        $like = '%' . search_like_escape($q) . '%';
+        $where .= ' AND (' . search_name_sql('s.name') . ' LIKE ? OR '
+            . search_name_sql('s.visual_id') . ' LIKE ? OR s.slug LIKE ?)';
+        array_push($params, $like, $like, $like);
     }
 
     $countStmt = $pdo->prepare("SELECT COUNT(*) FROM product_series s WHERE {$where}");

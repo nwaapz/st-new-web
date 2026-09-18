@@ -455,6 +455,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
         $index = (int) ($row['index'] ?? 0);
         $ready = !empty($row['ready']);
         $action = (string) ($row['action'] ?? 'create');
+        $entityType = (string) ($row['entity_type'] ?? 'product');
         $issues = is_array($row['issues'] ?? null) ? $row['issues'] : [];
         $needsCategory = $action === 'create' && (int) ($row['category_id'] ?? 0) <= 0;
         $needsPrice = trim((string) ($row['price_text'] ?? '')) === '';
@@ -473,7 +474,18 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
               <strong><?= cms_h((string) ($row['name'] ?? '')) ?></strong>
               <div class="price-import-row-card__meta">
                 <span dir="ltr">کد <?= cms_h((string) ($row['visual_id'] ?? '')) ?></span>
-                <span><?= $action === 'update' ? 'به‌روزرسانی قیمت' : 'محصول جدید' ?></span>
+                <?php if ($entityType === 'series'): ?>
+                  <span class="price-import-badge">سری کیت</span>
+                <?php endif; ?>
+                <span><?php
+                  if ($action === 'update_series') {
+                      echo 'به‌روزرسانی قیمت سری کیت';
+                  } elseif ($action === 'update') {
+                      echo 'به‌روزرسانی قیمت';
+                  } else {
+                      echo 'محصول جدید';
+                  }
+                ?></span>
                 <?php if (!empty($row['section_hint'])): ?>
                   <span>بخش: <?= cms_h((string) $row['section_hint']) ?></span>
                 <?php endif; ?>
@@ -519,7 +531,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
           <div class="price-import-row-card__body">
             <div class="price-import-field<?= $needsName ? ' needs-attention' : '' ?>">
-              <span class="price-import-field__label">نام محصول</span>
+              <span class="price-import-field__label"><?= $action === 'update_series' ? 'نام سری کیت' : 'نام محصول' ?></span>
               <?php if ($action === 'create'): ?>
                 <input class="cms-input" name="rows[<?= $index ?>][name]" value="<?= cms_h((string) ($row['name'] ?? '')) ?>">
               <?php else: ?>
@@ -530,21 +542,22 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 
             <div class="price-import-field<?= $needsPrice ? ' needs-attention' : '' ?>">
               <span class="price-import-field__label">قیمت (تومان)</span>
-              <?php if ($priceFieldsApplied && $action === 'update'): ?>
+              <?php if ($priceFieldsApplied && ($action === 'update' || $action === 'update_series')): ?>
                 <div><?= cms_h((string) ($row['price_text'] ?? '')) ?></div>
                 <input type="hidden" name="rows[<?= $index ?>][price_text]" value="<?= cms_h((string) ($row['price_text'] ?? '')) ?>">
                 <span class="price-import-field__hint">در سرور ذخیره شد</span>
               <?php else: ?>
                 <input class="cms-input" name="rows[<?= $index ?>][price_text]" value="<?= cms_h((string) ($row['price_text'] ?? '')) ?>">
               <?php endif; ?>
-              <?php if ($action === 'update' && !empty($row['existing_price_text'])): ?>
+              <?php if (($action === 'update' || $action === 'update_series') && !empty($row['existing_price_text'])): ?>
                 <span class="price-import-field__hint">قبلی: <?= cms_h((string) $row['existing_price_text']) ?></span>
               <?php endif; ?>
             </div>
 
+            <?php if ($action !== 'update_series'): ?>
             <div class="price-import-field<?= $needsPack ? ' needs-attention' : '' ?>">
               <span class="price-import-field__label">تعداد در کارتن</span>
-              <?php if ($priceFieldsApplied && $action === 'update'): ?>
+              <?php if ($priceFieldsApplied && ($action === 'update' || $action === 'update_series')): ?>
                 <div><?= cms_h((string) ($row['pack_size'] ?? '—')) ?></div>
                 <input type="hidden" name="rows[<?= $index ?>][pack_size]" value="<?= cms_h((string) ($row['pack_size'] ?? '')) ?>">
               <?php else: ?>
@@ -554,6 +567,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
                 <span class="price-import-field__hint">قبلی: <?= cms_h((string) $row['existing_pack_size']) ?></span>
               <?php endif; ?>
             </div>
+            <?php endif; ?>
 
             <?php if ($action === 'create'): ?>
               <div class="price-import-field<?= $needsCategory ? ' needs-attention' : '' ?>">
@@ -571,7 +585,10 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
             <?php endif; ?>
 
             <div class="price-import-field price-import-field--wide">
-              <?php if ($skipCars): ?>
+              <?php if ($action === 'update_series'): ?>
+                <span class="price-import-field__label">سری کیت</span>
+                <p class="price-import-field__hint price-import-skip-cars-note">فقط قیمت این سری کیت به‌روز می‌شود.</p>
+              <?php elseif ($skipCars): ?>
                 <span class="price-import-field__label">خودروها</span>
                 <p class="price-import-field__hint price-import-skip-cars-note">خودروها از قبل ثبت شده — فقط قیمت به‌روز می‌شود.</p>
                 <?php if (!empty($row['existing_car_names'])): ?>

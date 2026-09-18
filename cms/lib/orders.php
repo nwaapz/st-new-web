@@ -926,6 +926,19 @@ function orders_admin_lookup_catalog_price(PDO $pdo, array $item): ?string
         if ($price !== null) {
             return $price;
         }
+
+        try {
+            $price = $lookupProduct(
+                $pdo,
+                'SELECT price_text FROM product_series WHERE visual_id = ? LIMIT 1',
+                [$visualId]
+            );
+            if ($price !== null) {
+                return $price;
+            }
+        } catch (Throwable $e) {
+            // product_series may be unavailable on older installs
+        }
     }
 
     $name = isset($item['name']) ? trim((string) $item['name']) : '';

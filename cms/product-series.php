@@ -6,6 +6,7 @@ require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/product-car-models.php';
 require_once __DIR__ . '/lib/product-categories.php';
 require_once __DIR__ . '/lib/product-series-categories.php';
+require_once __DIR__ . '/lib/search-text.php';
 require_once __DIR__ . '/lib/admin-audit.php';
 
 const SERIES_GALLERY_MAX = 12;
@@ -152,6 +153,7 @@ product_series_ensure_schema($pdo);
 $edit = null;
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
 $listCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
+$listSearchQ = trim((string) ($_GET['q'] ?? ''));
 $selectedProductIds = [];
 $selectedCategoryIds = [];
 $gallery = [];
@@ -352,6 +354,13 @@ if (!$showForm) {
     if ($listCategoryId > 0) {
         $where[] = cms_series_category_filter_sql('s');
         $listParams[] = $listCategoryId;
+    }
+    if ($listSearchQ !== '') {
+        $qNorm = search_normalize($listSearchQ);
+        $like = '%' . search_like_escape($qNorm) . '%';
+        $where[] = '(' . search_name_sql('s.name') . ' LIKE ? OR '
+            . search_name_sql('s.visual_id') . ' LIKE ? OR s.slug LIKE ?)';
+        array_push($listParams, $like, $like, $like);
     }
     $whereSql = implode(' AND ', $where);
     $categoryNamesSql = cms_series_category_names_sql('s');
@@ -555,17 +564,24 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
       </option>
     <?php endforeach; ?>
   </select>
+  <input class="cms-input" type="search" name="q" value="<?= cms_h($listSearchQ) ?>" placeholder="جستجو با نام یا شناسه…" autocomplete="off">
   <button class="cms-btn cms-btn--secondary" type="submit">فیلتر</button>
-  <?php if ($listCategoryId > 0): ?>
+  <?php if ($listCategoryId > 0 || $listSearchQ !== ''): ?>
     <a class="cms-btn cms-btn--ghost" href="product-series.php">پاک کردن</a>
   <?php endif; ?>
 </form>
 <div class="cms-panel">
   <?php if ($items === []): ?>
-    <p class="cms-empty">هنوز سری ثبت نشده. <a href="product-series.php?new=1">اولین سری را اضافه کنید</a>.</p>
+    <p class="cms-empty">
+      <?php if ($listSearchQ !== '' || $listCategoryId > 0): ?>
+        سری‌ای با این فیلتر یافت نشد.
+      <?php else: ?>
+        هنوز سری ثبت نشده. <a href="product-series.php?new=1">اولین سری را اضافه کنید</a>.
+      <?php endif; ?>
+    </p>
   <?php else: ?>
   <table class="cms-table">
-    <thead><tr><th>سری</th><th>شناسه</th><th>اسلاگ</th><th>دسته</th><th>قطعات</th><th>وضعیت</th><th></th></tr></thead>
+    <thead><tr><th>سری</th><th>شناسه</th><th>اسلاگ</th><th>دسته</th><th>قیمت</th><th>قطعات</th><th>وضعیت</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($items as $item): ?>
       <tr>
@@ -573,6 +589,7 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
         <td dir="ltr"><?= cms_h($item['visual_id'] ?? '') ?></td>
         <td dir="ltr"><?= cms_h($item['slug']) ?></td>
         <td><?= cms_h($item['category_names'] ?? '') ?></td>
+        <td><?= cms_h($item['price_text'] ?? '') ?></td>
         <td><?= (int) $item['product_count'] ?></td>
         <td><?= (int) $item['published'] ? 'فعال' : 'پیش‌نویس' ?></td>
         <td>
