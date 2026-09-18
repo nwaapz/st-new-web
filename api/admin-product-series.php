@@ -41,7 +41,8 @@ try {
 
         $q = trim((string) ($_GET['q'] ?? ''));
         $page = max(1, (int) ($_GET['page'] ?? 1));
-        $list = admin_product_series_list($pdo, $q, $page);
+        $categoryId = max(0, (int) ($_GET['category_id'] ?? 0));
+        $list = admin_product_series_list($pdo, $q, $page, $categoryId);
         api_json([
             'ok' => true,
             'series_list' => $list['items'],

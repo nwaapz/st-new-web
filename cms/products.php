@@ -7,6 +7,8 @@ require_once __DIR__ . '/lib/admin-audit.php';
 require_once __DIR__ . '/lib/car-model-factories.php';
 require_once __DIR__ . '/lib/product-car-models.php';
 require_once __DIR__ . '/lib/product-categories.php';
+require_once __DIR__ . '/lib/product-series-categories.php';
+require_once __DIR__ . '/lib/admin-products.php';
 require_once __DIR__ . '/lib/search-text.php';
 
 cms_require_login();
@@ -21,6 +23,7 @@ const PRODUCTS_PAGE_SIZE = 10;
 $productsListQs = static function (
     string $q = '',
     int $page = 1,
+    int $categoryId = 0,
     array $extra = []
 ): string {
     $params = $extra;
@@ -29,6 +32,9 @@ $productsListQs = static function (
     }
     if ($page > 1) {
         $params['page'] = (string) $page;
+    }
+    if ($categoryId > 0) {
+        $params['category_id'] = (string) $categoryId;
     }
     $qs = http_build_query($params);
 
@@ -257,9 +263,11 @@ $selectedCategoryIds = [];
 $carModelCategoryMap = [];
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
 $searchQ = trim((string) ($_GET['q'] ?? ''));
+$listCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
 $listPage = max(1, (int) ($_GET['page'] ?? 1));
 $listReturnQ = $searchQ;
 $listReturnPage = $listPage;
+$listReturnCategoryId = $listCategoryId;
 
 $categories = $pdo->query(
     'SELECT id, name FROM categories ORDER BY sort_order ASC, name ASC'
@@ -287,9 +295,12 @@ if (isset($_GET['edit'])) {
     $carModelCategoryMap = cms_product_load_car_model_categories($pdo, (int) $edit['id']);
 }
 
+cms_series_ensure_categories_schema($pdo);
+
 if (isset($_GET['delete'])) {
     $deleteQ = trim((string) ($_GET['q'] ?? ''));
     $deletePage = max(1, (int) ($_GET['page'] ?? 1));
+    $deleteCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
     $delId = (int) $_GET['delete'];
     $delStmt = $pdo->prepare('SELECT id, name FROM products WHERE id = ? LIMIT 1');
     $delStmt->execute([$delId]);
@@ -300,7 +311,7 @@ if (isset($_GET['delete'])) {
         cms_audit_catalog_delete($pdo, 'product.delete', 'product', $delId, (string) $delRow['name']);
     }
     cms_flash('محصول حذف شد');
-    cms_redirect($productsListQs($deleteQ, $deletePage));
+    cms_redirect($productsListQs($deleteQ, $deletePage, $deleteCategoryId));
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -308,6 +319,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? 'save');
     $returnQ = trim((string) ($_POST['return_q'] ?? ''));
     $returnPage = max(1, (int) ($_POST['return_page'] ?? 1));
+    $returnCategoryId = max(0, (int) ($_POST['return_category_id'] ?? 0));
     try {
         $categoryId1 = (int) ($_POST['category_id_1'] ?? 0);
         $categoryId2 = (int) ($_POST['category_id_2'] ?? 0);
@@ -521,14 +533,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $id > 0
         );
         cms_flash(($id > 0 ? 'محصول به‌روز شد' : 'محصول اضافه شد') . $overrideMissingWarning);
-        cms_redirect($productsListQs($returnQ, $returnPage));
+        cms_redirect($productsListQs($returnQ, $returnPage, $returnCategoryId));
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
         cms_flash($e->getMessage(), 'error');
         if ($id > 0) {
-            cms_redirect($productsListQs($returnQ, $returnPage, ['edit' => (string) $id]));
+            cms_redirect($productsListQs($returnQ, $returnPage, $returnCategoryId, ['edit' => (string) $id]));
         } else {
             cms_redirect('products.php?new=1');
         }
@@ -545,12 +557,19 @@ $productFactoryNamesSql = cms_product_factory_names_sql('p');
 $productCategoryNamesSql = cms_product_category_names_sql('p');
 $primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
 $items = [];
+$categorySeriesItems = [];
 $totalRows = 0;
 $totalPages = 1;
 
 if (!$showForm) {
     $where = ['1=1'];
     $listParams = [];
+    if ($listCategoryId > 0) {
+        $where[] = cms_product_effective_category_in_filter_sql('p', 1);
+        $listParams[] = $listCategoryId;
+        $listParams[] = $listCategoryId;
+        $categorySeriesItems = admin_series_list_for_category($pdo, $listCategoryId);
+    }
     if ($searchQ !== '') {
         $nameLike = '%' . search_like_escape(search_normalize($searchQ)) . '%';
         $idLike = '%' . search_like_escape($searchQ) . '%';
@@ -612,6 +631,7 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   <input type="hidden" name="action" id="product-form-action" value="save">
   <input type="hidden" name="return_q" value="<?= cms_h($listReturnQ) ?>">
   <input type="hidden" name="return_page" value="<?= (int) $listReturnPage ?>">
+  <input type="hidden" name="return_category_id" value="<?= (int) $listReturnCategoryId ?>">
 
   <fieldset class="cms-field" style="border:0;padding:0;margin:0 0 1rem">
     <legend class="cms-label" style="padding:0;margin-bottom:.5rem">مدل‌های خودرو (کارخانه / مدل)</legend>
@@ -813,17 +833,47 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   </label>
   <div class="cms-btn-row">
     <button class="cms-btn" type="submit" onclick="document.getElementById('product-form-action').value='save'">ذخیره</button>
-    <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($listReturnQ, $listReturnPage)) ?>">بازگشت به لیست</a>
+    <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($listReturnQ, $listReturnPage, $listReturnCategoryId)) ?>">بازگشت به لیست</a>
   </div>
 </form>
 <?php else: ?>
 <form class="cms-search" method="get" action="products.php">
+  <select class="cms-select" name="category_id" style="min-width:12rem">
+    <option value="0">همه دسته‌ها</option>
+    <?php foreach ($categories as $c): ?>
+      <option value="<?= (int) $c['id'] ?>" <?= $listCategoryId === (int) $c['id'] ? 'selected' : '' ?>>
+        <?= cms_h($c['name']) ?>
+      </option>
+    <?php endforeach; ?>
+  </select>
   <input class="cms-input" type="search" name="q" value="<?= cms_h($searchQ) ?>" placeholder="جستجو با نام یا شناسه…" autocomplete="off">
-  <button class="cms-btn cms-btn--secondary" type="submit">جستجو</button>
-  <?php if ($searchQ !== ''): ?>
+  <button class="cms-btn cms-btn--secondary" type="submit">فیلتر</button>
+  <?php if ($searchQ !== '' || $listCategoryId > 0): ?>
     <a class="cms-btn cms-btn--ghost" href="products.php">پاک کردن</a>
   <?php endif; ?>
 </form>
+
+<?php if ($listCategoryId > 0 && $categorySeriesItems !== []): ?>
+<div class="cms-panel" style="margin-bottom:1rem">
+  <h2 style="margin:0 0 .75rem;font-size:1rem">سری‌های این دسته</h2>
+  <table class="cms-table">
+    <thead><tr><th>سری کیت</th><th>شناسه</th><th>دسته</th><th>قطعات</th><th></th></tr></thead>
+    <tbody>
+    <?php foreach ($categorySeriesItems as $seriesItem): ?>
+      <tr>
+        <td><?= cms_h($seriesItem['name']) ?></td>
+        <td dir="ltr"><?= cms_h($seriesItem['visual_id']) ?></td>
+        <td><?= cms_h($seriesItem['category_names']) ?></td>
+        <td><?= (int) $seriesItem['product_count'] ?></td>
+        <td>
+          <a class="cms-btn cms-btn--secondary" href="product-series.php?edit=<?= (int) $seriesItem['id'] ?>">ویرایش</a>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
+<?php endif; ?>
 
 <div class="cms-panel">
   <?php if ($items === []): ?>
@@ -851,8 +901,8 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
         <td><?= cms_h($item['price_text'] ?? '') ?></td>
         <td>
           <div class="cms-btn-row" style="margin-top:0">
-            <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage, ['edit' => (string) (int) $item['id']])) ?>">ویرایش</a>
-            <a class="cms-btn cms-btn--ghost" href="<?= cms_h($productsListQs($searchQ, $listPage, ['delete' => (string) (int) $item['id']])) ?>" onclick="return confirm('حذف؟')">حذف</a>
+            <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage, $listCategoryId, ['edit' => (string) (int) $item['id']])) ?>">ویرایش</a>
+            <a class="cms-btn cms-btn--ghost" href="<?= cms_h($productsListQs($searchQ, $listPage, $listCategoryId, ['delete' => (string) (int) $item['id']])) ?>" onclick="return confirm('حذف؟')">حذف</a>
           </div>
         </td>
       </tr>
@@ -863,11 +913,11 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   <?php if ($totalPages > 1): ?>
     <nav class="cms-orders-pager" aria-label="صفحه‌بندی محصولات" style="margin-top:1rem">
       <?php if ($listPage > 1): ?>
-        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage - 1)) ?>">قبلی</a>
+        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage - 1, $listCategoryId)) ?>">قبلی</a>
       <?php endif; ?>
       <span class="cms-muted"><?= (int) $listPage ?> / <?= (int) $totalPages ?></span>
       <?php if ($listPage < $totalPages): ?>
-        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage + 1)) ?>">بعدی</a>
+        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($productsListQs($searchQ, $listPage + 1, $listCategoryId)) ?>">بعدی</a>
       <?php endif; ?>
     </nav>
   <?php endif; ?>

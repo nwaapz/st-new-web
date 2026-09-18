@@ -297,9 +297,30 @@ try {
 
     $carModelId = isset($_GET['car_model_id']) ? (int) $_GET['car_model_id'] : 0;
     $factoryId = isset($_GET['factory_id']) ? (int) $_GET['factory_id'] : 0;
+    $categoryId = isset($_GET['category_id']) ? (int) $_GET['category_id'] : 0;
+    $categoryIds = [];
+    if (isset($_GET['category_ids'])) {
+        foreach (explode(',', (string) $_GET['category_ids']) as $part) {
+            $idPart = (int) trim($part);
+            if ($idPart > 0) {
+                $categoryIds[] = $idPart;
+            }
+        }
+        $categoryIds = array_values(array_unique($categoryIds));
+    }
+    if ($categoryId > 0) {
+        $categoryIds[] = $categoryId;
+        $categoryIds = array_values(array_unique($categoryIds));
+    }
 
     $where = ['published = 1'];
     $listParams = [];
+    if ($categoryIds !== []) {
+        $where[] = cms_series_category_in_filter_sql('product_series', count($categoryIds));
+        foreach ($categoryIds as $catId) {
+            $listParams[] = $catId;
+        }
+    }
     if ($carModelId > 0) {
         $where[] = cms_series_car_model_filter_sql('product_series');
         $listParams[] = $carModelId;

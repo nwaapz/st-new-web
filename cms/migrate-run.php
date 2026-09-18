@@ -195,6 +195,13 @@ try {
         $log[] = 'product_series_categories already exists';
     }
 
+    require_once __DIR__ . '/lib/product-series-categories.php';
+    require_once __DIR__ . '/lib/product-categories.php';
+    cms_series_ensure_categories_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
+    $seriesCategoryBackfill = cms_series_backfill_categories_from_members($pdo);
+    $log[] = 'Backfilled product_series_categories from member products: ' . $seriesCategoryBackfill . ' series';
+
     $seriesImagesExists = $pdo->query("SHOW TABLES LIKE 'product_series_images'")->fetchAll();
     if (count($seriesImagesExists) === 0) {
         $pdo->exec(

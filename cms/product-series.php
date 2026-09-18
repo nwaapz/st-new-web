@@ -151,6 +151,7 @@ product_series_ensure_schema($pdo);
 
 $edit = null;
 $showForm = isset($_GET['new']) || isset($_GET['edit']);
+$listCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
 $selectedProductIds = [];
 $selectedCategoryIds = [];
 $gallery = [];
@@ -344,12 +345,27 @@ if ($showForm && isset($_GET['gallery_extra']) && $edit) {
     $gallery[] = series_blank_gallery_slide();
 }
 
-$items = $pdo->query(
-    'SELECT s.*,
-            (SELECT COUNT(*) FROM product_series_items i WHERE i.series_id = s.id) AS product_count
-     FROM product_series s
-     ORDER BY s.sort_order ASC, s.name ASC'
-)->fetchAll();
+$items = [];
+if (!$showForm) {
+    $where = ['1=1'];
+    $listParams = [];
+    if ($listCategoryId > 0) {
+        $where[] = cms_series_category_filter_sql('s');
+        $listParams[] = $listCategoryId;
+    }
+    $whereSql = implode(' AND ', $where);
+    $categoryNamesSql = cms_series_category_names_sql('s');
+    $listStmt = $pdo->prepare(
+        "SELECT s.*,
+                (SELECT COUNT(*) FROM product_series_items i WHERE i.series_id = s.id) AS product_count,
+                {$categoryNamesSql} AS category_names
+         FROM product_series s
+         WHERE {$whereSql}
+         ORDER BY s.sort_order ASC, s.name ASC"
+    );
+    $listStmt->execute($listParams);
+    $items = $listStmt->fetchAll();
+}
 
 $imagePickerOptions = series_image_picker_options(
     (string) ($edit['image'] ?? ''),
@@ -530,18 +546,33 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
   </div>
 </form>
 <?php else: ?>
+<form class="cms-search" method="get" action="product-series.php">
+  <select class="cms-select" name="category_id" style="min-width:12rem">
+    <option value="0">همه دسته‌ها</option>
+    <?php foreach ($categories as $c): ?>
+      <option value="<?= (int) $c['id'] ?>" <?= $listCategoryId === (int) $c['id'] ? 'selected' : '' ?>>
+        <?= cms_h($c['name']) ?>
+      </option>
+    <?php endforeach; ?>
+  </select>
+  <button class="cms-btn cms-btn--secondary" type="submit">فیلتر</button>
+  <?php if ($listCategoryId > 0): ?>
+    <a class="cms-btn cms-btn--ghost" href="product-series.php">پاک کردن</a>
+  <?php endif; ?>
+</form>
 <div class="cms-panel">
   <?php if ($items === []): ?>
     <p class="cms-empty">هنوز سری ثبت نشده. <a href="product-series.php?new=1">اولین سری را اضافه کنید</a>.</p>
   <?php else: ?>
   <table class="cms-table">
-    <thead><tr><th>سری</th><th>شناسه</th><th>اسلاگ</th><th>قطعات</th><th>وضعیت</th><th></th></tr></thead>
+    <thead><tr><th>سری</th><th>شناسه</th><th>اسلاگ</th><th>دسته</th><th>قطعات</th><th>وضعیت</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($items as $item): ?>
       <tr>
         <td><div class="cms-list-name"><?php cms_list_thumb($item['image'] ?? null); ?><span><?= cms_h($item['name']) ?></span></div></td>
         <td dir="ltr"><?= cms_h($item['visual_id'] ?? '') ?></td>
         <td dir="ltr"><?= cms_h($item['slug']) ?></td>
+        <td><?= cms_h($item['category_names'] ?? '') ?></td>
         <td><?= (int) $item['product_count'] ?></td>
         <td><?= (int) $item['published'] ? 'فعال' : 'پیش‌نویس' ?></td>
         <td>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/product-categories.php';
+require_once __DIR__ . '/lib/product-series-categories.php';
 require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
@@ -32,6 +33,7 @@ function category_ensure_schema(PDO $pdo): void
 
 category_ensure_schema($pdo);
 cms_ensure_product_categories_schema($pdo);
+cms_series_ensure_categories_schema($pdo);
 
 if (isset($_GET['edit'])) {
     $stmt = $pdo->prepare('SELECT * FROM categories WHERE id = ?');
@@ -135,7 +137,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $items = $pdo->query(
     'SELECT c.*,
-            (SELECT COUNT(*) FROM product_categories pc WHERE pc.category_id = c.id) AS product_count
+            (
+              (SELECT COUNT(*) FROM product_categories pc WHERE pc.category_id = c.id)
+              + (SELECT COUNT(*) FROM product_series_categories sc WHERE sc.category_id = c.id)
+            ) AS product_count
      FROM categories c
      ORDER BY c.sort_order ASC, c.name ASC'
 )->fetchAll();
@@ -196,7 +201,7 @@ cms_layout_start('دسته‌بندی‌ها', cms_current_username(), 'shop');
     <p class="cms-empty">هنوز دسته‌ای ثبت نشده. <a href="categories.php?new=1">اولین مورد را اضافه کنید</a>.</p>
   <?php else: ?>
   <table class="cms-table">
-    <thead><tr><th>دسته</th><th>اسلاگ</th><th>محصولات</th><th>وضعیت</th><th></th></tr></thead>
+    <thead><tr><th>دسته</th><th>اسلاگ</th><th>محصولات / سری</th><th>وضعیت</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($items as $item): ?>
       <tr>

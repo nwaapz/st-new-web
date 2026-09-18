@@ -6,6 +6,7 @@ require_once __DIR__ . '/search-text.php';
 require_once __DIR__ . '/shop-search-intent.php';
 require_once __DIR__ . '/product-categories.php';
 require_once __DIR__ . '/product-car-models.php';
+require_once __DIR__ . '/product-series-categories.php';
 
 const ADMIN_PRODUCT_GALLERY_MAX = 12;
 const ADMIN_PRODUCTS_PAGE_SIZE = 20;
@@ -206,6 +207,43 @@ function admin_products_list(
         'total_pages' => $totalPages,
         'search_intent' => $searchIntent,
     ];
+}
+
+/**
+ * @return list<array{id:int,name:string,visual_id:string,category_names:string,product_count:int,published:bool}>
+ */
+function admin_series_list_for_category(PDO $pdo, int $categoryId, int $limit = 20): array
+{
+    admin_products_ensure_schema($pdo);
+    cms_series_ensure_categories_schema($pdo);
+    $categoryId = max(0, $categoryId);
+    if ($categoryId <= 0) {
+        return [];
+    }
+    $limit = max(1, min(100, $limit));
+
+    $sql = 'SELECT s.id, s.name, s.visual_id, s.published,
+                   ' . cms_series_category_names_sql('s') . ' AS category_names,
+                   (SELECT COUNT(*) FROM product_series_items i WHERE i.series_id = s.id) AS product_count
+            FROM product_series s
+            WHERE ' . cms_series_category_filter_sql('s') . '
+            ORDER BY s.sort_order ASC, s.name ASC
+            LIMIT ' . (int) $limit;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$categoryId]);
+    $items = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $items[] = [
+            'id' => (int) $row['id'],
+            'name' => (string) ($row['name'] ?? ''),
+            'visual_id' => (string) ($row['visual_id'] ?? ''),
+            'category_names' => (string) ($row['category_names'] ?? ''),
+            'product_count' => (int) ($row['product_count'] ?? 0),
+            'published' => (int) ($row['published'] ?? 0) === 1,
+        ];
+    }
+
+    return $items;
 }
 
 function admin_products_get(PDO $pdo, int $id): ?array

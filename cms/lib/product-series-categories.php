@@ -36,6 +36,77 @@ function cms_series_category_names_sql(string $seriesAlias = 's'): string
              WHERE sc.series_id = ' . $seriesAlias . '.id)';
 }
 
+function cms_series_category_filter_sql(string $seriesAlias = 's'): string
+{
+    return cms_series_category_in_filter_sql($seriesAlias, 1);
+}
+
+function cms_series_category_in_filter_sql(string $seriesAlias, int $count): string
+{
+    if ($count <= 0) {
+        return '1=1';
+    }
+    $placeholders = implode(',', array_fill(0, $count, '?'));
+
+    return 'EXISTS (
+        SELECT 1 FROM product_series_categories sc_filter
+        WHERE sc_filter.series_id = ' . $seriesAlias . '.id
+          AND sc_filter.category_id IN (' . $placeholders . ')
+    )';
+}
+
+/**
+ * One-time helper: assign primary member-product category to series with no categories.
+ */
+function cms_series_backfill_categories_from_members(PDO $pdo): int
+{
+    cms_series_ensure_categories_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
+
+    $seriesRows = $pdo->query(
+        'SELECT s.id
+         FROM product_series s
+         WHERE NOT EXISTS (
+             SELECT 1 FROM product_series_categories sc WHERE sc.series_id = s.id
+         )'
+    )->fetchAll() ?: [];
+
+    if ($seriesRows === []) {
+        return 0;
+    }
+
+    $categoryStmt = $pdo->prepare(
+        'SELECT pc.category_id
+         FROM product_series_items psi
+         JOIN product_categories pc ON pc.product_id = psi.product_id
+         WHERE psi.series_id = ?
+         ORDER BY psi.sort_order ASC, psi.product_id ASC, pc.sort_order ASC, pc.category_id ASC
+         LIMIT 1'
+    );
+    $insertStmt = $pdo->prepare(
+        'INSERT IGNORE INTO product_series_categories (series_id, category_id, sort_order) VALUES (?, ?, 0)'
+    );
+
+    $count = 0;
+    foreach ($seriesRows as $row) {
+        $seriesId = (int) ($row['id'] ?? 0);
+        if ($seriesId <= 0) {
+            continue;
+        }
+        $categoryStmt->execute([$seriesId]);
+        $categoryId = (int) $categoryStmt->fetchColumn();
+        if ($categoryId <= 0) {
+            continue;
+        }
+        $insertStmt->execute([$seriesId, $categoryId]);
+        if ($insertStmt->rowCount() > 0) {
+            $count++;
+        }
+    }
+
+    return $count;
+}
+
 /** @return list<int> */
 function cms_series_load_category_ids(PDO $pdo, int $seriesId): array
 {

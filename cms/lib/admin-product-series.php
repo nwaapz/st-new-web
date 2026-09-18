@@ -96,13 +96,18 @@ function admin_series_load_product_ids(PDO $pdo, int $seriesId): array
 /**
  * @return array{items:list<array<string,mixed>>,total:int,page:int,total_pages:int}
  */
-function admin_product_series_list(PDO $pdo, string $q = '', int $page = 1): array
+function admin_product_series_list(PDO $pdo, string $q = '', int $page = 1, int $categoryId = 0): array
 {
     admin_product_series_ensure_schema($pdo);
     $page = max(1, $page);
+    $categoryId = max(0, $categoryId);
     $q = trim($q);
     $where = '1=1';
     $params = [];
+    if ($categoryId > 0) {
+        $where .= ' AND ' . cms_series_category_filter_sql('s');
+        $params[] = $categoryId;
+    }
     if ($q !== '') {
         $where .= ' AND (s.name LIKE ? OR s.visual_id LIKE ? OR s.slug LIKE ?)';
         $like = '%' . $q . '%';
