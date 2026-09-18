@@ -122,6 +122,7 @@ try {
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    error_log('[admin-orders] ' . $e->getMessage());
-    api_error('خطای سرور', 500);
+    error_log('[admin-orders] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    $message = trim($e->getMessage());
+    api_error($message !== '' ? $message : 'خطای سرور', 500);
 }

@@ -1731,25 +1731,24 @@ function orders_admin_apply_action(
         if ($current !== 'submitted') {
             throw new RuntimeException('تأیید انبار فقط برای سفارش تازه ثبت‌شده مجاز است');
         }
-        if ($prices === []) {
-            throw new RuntimeException('قبل از تأیید انبار، قیمت تومان همه اقلام را وارد کنید');
-        }
         $pdo->beginTransaction();
-        $updPrice = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
-        foreach ($prices as $itemId => $priceRaw) {
-            $itemId = (int) $itemId;
-            if ($itemId <= 0) {
-                continue;
+        if ($prices !== []) {
+            $updPrice = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
+            foreach ($prices as $itemId => $priceRaw) {
+                $itemId = (int) $itemId;
+                if ($itemId <= 0) {
+                    continue;
+                }
+                try {
+                    $normalized = invoices_normalize_price_text((string) $priceRaw);
+                } catch (InvalidArgumentException $e) {
+                    throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
+                }
+                if ($normalized === null || $normalized === '') {
+                    throw new RuntimeException('قیمت تومان همه اقلام برای تأیید انبار الزامی است');
+                }
+                $updPrice->execute([$normalized, $itemId, $orderId]);
             }
-            try {
-                $normalized = invoices_normalize_price_text((string) $priceRaw);
-            } catch (InvalidArgumentException $e) {
-                throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
-            }
-            if ($normalized === null || $normalized === '') {
-                throw new RuntimeException('قیمت تومان همه اقلام برای تأیید انبار الزامی است');
-            }
-            $updPrice->execute([$normalized, $itemId, $orderId]);
         }
         $pricedItems = orders_fetch_items($pdo, $orderId);
         if ($pricedItems === []) {
