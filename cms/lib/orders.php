@@ -755,46 +755,144 @@ function orders_serialize(array $order, array $items, array $events): array
     ];
 }
 
+function orders_admin_pricing_helpers_ready(): void
+{
+    if (!function_exists('invoices_normalize_price_text')) {
+        require_once __DIR__ . '/invoices.php';
+    }
+}
+
+function orders_admin_is_call_for_price(?string $text): bool
+{
+    $text = trim((string) $text);
+    if ($text === '') {
+        return true;
+    }
+
+    $label = function_exists('cms_call_for_price_label')
+        ? cms_call_for_price_label()
+        : 'تماس برای قیمت';
+    if ($text === $label) {
+        return true;
+    }
+
+    $lower = function_exists('mb_strtolower') ? mb_strtolower($text, 'UTF-8') : strtolower($text);
+    return str_contains($lower, 'تماس') && str_contains($lower, 'قیمت');
+}
+
 /**
- * Live catalog price for admin order pricing (independent of saved order line price).
+ * Normalize catalog / order price text to stored toman label when possible.
+ */
+function orders_admin_try_normalize_price(?string $raw): ?string
+{
+    orders_admin_pricing_helpers_ready();
+
+    $raw = trim((string) $raw);
+    if ($raw === '' || orders_admin_is_call_for_price($raw)) {
+        return null;
+    }
+
+    foreach ([$raw, str_replace('.', '', $raw)] as $candidate) {
+        $candidate = trim($candidate);
+        if ($candidate === '') {
+            continue;
+        }
+        try {
+            $normalized = invoices_normalize_price_text($candidate);
+            if ($normalized !== null) {
+                return $normalized;
+            }
+        } catch (Throwable $e) {
+            // try next candidate
+        }
+    }
+
+    return null;
+}
+
+/**
+ * @return list<string>
+ */
+function orders_admin_slug_variants(string $slug): array
+{
+    $slug = trim($slug);
+    if ($slug === '') {
+        return [];
+    }
+
+    $variants = [$slug];
+    $spaced = str_replace('-', ' ', $slug);
+    if ($spaced !== $slug) {
+        $variants[] = $spaced;
+    }
+    $dashed = preg_replace('/\s+/u', '-', $slug) ?? $slug;
+    if ($dashed !== $slug) {
+        $variants[] = $dashed;
+    }
+
+    return array_values(array_unique($variants));
+}
+
+/**
+ * @param array<string, mixed>|null $row
+ */
+function orders_admin_pick_catalog_price(?array $row): ?string
+{
+    if (!$row) {
+        return null;
+    }
+
+    $price = isset($row['price_text']) ? trim((string) $row['price_text']) : '';
+    if ($price === '' || orders_admin_is_call_for_price($price)) {
+        return null;
+    }
+
+    return orders_admin_try_normalize_price($price) ?? $price;
+}
+
+/**
+ * Default price for admin order pricing UI (catalog first, then parseable saved line).
  */
 function orders_admin_lookup_catalog_price(PDO $pdo, array $item): ?string
 {
-    $pickPrice = static function (?array $row): ?string {
-        if (!$row) {
-            return null;
-        }
-        $price = isset($row['price_text']) ? trim((string) $row['price_text']) : '';
-        return $price !== '' ? $price : null;
+    $lookupProduct = static function (PDO $pdo, string $sql, array $params): ?string {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+        return orders_admin_pick_catalog_price(is_array($row) ? $row : null);
     };
 
     $productId = isset($item['product_id']) && $item['product_id'] !== null
         ? (int) $item['product_id']
         : 0;
     if ($productId > 0) {
-        $stmt = $pdo->prepare('SELECT price_text FROM products WHERE id = ? LIMIT 1');
-        $stmt->execute([$productId]);
-        $price = $pickPrice($stmt->fetch() ?: null);
+        $price = $lookupProduct(
+            $pdo,
+            'SELECT price_text FROM products WHERE id = ? LIMIT 1',
+            [$productId]
+        );
         if ($price !== null) {
             return $price;
         }
     }
 
     $slug = isset($item['slug']) ? trim((string) $item['slug']) : '';
-    if ($slug !== '') {
-        $stmt = $pdo->prepare('SELECT price_text FROM products WHERE slug = ? LIMIT 1');
-        $stmt->execute([$slug]);
-        $price = $pickPrice($stmt->fetch() ?: null);
+    foreach (orders_admin_slug_variants($slug) as $slugVariant) {
+        $price = $lookupProduct(
+            $pdo,
+            'SELECT price_text FROM products WHERE slug = ? LIMIT 1',
+            [$slugVariant]
+        );
         if ($price !== null) {
             return $price;
         }
 
         try {
-            $seriesStmt = $pdo->prepare(
-                'SELECT price_text FROM product_series WHERE slug = ? LIMIT 1'
+            $price = $lookupProduct(
+                $pdo,
+                'SELECT price_text FROM product_series WHERE slug = ? LIMIT 1',
+                [$slugVariant]
             );
-            $seriesStmt->execute([$slug]);
-            $price = $pickPrice($seriesStmt->fetch() ?: null);
             if ($price !== null) {
                 return $price;
             }
@@ -803,11 +901,28 @@ function orders_admin_lookup_catalog_price(PDO $pdo, array $item): ?string
         }
     }
 
+    if ($slug !== '' && (function_exists('mb_strlen') ? mb_strlen($slug, 'UTF-8') : strlen($slug)) >= 3) {
+        $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $slug) . '%';
+        $price = $lookupProduct(
+            $pdo,
+            'SELECT price_text FROM products
+             WHERE slug LIKE ? ESCAPE \'\\\\\' OR name LIKE ? ESCAPE \'\\\\\'
+             ORDER BY published DESC, id DESC
+             LIMIT 1',
+            [$like, $like]
+        );
+        if ($price !== null) {
+            return $price;
+        }
+    }
+
     $visualId = isset($item['visual_id']) ? trim((string) $item['visual_id']) : '';
     if ($visualId !== '') {
-        $stmt = $pdo->prepare('SELECT price_text FROM products WHERE visual_id = ? LIMIT 1');
-        $stmt->execute([$visualId]);
-        $price = $pickPrice($stmt->fetch() ?: null);
+        $price = $lookupProduct(
+            $pdo,
+            'SELECT price_text FROM products WHERE visual_id = ? LIMIT 1',
+            [$visualId]
+        );
         if ($price !== null) {
             return $price;
         }
@@ -815,24 +930,49 @@ function orders_admin_lookup_catalog_price(PDO $pdo, array $item): ?string
 
     $name = isset($item['name']) ? trim((string) $item['name']) : '';
     if ($name !== '') {
-        $stmt = $pdo->prepare('SELECT price_text FROM products WHERE name = ? LIMIT 1');
-        $stmt->execute([$name]);
-        $price = $pickPrice($stmt->fetch() ?: null);
+        $price = $lookupProduct(
+            $pdo,
+            'SELECT price_text FROM products WHERE name = ? LIMIT 1',
+            [$name]
+        );
         if ($price !== null) {
             return $price;
         }
 
         try {
-            $seriesStmt = $pdo->prepare(
-                'SELECT price_text FROM product_series WHERE name = ? LIMIT 1'
+            $price = $lookupProduct(
+                $pdo,
+                'SELECT price_text FROM product_series WHERE name = ? LIMIT 1',
+                [$name]
             );
-            $seriesStmt->execute([$name]);
-            $price = $pickPrice($seriesStmt->fetch() ?: null);
             if ($price !== null) {
                 return $price;
             }
         } catch (Throwable $e) {
             // ignore
+        }
+
+        if ((function_exists('mb_strlen') ? mb_strlen($name, 'UTF-8') : strlen($name)) >= 3) {
+            $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $name) . '%';
+            $price = $lookupProduct(
+                $pdo,
+                'SELECT price_text FROM products
+                 WHERE name LIKE ? ESCAPE \'\\\\\'
+                 ORDER BY published DESC, id DESC
+                 LIMIT 1',
+                [$like]
+            );
+            if ($price !== null) {
+                return $price;
+            }
+        }
+    }
+
+    $savedLinePrice = isset($item['price_text']) ? trim((string) $item['price_text']) : '';
+    if ($savedLinePrice !== '') {
+        $fallback = orders_admin_try_normalize_price($savedLinePrice);
+        if ($fallback !== null) {
+            return $fallback;
         }
     }
 
@@ -913,6 +1053,7 @@ function orders_admin_serialize(array $order, array $items, array $events): arra
         static fn(array $row): int => (int) $row['quantity'],
         $serializedItems
     ));
+    $payload['pricing_api_version'] = 2;
 
     return $payload;
 }

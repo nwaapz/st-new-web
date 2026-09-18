@@ -32,6 +32,7 @@ try {
             $items = orders_fetch_items($pdo, $orderId);
             api_json([
                 'ok' => true,
+                'pricing_api_version' => 2,
                 'order' => orders_admin_serialize(
                     $order,
                     $items,
@@ -102,6 +103,7 @@ try {
     $items = orders_fetch_items($pdo, $orderId);
     $response = [
         'ok' => true,
+        'pricing_api_version' => 2,
         'message' => $result['message'],
         'order' => orders_admin_serialize(
             $order,
