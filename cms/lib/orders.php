@@ -752,12 +752,19 @@ function orders_admin_enrich_items(PDO $pdo, array $items): array
     $productStmt = $pdo->prepare(
         'SELECT price_text FROM products WHERE id = ? LIMIT 1'
     );
-    $seriesBySlugStmt = $pdo->prepare(
-        'SELECT price_text FROM product_series WHERE slug = ? AND published = 1 LIMIT 1'
-    );
-    $seriesByNameStmt = $pdo->prepare(
-        'SELECT price_text FROM product_series WHERE name = ? AND published = 1 LIMIT 1'
-    );
+    $seriesBySlugStmt = null;
+    $seriesByNameStmt = null;
+    try {
+        $seriesBySlugStmt = $pdo->prepare(
+            'SELECT price_text FROM product_series WHERE slug = ? AND published = 1 LIMIT 1'
+        );
+        $seriesByNameStmt = $pdo->prepare(
+            'SELECT price_text FROM product_series WHERE name = ? AND published = 1 LIMIT 1'
+        );
+    } catch (Throwable $e) {
+        $seriesBySlugStmt = null;
+        $seriesByNameStmt = null;
+    }
 
     $enriched = [];
     foreach ($items as $item) {
@@ -778,14 +785,14 @@ function orders_admin_enrich_items(PDO $pdo, array $items): array
             } else {
                 $slug = isset($item['slug']) ? trim((string) $item['slug']) : '';
                 $name = isset($item['name']) ? trim((string) $item['name']) : '';
-                if ($slug !== '') {
+                if ($slug !== '' && $seriesBySlugStmt !== null) {
                     $seriesBySlugStmt->execute([$slug]);
                     $series = $seriesBySlugStmt->fetch();
                     if ($series && $series['price_text'] !== null && trim((string) $series['price_text']) !== '') {
                         $catalogPrice = (string) $series['price_text'];
                     }
                 }
-                if ($catalogPrice === null && $name !== '') {
+                if ($catalogPrice === null && $name !== '' && $seriesByNameStmt !== null) {
                     $seriesByNameStmt->execute([$name]);
                     $series = $seriesByNameStmt->fetch();
                     if ($series && $series['price_text'] !== null && trim((string) $series['price_text']) !== '') {
@@ -1760,7 +1767,9 @@ function orders_admin_apply_action(
         if ($dueAt === '') {
             $dueAt = date('Y-m-d', strtotime('+7 days'));
         }
-        invoices_issue_pre($pdo, $orderId, $dueAt);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueAt)) {
+            throw new RuntimeException('تاریخ سررسید پیش‌فاکتور نامعتبر است');
+        }
         $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
         $upd->execute(['accepted', $orderId]);
         orders_add_event(
@@ -1772,10 +1781,19 @@ function orders_admin_apply_action(
             $message !== '' ? $message : 'تأیید انبار و ارسال خودکار پیش‌فاکتور'
         );
         $pdo->commit();
+
+        $invoiceWarning = null;
+        $resultMessage = 'انبار تأیید شد و پیش‌فاکتور برای مشتری ارسال شد';
+        try {
+            invoices_issue_pre($pdo, $orderId, $dueAt);
+        } catch (Throwable $invErr) {
+            $invoiceWarning = $invErr->getMessage();
+            $resultMessage = 'انبار تأیید شد اما صدور پیش‌فاکتور ناموفق بود';
+        }
         orders_admin_notify_sales_client($pdo, $orderId, 'accepted', $message);
         orders_admin_audit($pdo, $order, 'accept');
 
-        return ['message' => 'انبار تأیید شد و پیش‌فاکتور برای مشتری ارسال شد', 'invoice_warning' => null];
+        return ['message' => $resultMessage, 'invoice_warning' => $invoiceWarning];
     }
 
     if ($action === 'issue_pre_invoice') {

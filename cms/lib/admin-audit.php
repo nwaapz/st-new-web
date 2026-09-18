@@ -121,13 +121,37 @@ function admin_audit_category_for_action(string $action): string
 }
 
 /**
+ * Resolve admin user from CMS session or mobile admin API session.
+ *
+ * @return array{id:int,username:string}|null
+ */
+function admin_audit_current_user(PDO $pdo): ?array
+{
+    $admin = cms_current_admin();
+    if ($admin !== null) {
+        return $admin;
+    }
+    if (function_exists('admin_auth_current_user')) {
+        $apiUser = admin_auth_current_user($pdo);
+        if ($apiUser !== null) {
+            return [
+                'id' => (int) $apiUser['id'],
+                'username' => (string) $apiUser['username'],
+            ];
+        }
+    }
+
+    return null;
+}
+
+/**
  * @param array<string, mixed> $ctx entity_type, entity_id, entity_label, summary, detail (array)
  */
 function cms_admin_audit(PDO $pdo, string $action, array $ctx = []): void
 {
     admin_audit_ensure_schema($pdo);
 
-    $admin = cms_current_admin();
+    $admin = admin_audit_current_user($pdo);
     if ($admin === null) {
         return;
     }
@@ -284,8 +308,8 @@ function admin_audit_entity_href(?string $entityType, ?int $entityId): ?string
 
 function orders_admin_audit(PDO $pdo, array $order, string $action, ?array $detail = null): void
 {
-    $admin = cms_current_admin();
-    $user = $admin['username'] ?? 'admin';
+    $admin = admin_audit_current_user($pdo);
+    $user = $admin !== null ? (string) ($admin['username'] ?? 'admin') : 'admin';
     $code = (string) ($order['public_code'] ?? '—');
     $orderId = (int) ($order['id'] ?? 0);
 
