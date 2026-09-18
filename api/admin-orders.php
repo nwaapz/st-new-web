@@ -32,7 +32,7 @@ try {
             $items = orders_fetch_items($pdo, $orderId);
             api_json([
                 'ok' => true,
-                'order' => orders_serialize(
+                'order' => orders_admin_serialize(
                     $order,
                     $items,
                     orders_fetch_events($pdo, $orderId)
@@ -103,7 +103,7 @@ try {
     $response = [
         'ok' => true,
         'message' => $result['message'],
-        'order' => orders_serialize(
+        'order' => orders_admin_serialize(
             $order,
             $items,
             orders_fetch_events($pdo, $orderId)

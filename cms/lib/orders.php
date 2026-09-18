@@ -741,6 +741,127 @@ function orders_serialize(array $order, array $items, array $events): array
     ];
 }
 
+/**
+ * Attach live catalog default prices for admin pricing UI.
+ *
+ * @param list<array<string, mixed>> $items
+ * @return list<array<string, mixed>>
+ */
+function orders_admin_enrich_items(PDO $pdo, array $items): array
+{
+    $productStmt = $pdo->prepare(
+        'SELECT price_text FROM products WHERE id = ? LIMIT 1'
+    );
+    $seriesBySlugStmt = $pdo->prepare(
+        'SELECT price_text FROM product_series WHERE slug = ? AND published = 1 LIMIT 1'
+    );
+    $seriesByNameStmt = $pdo->prepare(
+        'SELECT price_text FROM product_series WHERE name = ? AND published = 1 LIMIT 1'
+    );
+
+    $enriched = [];
+    foreach ($items as $item) {
+        $row = $item;
+        $catalogPrice = null;
+        $savedPrice = isset($item['price_text']) ? trim((string) $item['price_text']) : '';
+
+        if ($savedPrice === '') {
+            $productId = isset($item['product_id']) && $item['product_id'] !== null
+                ? (int) $item['product_id']
+                : 0;
+            if ($productId > 0) {
+                $productStmt->execute([$productId]);
+                $prod = $productStmt->fetch();
+                if ($prod && $prod['price_text'] !== null && trim((string) $prod['price_text']) !== '') {
+                    $catalogPrice = (string) $prod['price_text'];
+                }
+            } else {
+                $slug = isset($item['slug']) ? trim((string) $item['slug']) : '';
+                $name = isset($item['name']) ? trim((string) $item['name']) : '';
+                if ($slug !== '') {
+                    $seriesBySlugStmt->execute([$slug]);
+                    $series = $seriesBySlugStmt->fetch();
+                    if ($series && $series['price_text'] !== null && trim((string) $series['price_text']) !== '') {
+                        $catalogPrice = (string) $series['price_text'];
+                    }
+                }
+                if ($catalogPrice === null && $name !== '') {
+                    $seriesByNameStmt->execute([$name]);
+                    $series = $seriesByNameStmt->fetch();
+                    if ($series && $series['price_text'] !== null && trim((string) $series['price_text']) !== '') {
+                        $catalogPrice = (string) $series['price_text'];
+                    }
+                }
+            }
+        }
+
+        $row['catalog_price_text'] = $catalogPrice;
+        $enriched[] = $row;
+    }
+
+    return $enriched;
+}
+
+/**
+ * Admin API serialization — always exposes saved prices and catalog defaults.
+ *
+ * @param array<string, mixed> $order
+ * @param list<array<string, mixed>> $items
+ * @param list<array<string, mixed>> $events
+ * @return array<string, mixed>
+ */
+function orders_admin_serialize(array $order, array $items, array $events): array
+{
+    $pdo = cms_pdo();
+    $enrichedItems = orders_admin_enrich_items($pdo, $items);
+
+    $serializedItems = [];
+    foreach ($enrichedItems as $item) {
+        $priceText = $item['price_text'] !== null && trim((string) $item['price_text']) !== ''
+            ? (string) $item['price_text']
+            : null;
+        $catalogPriceText = isset($item['catalog_price_text'])
+            && $item['catalog_price_text'] !== null
+            && trim((string) $item['catalog_price_text']) !== ''
+            ? (string) $item['catalog_price_text']
+            : null;
+
+        $serializedItems[] = [
+            'id' => (int) $item['id'],
+            'product_id' => isset($item['product_id']) && $item['product_id'] !== null
+                ? (int) $item['product_id']
+                : null,
+            'name' => (string) $item['name'],
+            'slug' => (string) ($item['slug'] ?? ''),
+            'price_text' => $priceText,
+            'catalog_price_text' => $catalogPriceText,
+            'image' => $item['image'] !== null ? (string) $item['image'] : null,
+            'quantity' => (int) $item['quantity'],
+            'unit_type' => isset($item['unit_type']) && (string) $item['unit_type'] === 'pack'
+                ? 'pack'
+                : 'piece',
+            'pack_size' => isset($item['pack_size']) && $item['pack_size'] !== null && (int) $item['pack_size'] > 0
+                ? (int) $item['pack_size']
+                : null,
+            'factory_name' => $item['factory_name'] !== null ? (string) $item['factory_name'] : null,
+            'model_name' => $item['model_name'] !== null ? (string) $item['model_name'] : null,
+            'category_name' => $item['category_name'] !== null ? (string) $item['category_name'] : null,
+            'visual_id' => isset($item['visual_id']) && $item['visual_id'] !== null && trim((string) $item['visual_id']) !== ''
+                ? (string) $item['visual_id']
+                : null,
+        ];
+    }
+
+    $payload = orders_serialize($order, $items, $events);
+    $payload['items'] = $serializedItems;
+    $payload['item_count'] = array_sum(array_map(
+        static fn(array $row): int => (int) $row['quantity'],
+        $serializedItems
+    ));
+
+    return $payload;
+}
+
 /** Max payment proof attachments per order. */
 function orders_payment_files_max(): int
 {
