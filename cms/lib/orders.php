@@ -756,6 +756,90 @@ function orders_serialize(array $order, array $items, array $events): array
 }
 
 /**
+ * Live catalog price for admin order pricing (independent of saved order line price).
+ */
+function orders_admin_lookup_catalog_price(PDO $pdo, array $item): ?string
+{
+    $pickPrice = static function (?array $row): ?string {
+        if (!$row) {
+            return null;
+        }
+        $price = isset($row['price_text']) ? trim((string) $row['price_text']) : '';
+        return $price !== '' ? $price : null;
+    };
+
+    $productId = isset($item['product_id']) && $item['product_id'] !== null
+        ? (int) $item['product_id']
+        : 0;
+    if ($productId > 0) {
+        $stmt = $pdo->prepare('SELECT price_text FROM products WHERE id = ? LIMIT 1');
+        $stmt->execute([$productId]);
+        $price = $pickPrice($stmt->fetch() ?: null);
+        if ($price !== null) {
+            return $price;
+        }
+    }
+
+    $slug = isset($item['slug']) ? trim((string) $item['slug']) : '';
+    if ($slug !== '') {
+        $stmt = $pdo->prepare('SELECT price_text FROM products WHERE slug = ? LIMIT 1');
+        $stmt->execute([$slug]);
+        $price = $pickPrice($stmt->fetch() ?: null);
+        if ($price !== null) {
+            return $price;
+        }
+
+        try {
+            $seriesStmt = $pdo->prepare(
+                'SELECT price_text FROM product_series WHERE slug = ? LIMIT 1'
+            );
+            $seriesStmt->execute([$slug]);
+            $price = $pickPrice($seriesStmt->fetch() ?: null);
+            if ($price !== null) {
+                return $price;
+            }
+        } catch (Throwable $e) {
+            // product_series may be unavailable on older installs
+        }
+    }
+
+    $visualId = isset($item['visual_id']) ? trim((string) $item['visual_id']) : '';
+    if ($visualId !== '') {
+        $stmt = $pdo->prepare('SELECT price_text FROM products WHERE visual_id = ? LIMIT 1');
+        $stmt->execute([$visualId]);
+        $price = $pickPrice($stmt->fetch() ?: null);
+        if ($price !== null) {
+            return $price;
+        }
+    }
+
+    $name = isset($item['name']) ? trim((string) $item['name']) : '';
+    if ($name !== '') {
+        $stmt = $pdo->prepare('SELECT price_text FROM products WHERE name = ? LIMIT 1');
+        $stmt->execute([$name]);
+        $price = $pickPrice($stmt->fetch() ?: null);
+        if ($price !== null) {
+            return $price;
+        }
+
+        try {
+            $seriesStmt = $pdo->prepare(
+                'SELECT price_text FROM product_series WHERE name = ? LIMIT 1'
+            );
+            $seriesStmt->execute([$name]);
+            $price = $pickPrice($seriesStmt->fetch() ?: null);
+            if ($price !== null) {
+                return $price;
+            }
+        } catch (Throwable $e) {
+            // ignore
+        }
+    }
+
+    return null;
+}
+
+/**
  * Attach live catalog default prices for admin pricing UI.
  *
  * @param list<array<string, mixed>> $items
@@ -763,60 +847,10 @@ function orders_serialize(array $order, array $items, array $events): array
  */
 function orders_admin_enrich_items(PDO $pdo, array $items): array
 {
-    $productStmt = $pdo->prepare(
-        'SELECT price_text FROM products WHERE id = ? LIMIT 1'
-    );
-    $seriesBySlugStmt = null;
-    $seriesByNameStmt = null;
-    try {
-        $seriesBySlugStmt = $pdo->prepare(
-            'SELECT price_text FROM product_series WHERE slug = ? AND published = 1 LIMIT 1'
-        );
-        $seriesByNameStmt = $pdo->prepare(
-            'SELECT price_text FROM product_series WHERE name = ? AND published = 1 LIMIT 1'
-        );
-    } catch (Throwable $e) {
-        $seriesBySlugStmt = null;
-        $seriesByNameStmt = null;
-    }
-
     $enriched = [];
     foreach ($items as $item) {
         $row = $item;
-        $catalogPrice = null;
-        $savedPrice = isset($item['price_text']) ? trim((string) $item['price_text']) : '';
-
-        if ($savedPrice === '') {
-            $productId = isset($item['product_id']) && $item['product_id'] !== null
-                ? (int) $item['product_id']
-                : 0;
-            if ($productId > 0) {
-                $productStmt->execute([$productId]);
-                $prod = $productStmt->fetch();
-                if ($prod && $prod['price_text'] !== null && trim((string) $prod['price_text']) !== '') {
-                    $catalogPrice = (string) $prod['price_text'];
-                }
-            } else {
-                $slug = isset($item['slug']) ? trim((string) $item['slug']) : '';
-                $name = isset($item['name']) ? trim((string) $item['name']) : '';
-                if ($slug !== '' && $seriesBySlugStmt !== null) {
-                    $seriesBySlugStmt->execute([$slug]);
-                    $series = $seriesBySlugStmt->fetch();
-                    if ($series && $series['price_text'] !== null && trim((string) $series['price_text']) !== '') {
-                        $catalogPrice = (string) $series['price_text'];
-                    }
-                }
-                if ($catalogPrice === null && $name !== '' && $seriesByNameStmt !== null) {
-                    $seriesByNameStmt->execute([$name]);
-                    $series = $seriesByNameStmt->fetch();
-                    if ($series && $series['price_text'] !== null && trim((string) $series['price_text']) !== '') {
-                        $catalogPrice = (string) $series['price_text'];
-                    }
-                }
-            }
-        }
-
-        $row['catalog_price_text'] = $catalogPrice;
+        $row['catalog_price_text'] = orders_admin_lookup_catalog_price($pdo, $item);
         $enriched[] = $row;
     }
 
