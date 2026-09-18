@@ -7,6 +7,20 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/order-cheques.php';
 
+function orders_notify_sales_client(PDO $pdo, int $orderId, string $notifyType, string $message = ''): void
+{
+    if (!function_exists('orders_admin_notify_sales_client')) {
+        $pushLib = __DIR__ . '/sales-push.php';
+        if (is_readable($pushLib)) {
+            require_once $pushLib;
+        }
+    }
+    if (!function_exists('orders_admin_notify_sales_client')) {
+        return;
+    }
+    orders_admin_notify_sales_client($pdo, $orderId, $notifyType, $message);
+}
+
 function orders_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
@@ -1592,7 +1606,7 @@ function orders_cancel(PDO $pdo, array $order, string $actor, string $message = 
         orders_admin_audit($pdo, $order, 'cancel');
     }
 
-    orders_admin_notify_sales_client($pdo, $orderId, 'cancelled', $message);
+    orders_notify_sales_client($pdo, $orderId, 'cancelled', $message);
 
     if ($actor === 'client') {
         if (!function_exists('admin_push_notify_order_activity')) {
@@ -1691,7 +1705,7 @@ function orders_admin_apply_action(
             'هشدار نقص مدارک: ' . $message
         );
         $pdo->commit();
-        orders_admin_notify_sales_client($pdo, $orderId, 'warn_payment', $message);
+        orders_notify_sales_client($pdo, $orderId, 'warn_payment', $message);
         orders_admin_audit($pdo, $order, 'warn_payment');
 
         return ['message' => 'هشدار نقص مدارک برای مشتری ارسال شد', 'invoice_warning' => null];
@@ -1789,7 +1803,7 @@ function orders_admin_apply_action(
             $invoiceWarning = $invErr->getMessage();
             $resultMessage = 'انبار تأیید شد اما صدور پیش‌فاکتور ناموفق بود';
         }
-        orders_admin_notify_sales_client($pdo, $orderId, 'accepted', $message);
+        orders_notify_sales_client($pdo, $orderId, 'accepted', $message);
         orders_admin_audit($pdo, $order, 'accept');
 
         return ['message' => $resultMessage, 'invoice_warning' => $invoiceWarning];
@@ -1880,7 +1894,7 @@ function orders_admin_apply_action(
 
     orders_admin_audit($pdo, $order, $action);
 
-    orders_admin_notify_sales_client($pdo, $orderId, $next, $message);
+    orders_notify_sales_client($pdo, $orderId, $next, $message);
 
     return ['message' => $resultMessage, 'invoice_warning' => $invoiceWarning];
 }
