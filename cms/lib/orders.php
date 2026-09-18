@@ -401,6 +401,12 @@ function orders_can_cancel(string $status): bool
     return in_array($status, orders_cancel_statuses(), true);
 }
 
+/** Hard-delete is only allowed for closed archived orders (cancelled / rejected). */
+function orders_can_delete(string $status): bool
+{
+    return orders_is_archived($status);
+}
+
 function orders_chat_send_allowed(string $status): bool
 {
     return !in_array($status, ['cancelled', 'rejected', 'received'], true);
@@ -1067,6 +1073,7 @@ function orders_admin_serialize(array $order, array $items, array $events): arra
         $serializedItems
     ));
     $payload['pricing_api_version'] = 2;
+    $payload['can_delete'] = orders_can_delete((string) $order['status']);
 
     return $payload;
 }
@@ -1756,6 +1763,119 @@ function orders_admin_list(
 }
 
 /**
+ * Remove uploaded payment proof and invoice files for an order.
+ *
+ * @param array<string, mixed> $order
+ */
+function orders_purge_order_files(array $order): void
+{
+    foreach (orders_payment_files_list($order) as $path) {
+        orders_delete_upload_file($path);
+    }
+    $legacy = isset($order['payment_file']) ? trim((string) $order['payment_file']) : '';
+    if ($legacy !== '') {
+        orders_delete_upload_file($legacy);
+    }
+    foreach (['pre_invoice_file', 'final_invoice_file'] as $key) {
+        $path = isset($order[$key]) ? trim((string) $order[$key]) : '';
+        if ($path !== '') {
+            orders_delete_upload_file($path);
+        }
+    }
+}
+
+function orders_purge_analytics(PDO $pdo, int $orderId): void
+{
+    if ($orderId <= 0) {
+        return;
+    }
+
+    $analyticsLib = __DIR__ . '/analytics-orders.php';
+    if (!is_readable($analyticsLib)) {
+        return;
+    }
+
+    require_once $analyticsLib;
+
+    try {
+        analytics_orders_ensure_schema($pdo);
+        $tables = [
+            'analytics_order_line_facts',
+            'analytics_order_cheque_facts',
+            'analytics_order_stage_times',
+            'analytics_order_facts',
+        ];
+        foreach ($tables as $table) {
+            $stmt = $pdo->prepare("DELETE FROM {$table} WHERE order_id = ?");
+            $stmt->execute([$orderId]);
+        }
+    } catch (Throwable $e) {
+        error_log('[orders_delete] analytics purge failed: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Permanently delete an archived order and all related rows/files.
+ *
+ * @param array<string, mixed> $order
+ * @return array{message: string, deleted: true}
+ */
+function orders_delete(PDO $pdo, array $order, string $message = ''): array
+{
+    require_once __DIR__ . '/admin-audit.php';
+    require_once __DIR__ . '/order-messages.php';
+
+    $orderId = (int) ($order['id'] ?? 0);
+    if ($orderId <= 0) {
+        throw new RuntimeException('سفارش نامعتبر');
+    }
+
+    $current = (string) ($order['status'] ?? '');
+    if (!orders_can_delete($current)) {
+        throw new RuntimeException('فقط سفارش‌های لغو یا رد شده قابل حذف دائمی هستند');
+    }
+
+    orders_purge_order_files($order);
+
+    $pdo->beginTransaction();
+    try {
+        orders_purge_analytics($pdo, $orderId);
+
+        try {
+            $pdo->prepare('DELETE FROM site_order_reads WHERE order_id = ?')->execute([$orderId]);
+        } catch (Throwable $e) {
+            /* optional table */
+        }
+
+        order_cheques_ensure_schema($pdo);
+        $pdo->prepare('DELETE FROM order_cheques WHERE order_id = ?')->execute([$orderId]);
+        $pdo->prepare('DELETE FROM order_items WHERE order_id = ?')->execute([$orderId]);
+        $pdo->prepare('DELETE FROM order_events WHERE order_id = ?')->execute([$orderId]);
+        order_messages_ensure_schema($pdo);
+        $pdo->prepare('DELETE FROM order_messages WHERE order_id = ?')->execute([$orderId]);
+        $pdo->prepare('DELETE FROM orders WHERE id = ?')->execute([$orderId]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    $detail = null;
+    $message = trim($message);
+    if ($message !== '') {
+        $detail = ['reason' => $message];
+    }
+    orders_admin_audit($pdo, $order, 'delete', $detail);
+
+    return [
+        'message' => 'سفارش به‌طور دائمی از پایگاه داده حذف شد',
+        'deleted' => true,
+    ];
+}
+
+/**
  * Cancel an order before payment (client or admin).
  *
  * @return array{message: string}
@@ -1841,6 +1961,10 @@ function orders_admin_apply_action(
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
         throw new RuntimeException('سفارش یافت نشد');
+    }
+
+    if ($action === 'delete') {
+        return orders_delete($pdo, $order, $message);
     }
 
     if ($action === 'add_cheque') {

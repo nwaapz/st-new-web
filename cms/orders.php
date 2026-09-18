@@ -126,7 +126,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $returnTab = '';
     }
 
-    $redirectTo = $ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, $orderId);
+    $redirectTo = $action === 'delete'
+        ? $ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, null)
+        : $ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, $orderId);
     if ($returnTab !== '') {
         $redirectTo .= '&tab=' . rawurlencode($returnTab);
     }
@@ -382,6 +384,7 @@ if ($viewOrder) {
             'class' => 'cms-btn--ghost',
         ];
     }
+    $canDeleteOrder = orders_can_delete($cur);
 
     $canEditPrices = in_array($cur, ['submitted', 'accepted', 'payment_proof_sent'], true);
     $preFile = isset($viewOrder['pre_invoice_file']) ? trim((string) $viewOrder['pre_invoice_file']) : '';
@@ -456,7 +459,7 @@ if ($viewOrder) {
         <?php if (orders_is_archived($cur)): ?>
           <div class="cms-payment-warn" style="margin:0 0 1rem">
             <strong class="cms-payment-warn__badge">بسته و بایگانی‌شده</strong>
-            <p class="cms-payment-warn__text">این سفارش به‌خاطر رد انبار بسته شده است. تغییر وضعیت ممکن نیست.</p>
+            <p class="cms-payment-warn__text">این سفارش بسته و بایگانی شده است. تغییر وضعیت ممکن نیست.</p>
           </div>
         <?php endif; ?>
 
@@ -527,7 +530,21 @@ if ($viewOrder) {
                 <?php if ($cur === 'accepted'): ?>
                   <p class="cms-muted">در انتظار ارسال مدارک پرداخت توسط مشتری. پیش‌فاکتور هنگام تأیید انبار ارسال شده؛ در صورت نیاز از تب «فاکتورها» دوباره بفرستید.</p>
                 <?php elseif (orders_is_archived($cur)): ?>
-                  <p class="cms-muted">این سفارش بسته و بایگانی شده است — اقدامی باقی نمانده.</p>
+                  <p class="cms-muted">این سفارش بسته و بایگانی شده است — اقدام وضعیتی باقی نمانده.</p>
+                  <?php if ($canDeleteOrder): ?>
+                    <form method="post" class="cms-form" id="order-delete-form" style="margin-top:.85rem">
+                      <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
+                      <?php $returnHiddens(); ?>
+                      <input type="hidden" name="action" value="delete">
+                      <input type="hidden" name="message" id="order-delete-message" value="">
+                      <p class="cms-confirm-modal__warn" style="margin:0 0 .75rem">
+                        حذف دائمی غیرقابل بازگشت است: ردیف سفارش، اقلام، تاریخچه، گفتگو، چک‌ها و فایل‌های مرتبط از پایگاه داده پاک می‌شوند.
+                      </p>
+                      <button type="button" class="cms-btn cms-btn--ghost" id="order-delete-btn" style="color:#b42318;border-color:#b42318">
+                        حذف از پایگاه داده…
+                      </button>
+                    </form>
+                  <?php endif; ?>
                 <?php elseif (orders_is_finished($cur)): ?>
                   <p class="cms-muted">تحویل تأیید شده و سفارش تمام است.</p>
                 <?php else: ?>
@@ -1025,6 +1042,59 @@ if ($viewOrder) {
         }
         draft.value = confirmMsg.value;
         actionInput.value = pendingAction;
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.submit();
+      });
+    })();
+    </script>
+  <?php endif; ?>
+
+  <?php if (!empty($canDeleteOrder)): ?>
+    <div id="order-delete-modal" class="cms-confirm-modal" hidden>
+      <div class="cms-confirm-modal__panel" role="dialog" aria-modal="true" aria-labelledby="order-delete-title">
+        <div class="cms-confirm-modal__head">
+          <strong id="order-delete-title">حذف دائمی سفارش — <?= cms_h($orderCode) ?></strong>
+          <button type="button" class="cms-btn cms-btn--ghost" id="order-delete-close">بستن</button>
+        </div>
+        <p class="cms-confirm-modal__warn" style="margin:.75rem 0">
+          این عمل <strong>برگشت‌پذیر نیست</strong>. سفارش، اقلام، تاریخچه، گفتگو، چک‌ها و فایل‌های آپلود از پایگاه داده حذف می‌شوند.
+        </p>
+        <label class="cms-field">
+          <span>یادداشت داخلی (اختیاری)</span>
+          <textarea class="cms-input" id="order-delete-note" rows="3" placeholder="علت حذف برای گزارش فعالیت…"></textarea>
+        </label>
+        <div class="cms-btn-row" style="margin-top:1rem">
+          <button type="button" class="cms-btn cms-btn--ghost" id="order-delete-cancel">انصراف</button>
+          <button type="button" class="cms-btn" id="order-delete-submit" style="background:#b42318;border-color:#b42318">حذف دائمی</button>
+        </div>
+      </div>
+    </div>
+    <script>
+    (function () {
+      var btn = document.getElementById('order-delete-btn');
+      var form = document.getElementById('order-delete-form');
+      var modal = document.getElementById('order-delete-modal');
+      var note = document.getElementById('order-delete-note');
+      var msgInput = document.getElementById('order-delete-message');
+      if (!btn || !form || !modal || !note || !msgInput) return;
+      function closeModal() { modal.hidden = true; }
+      function openModal() {
+        note.value = '';
+        modal.hidden = false;
+        note.focus();
+      }
+      btn.addEventListener('click', openModal);
+      document.getElementById('order-delete-close').addEventListener('click', closeModal);
+      document.getElementById('order-delete-cancel').addEventListener('click', closeModal);
+      modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !modal.hidden) { e.preventDefault(); closeModal(); }
+      });
+      document.getElementById('order-delete-submit').addEventListener('click', function () {
+        if (!window.confirm('سفارش <?= cms_h($orderCode) ?> برای همیشه حذف شود؟ این عمل قابل بازگشت نیست.')) {
+          return;
+        }
+        msgInput.value = note.value.trim();
         if (typeof form.requestSubmit === 'function') form.requestSubmit();
         else form.submit();
       });

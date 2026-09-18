@@ -41,6 +41,7 @@ try {
                 'totals' => invoices_totals_from_items($items),
                 'status_labels' => orders_status_labels(),
                 'allowed_transitions' => orders_allowed_transitions()[(string) $order['status']] ?? [],
+                'can_delete' => orders_can_delete((string) $order['status']),
             ]);
         }
 
@@ -95,6 +96,14 @@ try {
 
     $result = orders_admin_apply_action($pdo, $orderId, $action, $message, $prices, $preInvoiceDueAt, $cheque);
 
+    if ($action === 'delete' || !empty($result['deleted'])) {
+        api_json([
+            'ok' => true,
+            'deleted' => true,
+            'message' => $result['message'],
+        ]);
+    }
+
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
         api_error('سفارش یافت نشد', 404);
@@ -112,6 +121,7 @@ try {
         ),
         'totals' => invoices_totals_from_items($items),
         'allowed_transitions' => orders_allowed_transitions()[(string) $order['status']] ?? [],
+        'can_delete' => orders_can_delete((string) $order['status']),
     ];
     if ($result['invoice_warning'] !== null) {
         $response['invoice_warning'] = $result['invoice_warning'];

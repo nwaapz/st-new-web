@@ -41,6 +41,7 @@ function admin_audit_action_labels(): array
         'order.accept' => 'تأیید انبار سفارش',
         'order.reject' => 'رد سفارش',
         'order.cancel' => 'لغو سفارش',
+        'order.delete' => 'حذف سفارش',
         'order.mark_paid' => 'تأیید پرداخت',
         'order.mark_shipped' => 'ارسال مرسوله',
         'order.mark_not_received' => 'عدم دریافت مرسوله',
@@ -322,6 +323,9 @@ function orders_admin_audit(PDO $pdo, array $order, string $action, ?array $deta
             break;
         case 'cancel':
             $verb = 'سفارش ' . $code . ' را لغو کرد';
+            break;
+        case 'delete':
+            $verb = 'سفارش ' . $code . ' را از پایگاه داده حذف کرد';
             break;
         case 'mark_paid':
             $verb = 'پرداخت سفارش ' . $code . ' را تأیید کرد';
