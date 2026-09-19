@@ -97,7 +97,17 @@ try {
         api_error('سفارش و عملیات الزامی است', 400);
     }
 
-    $result = orders_admin_apply_action($pdo, $orderId, $action, $message, $prices, $preInvoiceDueAt, $cheque);
+    $paymentMethod = trim((string) ($body['payment_method'] ?? ''));
+    $result = orders_admin_apply_action(
+        $pdo,
+        $orderId,
+        $action,
+        $message,
+        $prices,
+        $preInvoiceDueAt,
+        $cheque,
+        $paymentMethod
+    );
 
     if ($action === 'delete' || $action === 'remove' || !empty($result['deleted'])) {
         api_json([

@@ -136,6 +136,44 @@ function order_cheques_serialize_row(array $row): array
     ];
 }
 
+function order_cheques_registered_total_toman(array $cheques): int
+{
+    if (!function_exists('invoices_parse_toman_amount')) {
+        require_once __DIR__ . '/invoices.php';
+    }
+    $total = 0;
+    foreach ($cheques as $cheque) {
+        $amountText = isset($cheque['amount_text']) ? (string) $cheque['amount_text'] : '';
+        $parsed = invoices_parse_toman_amount($amountText);
+        if ($parsed !== null && $parsed > 0) {
+            $total += $parsed;
+        }
+    }
+
+    return $total;
+}
+
+function order_cheques_remaining_toman(int $orderTotalToman, array $cheques): int
+{
+    if ($orderTotalToman <= 0) {
+        return 0;
+    }
+
+    return max(0, $orderTotalToman - order_cheques_registered_total_toman($cheques));
+}
+
+function order_cheques_format_toman_label(int $amount): string
+{
+    if ($amount <= 0) {
+        return '—';
+    }
+    if (function_exists('cms_to_persian_digits')) {
+        return cms_to_persian_digits(number_format($amount)) . ' تومان';
+    }
+
+    return number_format($amount) . ' تومان';
+}
+
 function order_cheques_all_funded(array $cheques): bool
 {
     if ($cheques === []) {

@@ -165,6 +165,20 @@ function orders_ensure_schema(PDO $pdo): void
             /* ignore */
         }
     }
+    if (!isset($cols['payment_method'])) {
+        try {
+            $pdo->exec("ALTER TABLE orders ADD COLUMN payment_method ENUM('cash','cheque') NULL");
+        } catch (Throwable $e) {
+            /* ignore */
+        }
+    }
+    if (!isset($cols['payment_reference'])) {
+        try {
+            $pdo->exec('ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(64) NULL');
+        } catch (Throwable $e) {
+            /* ignore */
+        }
+    }
 
     foreach (
         [
@@ -826,9 +840,65 @@ function orders_serialize(array $order, array $items, array $events): array
             static fn(array $row): int => (int) $row['quantity'],
             $serializedItems
         )),
+        'payment_method' => orders_normalize_payment_method(
+            isset($order['payment_method']) ? (string) $order['payment_method'] : null
+        ),
+        'payment_reference' => isset($order['payment_reference']) && trim((string) $order['payment_reference']) !== ''
+            ? trim((string) $order['payment_reference'])
+            : null,
         'cheques' => $cheques,
         'cheques_all_funded' => order_cheques_all_funded($cheques),
     ];
+}
+
+function orders_normalize_payment_method(?string $raw): ?string
+{
+    $value = strtolower(trim((string) $raw));
+    if ($value === 'cash' || $value === 'cheque') {
+        return $value;
+    }
+
+    return null;
+}
+
+/**
+ * @return array{can: bool, reason: ?string}
+ */
+function orders_mark_paid_readiness(array $order, array $cheques = [], ?int $orderTotalToman = null): array
+{
+    $status = (string) ($order['status'] ?? '');
+    if ($status !== 'payment_proof_sent') {
+        return ['can' => false, 'reason' => null];
+    }
+
+    $method = orders_normalize_payment_method(
+        isset($order['payment_method']) ? (string) $order['payment_method'] : null
+    );
+    if ($method === null) {
+        return ['can' => false, 'reason' => 'ابتدا روش پرداخت (نقد/چک) را انتخاب کنید'];
+    }
+
+    if ($method === 'cheque') {
+        if ($cheques === []) {
+            return ['can' => false, 'reason' => 'حداقل یک چک ثبت کنید'];
+        }
+        if (!order_cheques_all_funded($cheques)) {
+            return ['can' => false, 'reason' => 'همه چک‌ها باید وصول شوند'];
+        }
+
+        return ['can' => true, 'reason' => null];
+    }
+
+    $files = orders_payment_files_list($order);
+    $reference = isset($order['payment_reference']) ? trim((string) $order['payment_reference']) : '';
+    if ($files === []) {
+        return ['can' => false, 'reason' => 'رسید پرداخت توسط مشتری ارسال نشده است'];
+    }
+    if ($reference === '') {
+        return ['can' => false, 'reason' => 'شماره پیگیری پرداخت ثبت نشده است'];
+    }
+
+    return ['can' => true, 'reason' => null];
 }
 
 function orders_admin_pricing_helpers_ready(): void
@@ -1144,6 +1214,22 @@ function orders_admin_serialize(array $order, array $items, array $events): arra
     ));
     $payload['pricing_api_version'] = 2;
     $payload['can_delete'] = orders_can_delete((string) $order['status']);
+
+    if (!function_exists('invoices_totals_from_items')) {
+        require_once __DIR__ . '/invoices.php';
+    }
+    if (!function_exists('order_cheques_registered_total_toman')) {
+        require_once __DIR__ . '/order-cheques.php';
+    }
+    $cheques = is_array($payload['cheques'] ?? null) ? $payload['cheques'] : [];
+    $orderTotal = (int) (($totals = invoices_totals_from_items($serializedItems))['total'] ?? 0);
+    $registered = order_cheques_registered_total_toman($cheques);
+    $remaining = order_cheques_remaining_toman($orderTotal, $cheques);
+    $payload['cheque_registered_total_label'] = order_cheques_format_toman_label($registered);
+    $payload['cheque_remaining_label'] = order_cheques_format_toman_label($remaining);
+    $readiness = orders_mark_paid_readiness($order, $cheques, $orderTotal);
+    $payload['can_mark_paid'] = $readiness['can'];
+    $payload['mark_paid_block_reason'] = $readiness['reason'];
 
     return $payload;
 }
@@ -2020,7 +2106,8 @@ function orders_admin_apply_action(
     string $message = '',
     array $prices = [],
     string $preInvoiceDueAt = '',
-    array $cheque = []
+    array $cheque = [],
+    string $paymentMethod = ''
 ): array {
     require_once __DIR__ . '/invoices.php';
     require_once __DIR__ . '/order-cheques.php';
@@ -2070,6 +2157,46 @@ function orders_admin_apply_action(
     $allowed = orders_allowed_transitions();
     $invoiceWarning = null;
     $resultMessage = 'وضعیت سفارش به‌روز شد';
+
+    if ($action === 'set_payment_method') {
+        if (!in_array($current, ['accepted', 'payment_proof_sent'], true)) {
+            throw new RuntimeException('تعیین روش پرداخت فقط در مرحله پرداخت مجاز است');
+        }
+        $method = orders_normalize_payment_method($paymentMethod);
+        if ($method === null) {
+            throw new RuntimeException('روش پرداخت نامعتبر است');
+        }
+        $label = $method === 'cash' ? 'نقد' : 'چک';
+        $pdo->beginTransaction();
+        if ($current === 'accepted') {
+            $upd = $pdo->prepare('UPDATE orders SET payment_method = ?, status = ? WHERE id = ?');
+            $upd->execute([$method, 'payment_proof_sent', $orderId]);
+            orders_add_event(
+                $pdo,
+                $orderId,
+                'accepted',
+                'payment_proof_sent',
+                'admin',
+                'روش پرداخت: ' . $label
+            );
+        } else {
+            $upd = $pdo->prepare('UPDATE orders SET payment_method = ? WHERE id = ?');
+            $upd->execute([$method, $orderId]);
+            orders_add_event(
+                $pdo,
+                $orderId,
+                $current,
+                $current,
+                'admin',
+                'روش پرداخت: ' . $label
+            );
+        }
+        $pdo->commit();
+        orders_notify_sales_client($pdo, $orderId, 'payment_proof_sent', 'روش پرداخت: ' . $label);
+        orders_admin_audit($pdo, $order, 'set_payment_method', ['payment_method' => $method]);
+
+        return ['message' => 'روش پرداخت ثبت شد: ' . $label, 'invoice_warning' => null];
+    }
 
     if ($action === 'warn_payment') {
         if ($current !== 'payment_proof_sent') {
@@ -2248,6 +2375,19 @@ function orders_admin_apply_action(
     }
     if ($action === 'reject' && $message === '') {
         throw new RuntimeException('علت رد انبار (مثلاً موجود نبودن کالا) الزامی است');
+    }
+    if ($action === 'mark_paid') {
+        $chequeRows = order_cheques_fetch($pdo, $orderId);
+        $orderItems = orders_fetch_items($pdo, $orderId);
+        $orderTotals = invoices_totals_from_items($orderItems);
+        $readiness = orders_mark_paid_readiness(
+            $order,
+            $chequeRows,
+            (int) ($orderTotals['total'] ?? 0)
+        );
+        if (!$readiness['can']) {
+            throw new RuntimeException($readiness['reason'] ?? 'امکان تأیید پرداخت وجود ندارد');
+        }
     }
 
     $pdo->beginTransaction();

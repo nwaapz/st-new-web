@@ -34,6 +34,7 @@ try {
 
     $orderId = 0;
     $note = '';
+    $paymentReference = '';
     /** @var list<string> $keepFiles */
     $keepFiles = [];
     /** @var list<array<string, mixed>> $uploadFiles */
@@ -42,6 +43,9 @@ try {
     if ($isMultipart) {
         $orderId = (int) ($_POST['order_id'] ?? $_POST['id'] ?? 0);
         $note = isset($_POST['note']) ? trim((string) $_POST['note']) : '';
+        $paymentReference = isset($_POST['payment_reference'])
+            ? trim((string) $_POST['payment_reference'])
+            : '';
         $keepRaw = isset($_POST['keep_files']) ? (string) $_POST['keep_files'] : '[]';
         $decodedKeep = json_decode($keepRaw, true);
         if (is_array($decodedKeep)) {
@@ -87,6 +91,9 @@ try {
         $body = site_auth_request_json();
         $orderId = isset($body['order_id']) ? (int) $body['order_id'] : (isset($body['id']) ? (int) $body['id'] : 0);
         $note = isset($body['note']) ? trim((string) $body['note']) : '';
+        $paymentReference = isset($body['payment_reference'])
+            ? trim((string) $body['payment_reference'])
+            : '';
         if (isset($body['keep_files']) && is_array($body['keep_files'])) {
             foreach ($body['keep_files'] as $item) {
                 if (is_string($item) && trim($item) !== '') {
@@ -108,6 +115,26 @@ try {
     $status = (string) $order['status'];
     if (!in_array($status, ['accepted', 'payment_proof_sent'], true)) {
         api_error('در این وضعیت امکان ارسال مدارک پرداخت نیست', 400);
+    }
+
+    $paymentMethod = orders_normalize_payment_method(
+        isset($order['payment_method']) ? (string) $order['payment_method'] : null
+    );
+    if ($paymentMethod === null) {
+        api_error('روش پرداخت هنوز توسط انبار تعیین نشده است', 400);
+    }
+    if ($paymentMethod === 'cheque') {
+        api_error('پرداخت این سفارش با چک انجام می‌شود — ارسال رسید واریز لازم نیست', 400);
+    }
+
+    $existingReference = isset($order['payment_reference'])
+        ? trim((string) $order['payment_reference'])
+        : '';
+    if ($paymentReference === '') {
+        $paymentReference = $existingReference;
+    }
+    if ($paymentReference === '') {
+        api_error('شماره پیگیری پرداخت الزامی است', 400);
     }
 
     $existing = orders_payment_files_list($order);
@@ -186,6 +213,7 @@ try {
                  SET payment_note = ?,
                      payment_file = ?,
                      payment_files = ?,
+                     payment_reference = ?,
                      payment_warning_state = 'answered',
                      payment_submitted_at = CURRENT_TIMESTAMP,
                      status = ?
@@ -195,6 +223,7 @@ try {
                 $finalNote !== '' ? $finalNote : null,
                 $legacyFirst,
                 $encoded,
+                $paymentReference,
                 $nextStatus,
                 $orderId,
             ]);
@@ -204,6 +233,7 @@ try {
                  SET payment_note = ?,
                      payment_file = ?,
                      payment_files = ?,
+                     payment_reference = ?,
                      payment_submitted_at = CURRENT_TIMESTAMP,
                      status = ?
                  WHERE id = ?'
@@ -212,6 +242,7 @@ try {
                 $finalNote !== '' ? $finalNote : null,
                 $legacyFirst,
                 $encoded,
+                $paymentReference,
                 $nextStatus,
                 $orderId,
             ]);

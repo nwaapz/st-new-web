@@ -111,6 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'bank_result' => trim((string) ($_POST['bank_result'] ?? '')),
         ];
 
+        $paymentMethod = trim((string) ($_POST['payment_method'] ?? ''));
         $result = orders_admin_apply_action(
             $pdo,
             $orderId,
@@ -118,7 +119,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message,
             $prices,
             $preInvoiceDueAt,
-            $cheque
+            $cheque,
+            $paymentMethod
         );
         if (!empty($result['invoice_warning'])) {
             cms_flash($result['message'] . ' — ' . $result['invoice_warning'], 'error');
@@ -466,6 +468,27 @@ if ($viewOrder) {
     $draftMessage = $cur === 'payment_proof_sent' && $payWarn !== '' ? $payWarn : '';
     $statusTone = orders_is_archived($cur) ? 'danger' : (orders_is_finished($cur) ? 'ok' : (orders_is_parcel_open($cur) ? 'warn' : 'info'));
     $chatOpen = orders_chat_send_allowed($cur);
+    $viewOrderTotal = $viewItems !== []
+        ? (int) (invoices_totals_from_items($viewItems)['total'] ?? 0)
+        : 0;
+    $viewPaymentMethod = orders_normalize_payment_method(
+        isset($viewOrder['payment_method']) ? (string) $viewOrder['payment_method'] : null
+    );
+    $viewPaymentReference = isset($viewOrder['payment_reference'])
+        ? trim((string) $viewOrder['payment_reference'])
+        : '';
+    $viewMarkPaidReadiness = orders_mark_paid_readiness($viewOrder, $viewCheques, $viewOrderTotal);
+    $viewChequeRegisteredLabel = order_cheques_format_toman_label(
+        order_cheques_registered_total_toman($viewCheques)
+    );
+    $viewChequeRemainingLabel = order_cheques_format_toman_label(
+        order_cheques_remaining_toman($viewOrderTotal, $viewCheques)
+    );
+    $viewChatPeerLabel = isset($viewOrder['sales_user_id'])
+        && $viewOrder['sales_user_id'] !== null
+        && (int) $viewOrder['sales_user_id'] > 0
+        ? 'فروشنده'
+        : 'مشتری';
     $returnHiddens = static function () use ($statusFilter, $scope, $searchQ, $page, $ongoingMode): void {
         echo '<input type="hidden" name="return_status" value="' . cms_h($statusFilter) . '">';
         echo '<input type="hidden" name="return_scope" value="' . cms_h($scope) . '">';
@@ -516,7 +539,7 @@ if ($viewOrder) {
             <button type="button" class="cms-vtabs__tab" role="tab" data-tab="invoices" aria-selected="false">فاکتورها</button>
             <button type="button" class="cms-vtabs__tab" role="tab" data-tab="payment" aria-selected="false">مدارک پرداخت</button>
             <button type="button" class="cms-vtabs__tab" role="tab" data-tab="cheques" aria-selected="false">چک‌ها</button>
-            <button type="button" class="cms-vtabs__tab" role="tab" data-tab="chat" aria-selected="false">گفتگو با فروشنده</button>
+            <button type="button" class="cms-vtabs__tab" role="tab" data-tab="chat" aria-selected="false">گفتگو با <?= cms_h($viewChatPeerLabel) ?></button>
             <button type="button" class="cms-vtabs__tab" role="tab" data-tab="history" aria-selected="false">تاریخچه</button>
           </nav>
 
@@ -558,6 +581,9 @@ if ($viewOrder) {
                     <p class="cms-muted cms-vtabs__hint">برای تأیید انبار به تب «اقلام و قیمت» بروید — قیمت همه اقلام الزامی است و پیش‌فاکتور خودکار برای مشتری ارسال می‌شود. رد انبار سفارش را می‌بندد و بایگانی می‌کند.</p>
                   <?php elseif ($cur === 'payment_proof_sent'): ?>
                     <p class="cms-muted cms-vtabs__hint">هشدار نقص مدارک وضعیت را عوض نمی‌کند؛ مشتری اصلاح می‌کند و دوباره می‌فرستد.</p>
+                    <?php if (!$viewMarkPaidReadiness['can'] && ($viewMarkPaidReadiness['reason'] ?? '') !== ''): ?>
+                      <p class="cms-muted cms-vtabs__hint"><?= cms_h((string) $viewMarkPaidReadiness['reason']) ?></p>
+                    <?php endif; ?>
                   <?php elseif (orders_is_parcel_open($cur)): ?>
                     <p class="cms-muted cms-vtabs__hint">پس از ارسال، سفارش تا «تأیید دریافت» تمام نیست.</p>
                   <?php endif; ?>
@@ -568,6 +594,10 @@ if ($viewOrder) {
                         type="button"
                         data-action="<?= cms_h($btn['action']) ?>"
                         data-label="<?= cms_h($btn['label']) ?>"
+                        <?php if ($btn['action'] === 'mark_paid' && !$viewMarkPaidReadiness['can']): ?>
+                          disabled
+                          title="<?= cms_h((string) ($viewMarkPaidReadiness['reason'] ?? 'امکان تأیید پرداخت وجود ندارد')) ?>"
+                        <?php endif; ?>
                       ><?= cms_h($btn['label']) ?></button>
                     <?php endforeach; ?>
                   </div>
@@ -794,6 +824,24 @@ if ($viewOrder) {
 
             <section class="cms-vtabs__panel" data-panel="payment" role="tabpanel" hidden>
               <h3 class="cms-vtabs__heading">مدارک پرداخت مشتری</h3>
+              <?php if (in_array($cur, ['accepted', 'payment_proof_sent'], true)): ?>
+                <form method="post" class="cms-form" style="margin:0 0 1rem">
+                  <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
+                  <?php $returnHiddens(); ?>
+                  <input type="hidden" name="action" value="set_payment_method">
+                  <p class="cms-muted" style="margin:0 0 .5rem">
+                    روش پرداخت:
+                    <strong><?= $viewPaymentMethod === 'cash' ? 'نقد' : ($viewPaymentMethod === 'cheque' ? 'چک' : 'تعیین نشده') ?></strong>
+                  </p>
+                  <div class="cms-btn-row">
+                    <button class="cms-btn cms-btn--secondary" type="submit" name="payment_method" value="cash">نقد</button>
+                    <button class="cms-btn cms-btn--secondary" type="submit" name="payment_method" value="cheque">چک</button>
+                  </div>
+                </form>
+              <?php endif; ?>
+              <?php if ($viewPaymentReference !== ''): ?>
+                <p class="cms-muted" style="margin:0 0 .75rem">شماره پیگیری: <span dir="ltr"><?= cms_h($viewPaymentReference) ?></span></p>
+              <?php endif; ?>
               <?php if ($payWarnState === 'answered'): ?>
                 <div class="cms-payment-answered">
                   <strong class="cms-payment-answered__badge">پاسخ مشتری</strong>
@@ -847,6 +895,9 @@ if ($viewOrder) {
 
             <section class="cms-vtabs__panel" data-panel="cheques" role="tabpanel" hidden>
               <h3 class="cms-vtabs__heading">چک‌های پستی</h3>
+              <p class="cms-muted" style="margin:0 0 .75rem">
+                ثبت‌شده: <?= cms_h($viewChequeRegisteredLabel) ?> · مانده: <?= cms_h($viewChequeRemainingLabel) ?>
+              </p>
               <p class="cms-muted cms-vtabs__hint" style="margin-top:0">
                 روز دریافت چک با پست و سررسید را ثبت کنید. مشتری با پیامک و اعلان اپ مطلع می‌شود.
                 نتیجه بانک (وصول / برگشت) جدا از «تأیید پرداخت» سفارش است.
