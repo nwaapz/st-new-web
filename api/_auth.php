@@ -58,10 +58,33 @@ function site_auth_refresh_session_cookie(): void
     ]);
 }
 
+/**
+ * Flush and unlock the session file.
+ *
+ * PHP holds an exclusive lock on the session for the whole request, so without
+ * this the browser's parallel API calls (profile page fires orders, messages,
+ * notifications and tickets at once) queue up one behind another. Writers call
+ * site_auth_session_start() again, which reopens the session.
+ */
+function site_auth_session_release(): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+}
+
 function site_auth_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    require_once dirname(__DIR__) . '/cms/lib/schema-guard.php';
+    if (cms_schema_guard_done('site-auth', [__FILE__])) {
+        $ready = true;
+        require_once dirname(__DIR__) . '/cms/lib/branches.php';
+        branches_ensure_schema($pdo);
         return;
     }
 
@@ -129,6 +152,7 @@ function site_auth_ensure_schema(PDO $pdo): void
     require_once dirname(__DIR__) . '/cms/lib/branches.php';
     branches_ensure_schema($pdo);
 
+    cms_schema_guard_mark('site-auth', [__FILE__]);
     $ready = true;
 }
 
@@ -309,6 +333,7 @@ function site_auth_current_user(PDO $pdo): ?array
     if ($id <= 0) {
         $restored = site_auth_restore_from_device($pdo);
         if ($restored === null) {
+            site_auth_session_release();
             return null;
         }
         site_auth_login($restored['id'], $restored['phone']);
@@ -320,6 +345,7 @@ function site_auth_current_user(PDO $pdo): ?array
     $row = $stmt->fetch();
     if (!$row) {
         unset($_SESSION['web_user_id'], $_SESSION['web_user_phone']);
+        site_auth_session_release();
         return null;
     }
 
@@ -332,6 +358,7 @@ function site_auth_current_user(PDO $pdo): ?array
         site_auth_touch_device($pdo, $device['id']);
     }
     site_auth_refresh_session_cookie();
+    site_auth_session_release();
 
     return [
         'id' => $userId,

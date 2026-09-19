@@ -6,11 +6,17 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/bootstrap.php';
+require_once __DIR__ . '/schema-guard.php';
 
 function seller_credit_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    if (cms_schema_guard_done('seller-credit', [__FILE__])) {
+        $ready = true;
         return;
     }
 
@@ -31,6 +37,7 @@ function seller_credit_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
+    cms_schema_guard_mark('seller-credit', [__FILE__]);
     $ready = true;
 }
 

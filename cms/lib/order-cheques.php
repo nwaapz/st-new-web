@@ -6,11 +6,17 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/jalali.php';
+require_once __DIR__ . '/schema-guard.php';
 
 function order_cheques_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    if (cms_schema_guard_done('order-cheques', [__FILE__])) {
+        $ready = true;
         return;
     }
 
@@ -32,6 +38,7 @@ function order_cheques_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
+    cms_schema_guard_mark('order-cheques', [__FILE__]);
     $ready = true;
 }
 

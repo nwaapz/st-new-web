@@ -7,11 +7,17 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/seller-credit.php';
+require_once __DIR__ . '/schema-guard.php';
 
 function mechanic_broadcasts_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    if (cms_schema_guard_done('mechanic-broadcasts', [__FILE__])) {
+        $ready = true;
         return;
     }
 
@@ -72,6 +78,7 @@ function mechanic_broadcasts_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
+    cms_schema_guard_mark('mechanic-broadcasts', [__FILE__]);
     $ready = true;
 }
 

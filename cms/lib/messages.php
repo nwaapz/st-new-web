@@ -5,10 +5,17 @@ declare(strict_types=1);
  * Client ↔ admin messaging + unread watermarks for order changes.
  */
 
+require_once __DIR__ . '/schema-guard.php';
+
 function messages_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    if (cms_schema_guard_done('messages', [__FILE__])) {
+        $ready = true;
         return;
     }
 
@@ -142,6 +149,7 @@ function messages_ensure_schema(PDO $pdo): void
         /* ignore */
     }
 
+    cms_schema_guard_mark('messages', [__FILE__]);
     $ready = true;
 }
 

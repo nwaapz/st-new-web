@@ -180,6 +180,11 @@ function cms_take_flash(): ?array
 
 function cms_ensure_settings_table(PDO $pdo): void
 {
+    static $ready = false;
+    if ($ready) {
+        return;
+    }
+
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS site_settings (
           setting_key VARCHAR(64) NOT NULL,
@@ -188,20 +193,54 @@ function cms_ensure_settings_table(PDO $pdo): void
           PRIMARY KEY (setting_key)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
+
+    $ready = true;
+}
+
+/**
+ * Settings are read many times per request (headers, price mode, footer, …),
+ * so keep the whole table in memory for the life of the request.
+ *
+ * Pass $forget to drop the cache; it reloads on the next read.
+ *
+ * @return array<string, string>
+ */
+function cms_settings_all(bool $forget = false): array
+{
+    static $settings = null;
+
+    if ($forget) {
+        $settings = null;
+        return [];
+    }
+    if ($settings !== null) {
+        return $settings;
+    }
+
+    try {
+        $pdo = cms_pdo();
+        cms_ensure_settings_table($pdo);
+        $rows = $pdo->query('SELECT setting_key, setting_value FROM site_settings')->fetchAll() ?: [];
+        $settings = [];
+        foreach ($rows as $row) {
+            $settings[(string) $row['setting_key']] = (string) $row['setting_value'];
+        }
+    } catch (Throwable $e) {
+        $settings = [];
+    }
+
+    return $settings;
+}
+
+function cms_settings_forget(): void
+{
+    cms_settings_all(true);
 }
 
 function cms_setting_get(string $key, string $default = ''): string
 {
-    try {
-        $pdo = cms_pdo();
-        cms_ensure_settings_table($pdo);
-        $stmt = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = ?');
-        $stmt->execute([$key]);
-        $value = $stmt->fetchColumn();
-        return $value === false ? $default : (string) $value;
-    } catch (Throwable $e) {
-        return $default;
-    }
+    $settings = cms_settings_all();
+    return array_key_exists($key, $settings) ? $settings[$key] : $default;
 }
 
 function cms_setting_set(string $key, string $value): void
@@ -213,6 +252,7 @@ function cms_setting_set(string $key, string $value): void
          ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)'
     );
     $stmt->execute([$key, $value]);
+    cms_settings_forget();
 }
 
 function cms_call_for_price_enabled(): bool

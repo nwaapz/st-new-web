@@ -18,6 +18,10 @@ if (!$isCli) {
 
 $pdo = cms_pdo();
 
+// Drop the *_ensure_schema() skip stamps so this run always re-checks everything.
+require_once __DIR__ . '/lib/schema-guard.php';
+cms_schema_guard_flush();
+
 $log = [];
 $ok = true;
 

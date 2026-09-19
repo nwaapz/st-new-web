@@ -2,11 +2,17 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/orders.php';
+require_once __DIR__ . '/schema-guard.php';
 
 function order_messages_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    if (cms_schema_guard_done('order-messages', [__FILE__])) {
+        $ready = true;
         return;
     }
 
@@ -68,6 +74,7 @@ function order_messages_ensure_schema(PDO $pdo): void
         error_log('[order-messages] schema migration: ' . $e->getMessage());
     }
 
+    cms_schema_guard_mark('order-messages', [__FILE__]);
     $ready = true;
 }
 

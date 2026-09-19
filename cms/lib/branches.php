@@ -5,6 +5,8 @@ declare(strict_types=1);
  * Branch catalog helpers + ticket schema.
  */
 
+require_once __DIR__ . '/schema-guard.php';
+
 function branches_normalize_phone(string $phone): string
 {
     $digits = preg_replace('/\D/', '', $phone) ?? '';
@@ -18,6 +20,11 @@ function branches_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    if (cms_schema_guard_done('branches', [__FILE__])) {
+        $ready = true;
         return;
     }
 
@@ -113,6 +120,7 @@ function branches_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
+    cms_schema_guard_mark('branches', [__FILE__]);
     $ready = true;
 }
 

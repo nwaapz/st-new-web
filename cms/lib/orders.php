@@ -6,6 +6,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/order-cheques.php';
+require_once __DIR__ . '/schema-guard.php';
 
 function orders_notify_sales_client(PDO $pdo, int $orderId, string $notifyType, string $message = ''): void
 {
@@ -25,6 +26,12 @@ function orders_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    if (cms_schema_guard_done('orders', [__FILE__])) {
+        $ready = true;
+        order_cheques_ensure_schema($pdo);
         return;
     }
 
@@ -333,6 +340,7 @@ function orders_ensure_schema(PDO $pdo): void
     require_once __DIR__ . '/order-cheques.php';
     order_cheques_ensure_schema($pdo);
 
+    cms_schema_guard_mark('orders', [__FILE__]);
     $ready = true;
 }
 

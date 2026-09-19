@@ -10,11 +10,19 @@ declare(strict_types=1);
 require_once __DIR__ . '/mechanic-catalog.php';
 require_once __DIR__ . '/seller-credit.php';
 require_once __DIR__ . '/mechanic-broadcasts.php';
+require_once __DIR__ . '/schema-guard.php';
 
 function mechanics_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
     if ($ready) {
+        return;
+    }
+
+    if (cms_schema_guard_done('mechanics', [__FILE__])) {
+        $ready = true;
+        seller_credit_ensure_schema($pdo);
+        mechanic_broadcasts_ensure_schema($pdo);
         return;
     }
 
@@ -287,6 +295,7 @@ function mechanics_ensure_schema(PDO $pdo): void
     seller_credit_ensure_schema($pdo);
     mechanic_broadcasts_ensure_schema($pdo);
 
+    cms_schema_guard_mark('mechanics', [__FILE__]);
     $ready = true;
 }
 
