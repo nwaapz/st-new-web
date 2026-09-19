@@ -301,11 +301,13 @@ function order_messages_post_client(PDO $pdo, int $orderId, int $userId, string 
 function order_messages_serialize(array $row): array
 {
     $actor = (string) ($row['actor'] ?? '');
-    $senderName = match ($actor) {
-        'admin' => (string) ($row['admin_name'] ?? ''),
-        'client' => (string) ($row['client_name'] ?? ''),
-        default => (string) ($row['sales_name'] ?? ''),
-    };
+    if ($actor === 'admin') {
+        $senderName = (string) ($row['admin_name'] ?? '');
+    } elseif ($actor === 'client') {
+        $senderName = (string) ($row['client_name'] ?? '');
+    } else {
+        $senderName = (string) ($row['sales_name'] ?? '');
+    }
 
     return [
         'id' => (int) ($row['id'] ?? 0),
