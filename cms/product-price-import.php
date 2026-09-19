@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/lib/jalali.php';
 require_once __DIR__ . '/lib/price-import.php';
 require_once __DIR__ . '/lib/admin-audit.php';
 
@@ -179,6 +180,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         : null;
 
     try {
+        if ($action === 'save_sheet_url') {
+            $sheetUrl = trim((string) ($_POST['google_sheet_url'] ?? ''));
+            cms_setting_set(PRICE_IMPORT_SETTING_SHEET_URL, $sheetUrl);
+            cms_audit_simple(
+                $pdo,
+                'price_import.sheet_url',
+                cms_current_username() . ' آدرس Google Sheet ورود قیمت را به‌روز کرد'
+            );
+            cms_flash($sheetUrl === '' ? 'آدرس Google Sheet پاک شد' : 'آدرس Google Sheet ذخیره شد');
+            cms_redirect('product-price-import.php');
+        }
+
         if ($action === 'clear') {
             unset($_SESSION[PRICE_IMPORT_SESSION_KEY]);
             cms_audit_simple($pdo, 'price_import.clear', cms_current_username() . ' پیش‌نمایش ورود قیمت را پاک کرد');
@@ -365,6 +378,11 @@ $dismissedRows = $rowPartitions['dismissed'];
 $categories = price_import_load_categories($pdo);
 $carModels = price_import_load_car_models($pdo);
 $sourceName = is_array($session) ? (string) ($session['source_name'] ?? '') : '';
+$priceSyncStatus = price_import_get_sync_status();
+$googleSheetUrl = (string) ($priceSyncStatus['sheet_url'] ?? '');
+$lastPriceSyncDisplay = (string) ($priceSyncStatus['last_sync_at_display'] ?? '');
+$lastPriceSyncUpdated = (int) ($priceSyncStatus['updated'] ?? 0);
+$lastPriceSyncSource = (string) ($priceSyncStatus['source'] ?? '');
 
 $readyCount = 0;
 $carSetupCount = 0;
@@ -390,6 +408,46 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
   روی cPanel اگر xlsx کار نکرد، در Excel «Save As → CSV UTF-8» بزنید.
 </p>
 <p class="cms-muted"><?= cms_h(price_import_xlsx_support_hint()) ?></p>
+
+<div class="cms-card price-import-sheet">
+  <h2>Google Sheet (بروزرسانی خودکار)</h2>
+  <p class="cms-muted">
+    آدرس Google Sheet عمومی را وارد کنید (دسترسی: «Anyone with the link can view»).
+    اپ مدیریت فروش هنگام ورود و با دکمه بروزرسانی، قیمت‌ها را از این شیت می‌خواند.
+  </p>
+  <form method="post" class="cms-form">
+    <input type="hidden" name="action" value="save_sheet_url">
+    <label class="cms-label">آدرس Google Sheet</label>
+    <input
+      class="cms-input"
+      type="url"
+      name="google_sheet_url"
+      value="<?= cms_h($googleSheetUrl) ?>"
+      placeholder="https://docs.google.com/spreadsheets/d/..."
+      dir="ltr"
+      style="text-align:left"
+    >
+    <div class="cms-form__actions">
+      <button class="cms-btn cms-btn--primary" type="submit">ذخیره آدرس شیت</button>
+    </div>
+  </form>
+  <?php if ($lastPriceSyncDisplay !== ''): ?>
+    <p class="cms-muted" style="margin-top:1rem">
+      آخرین بروزرسانی قیمت:
+      <strong><?= cms_h($lastPriceSyncDisplay) ?></strong>
+      <?php if ($lastPriceSyncUpdated > 0): ?>
+        — <?= cms_h(cms_to_persian_digits((string) $lastPriceSyncUpdated)) ?> مورد به‌روز شد
+      <?php endif; ?>
+      <?php if ($lastPriceSyncSource === 'google_sheet'): ?>
+        (از Google Sheet)
+      <?php elseif ($lastPriceSyncSource === 'file_upload'): ?>
+        (از فایل Excel)
+      <?php endif; ?>
+    </p>
+  <?php else: ?>
+    <p class="cms-muted" style="margin-top:1rem">هنوز بروزرسانی قیمت انجام نشده است.</p>
+  <?php endif; ?>
+</div>
 
 <div class="cms-card price-import-upload">
   <h2>۱. آپلود فایل</h2>

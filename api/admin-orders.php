@@ -47,11 +47,12 @@ try {
 
         $scope = isset($_GET['scope']) ? trim((string) $_GET['scope']) : 'customers';
         $status = isset($_GET['status']) ? trim((string) $_GET['status']) : 'all';
+        $ongoingMode = isset($_GET['ongoing_mode']) ? trim((string) $_GET['ongoing_mode']) : 'new_order';
         $q = isset($_GET['q']) ? trim((string) $_GET['q']) : '';
         $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
         $perPage = isset($_GET['per_page']) ? (int) $_GET['per_page'] : 20;
 
-        $list = orders_admin_list($pdo, $scope, $status, $q, $page, $perPage);
+        $list = orders_admin_list($pdo, $scope, $status, $q, $page, $perPage, $ongoingMode);
         api_json([
             'ok' => true,
             'orders' => $list['items'],
@@ -62,6 +63,8 @@ try {
             'submitted_count' => $list['submitted_count'],
             'status_labels' => orders_status_labels(),
             'all_statuses' => orders_all_statuses(),
+            'ongoing_modes' => orders_ongoing_mode_labels(),
+            'ongoing_mode' => orders_normalize_ongoing_mode($ongoingMode),
         ]);
     }
 
@@ -96,7 +99,7 @@ try {
 
     $result = orders_admin_apply_action($pdo, $orderId, $action, $message, $prices, $preInvoiceDueAt, $cheque);
 
-    if ($action === 'delete' || !empty($result['deleted'])) {
+    if ($action === 'delete' || $action === 'remove' || !empty($result['deleted'])) {
         api_json([
             'ok' => true,
             'deleted' => true,

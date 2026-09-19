@@ -52,6 +52,8 @@ try {
         }
 
         $result = price_import_apply_prices_only($pdo, $parsed);
+        price_import_record_sync_meta((int) $result['updated'], 'file_upload');
+        $syncStatus = price_import_get_sync_status();
         api_json([
             'ok' => true,
             'source_name' => $originalName,
@@ -65,6 +67,9 @@ try {
                 $result['updated'],
                 count($result['skipped'])
             ),
+            'last_sync_at' => $syncStatus['last_sync_at'],
+            'last_sync_at_display' => $syncStatus['last_sync_at_display'],
+            'source' => $syncStatus['source'],
         ]);
     } finally {
         if (is_file($stored)) {

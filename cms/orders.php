@@ -14,6 +14,7 @@ orders_ensure_schema($pdo);
 $statusLabels = orders_status_labels();
 $allowed = orders_allowed_transitions();
 $bucketLabels = orders_list_bucket_labels();
+$ongoingModeLabels = orders_ongoing_mode_labels();
 
 $pageSize = 20;
 
@@ -36,17 +37,26 @@ if ($page < 1) {
 
 $viewId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 
+$ongoingMode = 'new_order';
+if ($statusFilter === 'ongoing' && isset($_GET['ongoing_mode'])) {
+    $ongoingMode = orders_normalize_ongoing_mode((string) $_GET['ongoing_mode']);
+}
+
 $ordersListQs = static function (
     string $scope,
     string $status = 'ongoing',
     string $q = '',
     int $page = 1,
-    ?int $id = null
+    ?int $id = null,
+    string $ongoingMode = 'new_order'
 ): string {
     $params = [
         'scope' => $scope,
         'status' => $status,
     ];
+    if ($status === 'ongoing') {
+        $params['ongoing_mode'] = orders_normalize_ongoing_mode($ongoingMode);
+    }
     if ($q !== '') {
         $params['q'] = $q;
     }
@@ -69,6 +79,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $returnQ = trim((string) ($_POST['return_q'] ?? $searchQ));
     $returnPage = max(1, (int) ($_POST['return_page'] ?? $page));
+    $returnOngoingMode = trim((string) ($_POST['return_ongoing_mode'] ?? $ongoingMode));
+    if ($returnStatus === 'ongoing') {
+        $returnOngoingMode = orders_normalize_ongoing_mode($returnOngoingMode);
+    } else {
+        $returnOngoingMode = 'new_order';
+    }
 
     try {
         if ($orderId <= 0) {
@@ -127,8 +143,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $redirectTo = $action === 'delete'
-        ? $ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, null)
-        : $ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, $orderId);
+        ? $ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, null, $returnOngoingMode)
+        : $ordersListQs($returnScope, $returnStatus, $returnQ, $returnPage, $orderId, $returnOngoingMode);
     if ($returnTab !== '') {
         $redirectTo .= '&tab=' . rawurlencode($returnTab);
     }
@@ -155,7 +171,7 @@ if ($viewId > 0) {
 $countCustomers = (int) $pdo->query('SELECT COUNT(*) FROM orders WHERE branch_id IS NULL')->fetchColumn();
 $countBranches = (int) $pdo->query('SELECT COUNT(*) FROM orders WHERE branch_id IS NOT NULL')->fetchColumn();
 
-$listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'ongoing');
+$listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'ongoing', $ongoingMode);
 $scope = $listWhere['scope'];
 $isBranchScope = $scope === 'branches';
 $statusFilter = $listWhere['status_filter'];
@@ -172,6 +188,13 @@ if ($page > $totalPages) {
 }
 $offset = ($page - 1) * $pageSize;
 
+$scopeSql = $scope === 'branches' ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
+$submittedStmt = $pdo->prepare(
+    "SELECT COUNT(*) FROM orders o WHERE {$scopeSql} AND o.status = 'submitted'"
+);
+$submittedStmt->execute();
+$submittedCount = (int) $submittedStmt->fetchColumn();
+
 $sql = "SELECT o.*,
         (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
         FROM orders o
@@ -182,7 +205,7 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $items = $stmt->fetchAll() ?: [];
 
-$listCloseHref = $ordersListQs($scope, $statusFilter, $searchQ, $page, null);
+$listCloseHref = $ordersListQs($scope, $statusFilter, $searchQ, $page, null, $ongoingMode);
 
 cms_layout_start('سفارش‌ها', cms_current_username(), 'customers');
 
@@ -206,20 +229,20 @@ if ($viewOrder) {
 <div class="cms-page-head">
   <div>
     <h1 style="margin:0">سفارش‌ها</h1>
-    <p class="cms-muted" style="margin:.35rem 0 0">انبار + قیمت/پیش‌فاکتور → پرداخت → ارسال → تأیید دریافت</p>
+    <p class="cms-muted" style="margin:.35rem 0 0">سفارش جدید → مدارک پرداخت → پرداخت → ارسال → تحویل</p>
   </div>
 </div>
 
 <div class="cms-orders-tabs" role="tablist" aria-label="نوع سفارش">
   <a class="cms-orders-tab<?= !$isBranchScope ? ' is-active' : '' ?>"
-     href="<?= cms_h($ordersListQs('customers', $statusFilter, $searchQ, 1, null)) ?>"
+     href="<?= cms_h($ordersListQs('customers', $statusFilter, $searchQ, 1, null, $ongoingMode)) ?>"
      role="tab"
      aria-selected="<?= !$isBranchScope ? 'true' : 'false' ?>">
     مشتری آزاد
     <span class="cms-orders-tab__count"><?= (int) $countCustomers ?></span>
   </a>
   <a class="cms-orders-tab<?= $isBranchScope ? ' is-active' : '' ?>"
-     href="<?= cms_h($ordersListQs('branches', $statusFilter, $searchQ, 1, null)) ?>"
+     href="<?= cms_h($ordersListQs('branches', $statusFilter, $searchQ, 1, null, $ongoingMode)) ?>"
      role="tab"
      aria-selected="<?= $isBranchScope ? 'true' : 'false' ?>">
     نمایندگان
@@ -230,6 +253,9 @@ if ($viewOrder) {
 <div class="cms-panel cms-orders-frame">
   <form class="cms-orders-toolbar" method="get" action="orders.php">
     <input type="hidden" name="scope" value="<?= cms_h($scope) ?>">
+    <?php if ($statusFilter === 'ongoing'): ?>
+      <input type="hidden" name="ongoing_mode" value="<?= cms_h($ongoingMode) ?>">
+    <?php endif; ?>
     <label class="cms-orders-toolbar__search">
       <span class="cms-label">جستجو</span>
       <input class="cms-input" type="search" name="q" value="<?= cms_h($searchQ) ?>"
@@ -248,10 +274,27 @@ if ($viewOrder) {
     <div class="cms-orders-toolbar__actions">
       <button class="cms-btn" type="submit">اعمال</button>
       <?php if ($searchQ !== '' || $statusFilter !== 'ongoing'): ?>
-        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($ordersListQs($scope, 'ongoing', '', 1, null)) ?>">پاک کردن</a>
+        <a class="cms-btn cms-btn--secondary" href="<?= cms_h($ordersListQs($scope, 'ongoing', '', 1, null, 'new_order')) ?>">پاک کردن</a>
       <?php endif; ?>
     </div>
   </form>
+
+  <?php if ($statusFilter === 'ongoing'): ?>
+    <div class="cms-ongoing-mode-frame">
+      <div class="cms-ongoing-mode-frame__title">مرحله پردازش</div>
+      <div class="cms-filter-row cms-ongoing-mode-frame__chips">
+        <?php foreach ($ongoingModeLabels as $modeKey => $modeLabel): ?>
+          <a class="cms-chip<?= $ongoingMode === $modeKey ? ' is-active' : '' ?>"
+             href="<?= cms_h($ordersListQs($scope, $statusFilter, $searchQ, 1, null, $modeKey)) ?>">
+            <?= cms_h($modeLabel) ?>
+            <?php if ($modeKey === 'new_order' && $submittedCount > 0 && $ongoingMode !== 'new_order'): ?>
+              <span class="cms-ongoing-mode-frame__badge"><?= (int) $submittedCount ?></span>
+            <?php endif; ?>
+          </a>
+        <?php endforeach; ?>
+      </div>
+    </div>
+  <?php endif; ?>
 
   <div class="cms-orders-list-head">
     <h2 style="margin:0;font-size:1.05rem">
@@ -286,7 +329,7 @@ if ($viewOrder) {
         <?php foreach ($items as $item): ?>
           <?php
             $rowArchived = orders_is_archived((string) $item['status']);
-            $rowHref = $ordersListQs($scope, $statusFilter, $searchQ, $page, (int) $item['id']);
+            $rowHref = $ordersListQs($scope, $statusFilter, $searchQ, $page, (int) $item['id'], $ongoingMode);
           ?>
           <tr class="cms-orders-row<?= $rowArchived ? ' cms-row--archived' : '' ?><?= $viewId === (int) $item['id'] ? ' is-open' : '' ?>"
               data-href="<?= cms_h($rowHref) ?>"
@@ -319,11 +362,11 @@ if ($viewOrder) {
     <?php if ($totalPages > 1): ?>
       <nav class="cms-orders-pager" aria-label="صفحه‌بندی">
         <?php if ($page > 1): ?>
-          <a class="cms-btn cms-btn--secondary" href="<?= cms_h($ordersListQs($scope, $statusFilter, $searchQ, $page - 1, null)) ?>">قبلی</a>
+          <a class="cms-btn cms-btn--secondary" href="<?= cms_h($ordersListQs($scope, $statusFilter, $searchQ, $page - 1, null, $ongoingMode)) ?>">قبلی</a>
         <?php endif; ?>
         <span class="cms-muted"><?= (int) $page ?> / <?= (int) $totalPages ?></span>
         <?php if ($page < $totalPages): ?>
-          <a class="cms-btn cms-btn--secondary" href="<?= cms_h($ordersListQs($scope, $statusFilter, $searchQ, $page + 1, null)) ?>">بعدی</a>
+          <a class="cms-btn cms-btn--secondary" href="<?= cms_h($ordersListQs($scope, $statusFilter, $searchQ, $page + 1, null, $ongoingMode)) ?>">بعدی</a>
         <?php endif; ?>
       </nav>
     <?php endif; ?>
@@ -423,11 +466,14 @@ if ($viewOrder) {
     $draftMessage = $cur === 'payment_proof_sent' && $payWarn !== '' ? $payWarn : '';
     $statusTone = orders_is_archived($cur) ? 'danger' : (orders_is_finished($cur) ? 'ok' : (orders_is_parcel_open($cur) ? 'warn' : 'info'));
     $chatOpen = orders_chat_send_allowed($cur);
-    $returnHiddens = static function () use ($statusFilter, $scope, $searchQ, $page): void {
+    $returnHiddens = static function () use ($statusFilter, $scope, $searchQ, $page, $ongoingMode): void {
         echo '<input type="hidden" name="return_status" value="' . cms_h($statusFilter) . '">';
         echo '<input type="hidden" name="return_scope" value="' . cms_h($scope) . '">';
         echo '<input type="hidden" name="return_q" value="' . cms_h($searchQ) . '">';
         echo '<input type="hidden" name="return_page" value="' . (int) $page . '">';
+        if ($statusFilter === 'ongoing') {
+            echo '<input type="hidden" name="return_ongoing_mode" value="' . cms_h($ongoingMode) . '">';
+        }
     };
   ?>
 

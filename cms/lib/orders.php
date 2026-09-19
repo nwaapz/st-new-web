@@ -455,6 +455,69 @@ function orders_list_bucket_keys(): array
     return array_keys(orders_list_bucket_labels());
 }
 
+/** @return array<string, string> */
+function orders_ongoing_mode_labels(): array
+{
+    return [
+        'new_order' => 'سفارش جدید',
+        'awaiting_payment' => 'در انتظار مدارک پرداخت',
+        'paid' => 'پرداخت دریافت شد',
+        'package_sent' => 'مرسوله ارسال شد',
+        'delivery_issue' => 'تحویل / برگشت به انبار',
+        'all' => 'همه در حال انجام',
+    ];
+}
+
+function orders_normalize_ongoing_mode(string $mode): string
+{
+    $mode = trim($mode);
+    $aliases = [
+        'awaiting_admin' => 'new_order',
+        'accepted' => 'awaiting_payment',
+        'payment_proof' => 'awaiting_payment',
+        'shipping' => 'package_sent',
+    ];
+    if (isset($aliases[$mode])) {
+        $mode = $aliases[$mode];
+    }
+    $labels = orders_ongoing_mode_labels();
+
+    return isset($labels[$mode]) ? $mode : 'new_order';
+}
+
+/**
+ * Sub-filters within the ongoing work queue (admin mobile + CMS).
+ *
+ * @return array{sql: ?string, params: list<mixed>}
+ */
+function orders_list_ongoing_mode_clause(string $mode): array
+{
+    $mode = orders_normalize_ongoing_mode($mode);
+    if ($mode === 'all') {
+        return orders_list_status_clause('ongoing');
+    }
+    if ($mode === 'new_order') {
+        return ['sql' => "o.status = 'submitted'", 'params' => []];
+    }
+    if ($mode === 'awaiting_payment') {
+        return ['sql' => "o.status IN ('accepted', 'payment_proof_sent')", 'params' => []];
+    }
+    if ($mode === 'paid') {
+        return ['sql' => "o.status = 'paid'", 'params' => []];
+    }
+    if ($mode === 'package_sent') {
+        return ['sql' => "o.status = 'shipped'", 'params' => []];
+    }
+    if ($mode === 'delivery_issue') {
+        $statuses = ['not_received', 'returned_to_origin', 'lost'];
+        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+
+        return ['sql' => "o.status IN ({$placeholders})", 'params' => $statuses];
+    }
+
+    return orders_list_status_clause('ongoing');
+}
+
 function orders_normalize_search_query(string $q): string
 {
     $q = trim($q);
@@ -569,19 +632,25 @@ function orders_admin_list_where(
     string $scope,
     string $statusFilter,
     string $searchQ,
-    string $defaultStatus = 'all'
+    string $defaultStatus = 'all',
+    string $ongoingMode = 'new_order'
 ): array {
     if ($scope !== 'branches' && $scope !== 'customers') {
         $scope = 'customers';
     }
     $statusFilter = orders_normalize_list_status($statusFilter, $defaultStatus);
+    $ongoingMode = orders_normalize_ongoing_mode($ongoingMode);
     $search = orders_list_search_clause($searchQ);
     $scopeSql = $scope === 'branches' ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
     $where = [$scopeSql];
     $params = [];
 
     if (!$search['is_identifier']) {
-        $status = orders_list_status_clause($statusFilter);
+        if ($statusFilter === 'ongoing') {
+            $status = orders_list_ongoing_mode_clause($ongoingMode);
+        } else {
+            $status = orders_list_status_clause($statusFilter);
+        }
         if ($status['sql'] !== null) {
             $where[] = $status['sql'];
             $params = array_merge($params, $status['params']);
@@ -598,6 +667,7 @@ function orders_admin_list_where(
         'scope' => $scope,
         'scope_sql' => $scopeSql,
         'status_filter' => $statusFilter,
+        'ongoing_mode' => $ongoingMode,
         'search_q' => $search['q'],
     ];
 }
@@ -1684,9 +1754,10 @@ function orders_admin_list(
     string $statusFilter = 'all',
     string $searchQ = '',
     int $page = 1,
-    int $pageSize = 20
+    int $pageSize = 20,
+    string $ongoingMode = 'new_order'
 ): array {
-    $listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'all');
+    $listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'all', $ongoingMode);
     $scope = $listWhere['scope'];
     $scopeSql = $listWhere['scope_sql'];
     $whereSql = $listWhere['sql'];
@@ -1820,7 +1891,7 @@ function orders_purge_analytics(PDO $pdo, int $orderId): void
  * @param array<string, mixed> $order
  * @return array{message: string, deleted: true}
  */
-function orders_delete(PDO $pdo, array $order, string $message = ''): array
+function orders_delete(PDO $pdo, array $order, string $message = '', bool $adminForce = false): array
 {
     require_once __DIR__ . '/admin-audit.php';
     require_once __DIR__ . '/order-messages.php';
@@ -1831,7 +1902,7 @@ function orders_delete(PDO $pdo, array $order, string $message = ''): array
     }
 
     $current = (string) ($order['status'] ?? '');
-    if (!orders_can_delete($current)) {
+    if (!$adminForce && !orders_can_delete($current)) {
         throw new RuntimeException('فقط سفارش‌های لغو یا رد شده قابل حذف دائمی هستند');
     }
 
@@ -1964,7 +2035,11 @@ function orders_admin_apply_action(
     }
 
     if ($action === 'delete') {
-        return orders_delete($pdo, $order, $message);
+        return orders_delete($pdo, $order, $message, false);
+    }
+
+    if ($action === 'remove') {
+        return orders_delete($pdo, $order, $message, true);
     }
 
     if ($action === 'add_cheque') {

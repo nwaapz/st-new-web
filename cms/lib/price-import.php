@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/price-import-xlsx.php';
+require_once __DIR__ . '/jalali.php';
 require_once __DIR__ . '/search-text.php';
 require_once __DIR__ . '/invoices.php';
 require_once __DIR__ . '/product-car-models.php';
@@ -1841,4 +1842,215 @@ function price_import_apply_prices_only(PDO $pdo, array $parsedRows): array
         'updated' => $updated,
         'skipped' => $skipped,
     ];
+}
+
+const PRICE_IMPORT_SETTING_SHEET_URL = 'price_import_google_sheet_url';
+const PRICE_IMPORT_SETTING_LAST_SYNC_AT = 'price_import_last_sync_at';
+const PRICE_IMPORT_SETTING_LAST_SYNC_UPDATED = 'price_import_last_sync_updated';
+const PRICE_IMPORT_SETTING_LAST_SYNC_SOURCE = 'price_import_last_sync_source';
+
+/**
+ * @return array{id:string,gid:string}
+ */
+function price_import_parse_google_sheet_url(string $url): array
+{
+    $url = trim($url);
+    if ($url === '') {
+        throw new RuntimeException('آدرس Google Sheet خالی است');
+    }
+
+    $id = '';
+    $gid = '0';
+
+    if (preg_match('#/spreadsheets/d/([a-zA-Z0-9-_]+)#', $url, $m)) {
+        $id = (string) $m[1];
+    } elseif (preg_match('#/spreadsheets/d/e/([a-zA-Z0-9-_]+)#', $url, $m)) {
+        $id = (string) $m[1];
+    }
+
+    if ($id === '') {
+        throw new RuntimeException('آدرس Google Sheet معتبر نیست');
+    }
+
+    if (preg_match('/[?&#]gid=(\d+)/', $url, $m)) {
+        $gid = (string) $m[1];
+    } elseif (preg_match('/#gid=(\d+)/', $url, $m)) {
+        $gid = (string) $m[1];
+    }
+
+    return ['id' => $id, 'gid' => $gid];
+}
+
+function price_import_build_google_export_url(string $id, string $gid): string
+{
+    $params = http_build_query([
+        'format' => 'xlsx',
+        'gid' => $gid !== '' ? $gid : '0',
+    ]);
+
+    if (str_contains($id, '2PACX-')) {
+        $pubParams = 'output=xlsx';
+        if ($gid !== '' && $gid !== '0') {
+            $pubParams .= '&gid=' . rawurlencode($gid);
+        }
+        return 'https://docs.google.com/spreadsheets/d/e/' . $id . '/pub?' . $pubParams;
+    }
+
+    return 'https://docs.google.com/spreadsheets/d/' . $id . '/export?' . $params;
+}
+
+function price_import_fetch_google_sheet_file(string $sheetUrl): string
+{
+    $parsed = price_import_parse_google_sheet_url($sheetUrl);
+    $exportUrl = price_import_build_google_export_url($parsed['id'], $parsed['gid']);
+    $stored = price_import_temp_dir() . DIRECTORY_SEPARATOR . 'sheet-' . bin2hex(random_bytes(8)) . '.xlsx';
+
+    $body = false;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($exportUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_TIMEOUT => 60,
+            CURLOPT_USERAGENT => 'StarTech-PriceSync/1.0',
+        ]);
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($body === false || $status >= 400) {
+            throw new RuntimeException('دریافت Google Sheet ناموفق بود (کد ' . $status . ')');
+        }
+    } else {
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 60,
+                'header' => "User-Agent: StarTech-PriceSync/1.0\r\n",
+            ],
+        ]);
+        $body = @file_get_contents($exportUrl, false, $context);
+        if ($body === false || $body === '') {
+            throw new RuntimeException('دریافت Google Sheet ناموفق بود');
+        }
+    }
+
+    if (file_put_contents($stored, $body) === false) {
+        throw new RuntimeException('ذخیره فایل Google Sheet ناموفق بود');
+    }
+
+    return $stored;
+}
+
+function price_import_format_sync_display(?string $iso): string
+{
+    $iso = trim((string) $iso);
+    if ($iso === '') {
+        return '';
+    }
+
+    try {
+        $dt = new DateTimeImmutable($iso);
+    } catch (Throwable $e) {
+        return $iso;
+    }
+
+    $now = new DateTimeImmutable('now', $dt->getTimezone());
+    $diff = $now->getTimestamp() - $dt->getTimestamp();
+    if ($diff < 60) {
+        return 'همین الان';
+    }
+    if ($diff < 3600) {
+        $mins = max(1, (int) floor($diff / 60));
+        return cms_to_persian_digits((string) $mins) . ' دقیقه پیش';
+    }
+    if ($diff < 86400) {
+        $hours = max(1, (int) floor($diff / 3600));
+        return cms_to_persian_digits((string) $hours) . ' ساعت پیش';
+    }
+
+    return cms_to_persian_digits(cms_jalali_format_from_timestamp($dt->format('Y-m-d H:i:s')));
+}
+
+function price_import_record_sync_meta(int $updated, string $source): void
+{
+    cms_setting_set(PRICE_IMPORT_SETTING_LAST_SYNC_AT, date('c'));
+    cms_setting_set(PRICE_IMPORT_SETTING_LAST_SYNC_UPDATED, (string) max(0, $updated));
+    cms_setting_set(PRICE_IMPORT_SETTING_LAST_SYNC_SOURCE, $source);
+}
+
+/**
+ * @return array{
+ *   last_sync_at:string,
+ *   last_sync_at_display:string,
+ *   updated:int,
+ *   source:string,
+ *   sheet_configured:bool,
+ *   sheet_url:string
+ * }
+ */
+function price_import_get_sync_status(): array
+{
+    $lastSyncAt = trim(cms_setting_get(PRICE_IMPORT_SETTING_LAST_SYNC_AT, ''));
+    $updated = (int) cms_setting_get(PRICE_IMPORT_SETTING_LAST_SYNC_UPDATED, '0');
+    $source = trim(cms_setting_get(PRICE_IMPORT_SETTING_LAST_SYNC_SOURCE, ''));
+    $sheetUrl = trim(cms_setting_get(PRICE_IMPORT_SETTING_SHEET_URL, ''));
+
+    return [
+        'last_sync_at' => $lastSyncAt,
+        'last_sync_at_display' => price_import_format_sync_display($lastSyncAt),
+        'updated' => $updated,
+        'source' => $source,
+        'sheet_configured' => $sheetUrl !== '',
+        'sheet_url' => $sheetUrl,
+    ];
+}
+
+/**
+ * @return array{
+ *   total_rows:int,
+ *   updated:int,
+ *   skipped:list<array{visual_id:string,name:string,excel_row:int,reason:string}>,
+ *   message:string,
+ *   last_sync_at:string,
+ *   last_sync_at_display:string,
+ *   source:string
+ * }
+ */
+function price_import_sync_from_google_sheet(PDO $pdo): array
+{
+    $sheetUrl = trim(cms_setting_get(PRICE_IMPORT_SETTING_SHEET_URL, ''));
+    if ($sheetUrl === '') {
+        throw new RuntimeException('آدرس Google Sheet در تنظیمات CMS ثبت نشده است');
+    }
+
+    $stored = price_import_fetch_google_sheet_file($sheetUrl);
+    try {
+        $parsed = price_import_parse_file($stored, 'xlsx');
+        if ($parsed === []) {
+            throw new RuntimeException('هیچ ردیف محصولی در Google Sheet یافت نشد');
+        }
+
+        $result = price_import_apply_prices_only($pdo, $parsed);
+        price_import_record_sync_meta((int) $result['updated'], 'google_sheet');
+
+        $status = price_import_get_sync_status();
+        $message = sprintf(
+            '%d ردیف خوانده شد — %d قیمت به‌روز شد — %d ردیف به‌روز نشد',
+            $result['total_rows'],
+            $result['updated'],
+            count($result['skipped'])
+        );
+
+        return array_merge($result, [
+            'message' => $message,
+            'last_sync_at' => $status['last_sync_at'],
+            'last_sync_at_display' => $status['last_sync_at_display'],
+            'source' => 'google_sheet',
+        ]);
+    } finally {
+        if (is_file($stored)) {
+            @unlink($stored);
+        }
+    }
 }
