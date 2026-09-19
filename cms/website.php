@@ -40,6 +40,10 @@ cms_layout_start('نمایش وب', cms_current_username(), 'website');
   است.
 </p>
 <div class="cms-grid-2">
+  <a class="cms-panel cms-hub-card" href="site-logo.php">
+    <h2>لوگوی سایت</h2>
+    <p class="cms-muted">تصویر لوگو در هدر و پاورقی — موقعیت و اندازه در Font Lab</p>
+  </a>
   <a class="cms-panel cms-hub-card" href="hero.php">
     <h2>صفحه اصلی</h2>
     <p class="cms-muted">هیرو و جوایز صفحه نخست</p>

@@ -34,6 +34,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     if ($section === 'website') {
         $subNav = [
             'website.php' => 'خلاصه',
+            'site-logo.php' => 'لوگوی سایت',
             'hero.php' => 'صفحه اصلی',
             'branches.php' => 'نمایندگان',
             'warranty.php' => 'گارانتی',
