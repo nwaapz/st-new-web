@@ -427,6 +427,10 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
       dir="ltr"
       style="text-align:left"
     >
+    <p class="cms-muted" style="margin:.35rem 0 0;font-size:.85rem">
+      لینک اشتراک‌گذاری همان فایل را بگذارید (حتی اگر فایل Excel آپلودی باشد).
+      دسترسی باید «هر کسی با لینک — مشاهده‌کننده» باشد.
+    </p>
     <div class="cms-form__actions">
       <button class="cms-btn cms-btn--primary" type="submit">ذخیره آدرس شیت</button>
     </div>

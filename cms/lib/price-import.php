@@ -1927,57 +1927,154 @@ function price_import_build_google_export_url(string $id, string $gid): string
     return 'https://docs.google.com/spreadsheets/d/' . $id . '/export?' . $params;
 }
 
-function price_import_fetch_google_sheet_file(string $sheetUrl): string
+/**
+ * @return list<array{url:string, ext:string}>
+ */
+function price_import_google_fetch_candidates(string $id, string $gid): array
 {
-    $parsed = price_import_parse_google_sheet_url($sheetUrl);
-    $exportUrl = price_import_build_google_export_url($parsed['id'], $parsed['gid']);
-    $stored = price_import_temp_dir() . DIRECTORY_SEPARATOR . 'sheet-' . bin2hex(random_bytes(8)) . '.xlsx';
+    $gidParam = $gid !== '' ? $gid : '0';
+    $gidQuery = 'gid=' . rawurlencode($gidParam);
 
-    $body = false;
+    if (str_contains($id, '2PACX-')) {
+        $pubBase = 'https://docs.google.com/spreadsheets/d/e/' . $id . '/pub?';
+        $extraGid = ($gid !== '' && $gid !== '0') ? '&gid=' . rawurlencode($gid) : '';
+
+        return [
+            ['url' => $pubBase . 'output=xlsx' . $extraGid, 'ext' => 'xlsx'],
+            ['url' => $pubBase . 'output=csv' . $extraGid, 'ext' => 'csv'],
+        ];
+    }
+
+    $base = 'https://docs.google.com/spreadsheets/d/' . $id;
+
+    return [
+        ['url' => $base . '/export?format=xlsx&' . $gidQuery, 'ext' => 'xlsx'],
+        ['url' => $base . '/export?format=csv&' . $gidQuery, 'ext' => 'csv'],
+        ['url' => $base . '/gviz/tq?tqx=out:csv&' . $gidQuery, 'ext' => 'csv'],
+        ['url' => $base . '/gviz/tq?tqx=out:csv', 'ext' => 'csv'],
+        ['url' => 'https://drive.google.com/uc?export=download&id=' . rawurlencode($id), 'ext' => 'xlsx'],
+    ];
+}
+
+/**
+ * @return array{body: string|false, status: int}
+ */
+function price_import_http_get_body(string $url): array
+{
     if (function_exists('curl_init')) {
-        $ch = curl_init($exportUrl);
+        $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_CONNECTTIMEOUT => 15,
-            CURLOPT_TIMEOUT => 60,
-            CURLOPT_USERAGENT => 'StarTech-PriceSync/1.0',
+            CURLOPT_CONNECTTIMEOUT => 20,
+            CURLOPT_TIMEOUT => 90,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 StarTech-PriceSync/1.2',
+            CURLOPT_HTTPHEADER => ['Accept: */*'],
         ]);
         $body = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        if ($body === false || $status >= 400) {
-            throw new RuntimeException('دریافت Google Sheet ناموفق بود (کد ' . $status . ')');
-        }
-        if (is_string($body) && (stripos($body, '<!DOCTYPE html') !== false || stripos($body, '<html') !== false)) {
-            throw new RuntimeException(
-                'Google Sheet قابل دسترسی نیست — در Google Sheets اشتراک‌گذاری را روی «هر کسی با لینک» بگذارید'
-            );
-        }
-    } else {
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'timeout' => 60,
-                'header' => "User-Agent: StarTech-PriceSync/1.0\r\n",
-            ],
-        ]);
-        $body = @file_get_contents($exportUrl, false, $context);
-        if ($body === false || $body === '') {
-            throw new RuntimeException('دریافت Google Sheet ناموفق بود');
-        }
-        if (stripos($body, '<!DOCTYPE html') !== false || stripos($body, '<html') !== false) {
-            throw new RuntimeException(
-                'Google Sheet قابل دسترسی نیست — در Google Sheets اشتراک‌گذاری را روی «هر کسی با لینک» بگذارید'
-            );
-        }
+
+        return ['body' => $body, 'status' => $status];
     }
 
-    if (file_put_contents($stored, $body) === false) {
-        throw new RuntimeException('ذخیره فایل Google Sheet ناموفق بود');
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'timeout' => 90,
+            'header' => "User-Agent: Mozilla/5.0 StarTech-PriceSync/1.2\r\n",
+            'follow_location' => 1,
+        ],
+    ]);
+    $body = @file_get_contents($url, false, $context);
+    $status = 0;
+    if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', (string) $http_response_header[0], $m)) {
+        $status = (int) $m[1];
     }
 
-    return $stored;
+    return ['body' => $body, 'status' => $status];
+}
+
+function price_import_is_html_response(?string $body): bool
+{
+    if (!is_string($body) || $body === '') {
+        return false;
+    }
+    $head = ltrim(substr($body, 0, 600));
+
+    return stripos($head, '<!DOCTYPE html') !== false
+        || stripos($head, '<html') !== false;
+}
+
+function price_import_validate_download_body(string $body, string $ext): bool
+{
+    if ($body === '') {
+        return false;
+    }
+    if (price_import_is_html_response($body)) {
+        return false;
+    }
+    if ($ext === 'xlsx') {
+        return strncmp($body, "PK\x03\x04", 4) === 0;
+    }
+    if ($ext === 'csv') {
+        return str_contains($body, ',') || str_contains($body, ';') || preg_match('/\d/', $body) === 1;
+    }
+
+    return false;
+}
+
+/**
+ * Download a Google Sheet / uploaded Excel-on-Drive file for price import.
+ *
+ * Uploaded .xlsx files opened in Google Sheets often reject /export?format=xlsx (HTTP 400);
+ * we fall back to the public gviz CSV endpoint which works for link-shared files.
+ *
+ * @return array{path:string, ext:string}
+ */
+function price_import_fetch_google_sheet_file(string $sheetUrl): array
+{
+    $parsed = price_import_parse_google_sheet_url($sheetUrl);
+    $candidates = price_import_google_fetch_candidates($parsed['id'], $parsed['gid']);
+    $errors = [];
+
+    foreach ($candidates as $candidate) {
+        $url = trim((string) ($candidate['url'] ?? ''));
+        $ext = trim((string) ($candidate['ext'] ?? 'xlsx'));
+        if ($url === '') {
+            continue;
+        }
+
+        $response = price_import_http_get_body($url);
+        $body = $response['body'];
+        $status = (int) ($response['status'] ?? 0);
+
+        if (!is_string($body) || $body === '' || $status >= 400) {
+            $errors[] = $ext . ' HTTP ' . $status;
+            continue;
+        }
+        if (!price_import_validate_download_body($body, $ext)) {
+            $errors[] = $ext . ' پاسخ نامعتبر';
+            continue;
+        }
+
+        $stored = price_import_temp_dir() . DIRECTORY_SEPARATOR . 'sheet-' . bin2hex(random_bytes(8)) . '.' . $ext;
+        if (file_put_contents($stored, $body) === false) {
+            throw new RuntimeException('ذخیره فایل Google Sheet ناموفق بود');
+        }
+
+        return ['path' => $stored, 'ext' => $ext];
+    }
+
+    $hint = 'اشتراک‌گذاری را روی «هر کسی با لینک مشاهده کند» بگذارید. '
+        . 'فایل‌های Excel آپلودی در Drive با export معمولی کار نمی‌کنند — سرور به‌صورت خودکار از CSV عمومی تلاش می‌کند.';
+    if ($errors !== []) {
+        throw new RuntimeException(
+            'دریافت Google Sheet ناموفق بود. ' . $hint . ' (' . implode('؛ ', array_slice($errors, 0, 5)) . ')'
+        );
+    }
+
+    throw new RuntimeException('دریافت Google Sheet ناموفق بود. ' . $hint);
 }
 
 function price_import_format_sync_display(?string $iso): string
@@ -2062,9 +2159,11 @@ function price_import_sync_from_google_sheet(PDO $pdo): array
         throw new RuntimeException('آدرس Google Sheet در تنظیمات CMS ثبت نشده است');
     }
 
-    $stored = price_import_fetch_google_sheet_file($sheetUrl);
+    $download = price_import_fetch_google_sheet_file($sheetUrl);
+    $stored = $download['path'];
+    $downloadExt = $download['ext'];
     try {
-        $parsed = price_import_parse_file($stored, 'xlsx');
+        $parsed = price_import_parse_file($stored, $downloadExt);
         if ($parsed === []) {
             throw new RuntimeException('هیچ ردیف محصولی در Google Sheet یافت نشد');
         }
