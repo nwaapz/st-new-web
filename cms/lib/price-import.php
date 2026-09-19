@@ -71,7 +71,9 @@ function price_import_looks_like_part_spec(string $text): bool
         return false;
     }
     return preg_match('/\d\s*PK[-\s]/i', $text) === 1
-        || preg_match('/CR\+PLUS/i', $text) === 1;
+        || preg_match('/CR\+?\s*PLUS/i', $text) === 1
+        || preg_match('/\d+[-\s]\d+\s*(CR|HNBR)/i', $text) === 1
+        || preg_match('/\bCR\+?\b/i', $text) === 1;
 }
 
 function price_import_looks_like_belt_type(string $text): bool
@@ -295,15 +297,43 @@ function price_import_cell_string($value): string
     return trim((string) $value);
 }
 
+function price_import_normalize_numeric_string(string $raw): string
+{
+    $normalized = strtr(trim($raw), [
+        '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+        '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+        '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+        '٬' => '', '،' => '', ',' => '', ' ' => '', "\u{00A0}" => '',
+    ]);
+
+    return trim($normalized);
+}
+
+function price_import_parse_numeric_amount($value): ?float
+{
+    if ($value === null || $value === '') {
+        return null;
+    }
+    if (is_int($value) || is_float($value)) {
+        return (float) $value;
+    }
+
+    $normalized = price_import_normalize_numeric_string((string) $value);
+    if ($normalized === '' || !preg_match('/^\d+(\.\d+)?$/', $normalized)) {
+        return null;
+    }
+
+    return (float) $normalized;
+}
+
 function price_import_rial_to_toman_text($rial): ?string
 {
-    if ($rial === null || $rial === '') {
+    $amount = price_import_parse_numeric_amount($rial);
+    if ($amount === null || $amount <= 0) {
         return null;
     }
-    if (!is_numeric($rial)) {
-        return null;
-    }
-    $toman = (int) round(((float) $rial) / 10);
+    $toman = (int) round($amount / 10);
     if ($toman <= 0) {
         return null;
     }
@@ -312,13 +342,11 @@ function price_import_rial_to_toman_text($rial): ?string
 
 function price_import_parse_pack_size($value): ?int
 {
-    if ($value === null || $value === '') {
+    $amount = price_import_parse_numeric_amount($value);
+    if ($amount === null) {
         return null;
     }
-    if (!is_numeric($value)) {
-        return null;
-    }
-    $pack = (int) round((float) $value);
+    $pack = (int) round($amount);
     return $pack > 0 ? $pack : null;
 }
 
@@ -1921,6 +1949,11 @@ function price_import_fetch_google_sheet_file(string $sheetUrl): string
         if ($body === false || $status >= 400) {
             throw new RuntimeException('دریافت Google Sheet ناموفق بود (کد ' . $status . ')');
         }
+        if (is_string($body) && (stripos($body, '<!DOCTYPE html') !== false || stripos($body, '<html') !== false)) {
+            throw new RuntimeException(
+                'Google Sheet قابل دسترسی نیست — در Google Sheets اشتراک‌گذاری را روی «هر کسی با لینک» بگذارید'
+            );
+        }
     } else {
         $context = stream_context_create([
             'http' => [
@@ -1932,6 +1965,11 @@ function price_import_fetch_google_sheet_file(string $sheetUrl): string
         $body = @file_get_contents($exportUrl, false, $context);
         if ($body === false || $body === '') {
             throw new RuntimeException('دریافت Google Sheet ناموفق بود');
+        }
+        if (stripos($body, '<!DOCTYPE html') !== false || stripos($body, '<html') !== false) {
+            throw new RuntimeException(
+                'Google Sheet قابل دسترسی نیست — در Google Sheets اشتراک‌گذاری را روی «هر کسی با لینک» بگذارید'
+            );
         }
     }
 
