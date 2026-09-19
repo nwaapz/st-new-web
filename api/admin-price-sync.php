@@ -44,6 +44,17 @@ try {
     }
 
     $result = price_import_sync_from_google_sheet($pdo);
+    $skipReasons = [];
+    foreach ($result['skipped'] as $skip) {
+        if (!is_array($skip)) {
+            continue;
+        }
+        $reason = trim((string) ($skip['reason'] ?? 'نامشخص'));
+        if ($reason === '') {
+            $reason = 'نامشخص';
+        }
+        $skipReasons[$reason] = ($skipReasons[$reason] ?? 0) + 1;
+    }
     api_json([
         'ok' => true,
         'last_sync_at' => $result['last_sync_at'],
@@ -53,6 +64,7 @@ try {
         'total_rows' => $result['total_rows'],
         'skipped_count' => count($result['skipped']),
         'skipped' => $result['skipped'],
+        'skip_reasons' => $skipReasons,
         'message' => $result['message'],
         'sheet_configured' => true,
     ]);

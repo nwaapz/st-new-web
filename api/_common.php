@@ -18,5 +18,5 @@ function api_json($data, int $status = 200): void
 
 function api_error(string $message, int $status = 500): void
 {
-    api_json(['error' => $message], $status);
+    api_json(['ok' => false, 'error' => $message], $status);
 }
