@@ -880,12 +880,11 @@ function orders_mark_paid_readiness(array $order, array $cheques = [], ?int $ord
 
     if ($method === 'cheque') {
         if ($cheques === []) {
-            return ['can' => false, 'reason' => 'حداقل یک چک ثبت کنید'];
-        }
-        if (!order_cheques_all_funded($cheques)) {
-            return ['can' => false, 'reason' => 'همه چک‌ها باید وصول شوند'];
+            return ['can' => false, 'reason' => 'حداقل یک چک در دفتر ثبت کنید'];
         }
 
+        // Physical receipt in office is enough to confirm payment and ship;
+        // bank cashing (funded) is tracked separately and does not block shipping.
         return ['can' => true, 'reason' => null];
     }
 

@@ -2,5 +2,5 @@
 2:"$Sreact.suspense"
 3:I[1736,["8500","static/chunks/8500-3953cc33eeceb44e.js","5864","static/chunks/5864-d1614e8ddd20ec5f.js","6636","static/chunks/app/profile/page-d3b32e3c5a1561d4.js"],"ProfileView"]
 4:I[484,[],"OutletBoundary"]
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"profile-page","children":["$","$2",null,{"fallback":["$","section",null,{"className":"profile","aria-label":"پروفایل","children":["$","div",null,{"className":"profile__panel","children":["$","div",null,{"className":"profile__status","children":"در حال آماده‌سازی…"}]}]}],"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"nQ195rLmuXnlqdC9eAEMK"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"profile-page","children":["$","$2",null,{"fallback":["$","section",null,{"className":"profile","aria-label":"پروفایل","children":["$","div",null,{"className":"profile__panel","children":["$","div",null,{"className":"profile__status","children":"در حال آماده‌سازی…"}]}]}],"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"nJNrkUcqm64Tgnki8uvrL"}
 5:null

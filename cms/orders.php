@@ -902,8 +902,8 @@ if ($viewOrder) {
                 روز دریافت چک با پست و سررسید را ثبت کنید. مشتری با پیامک و اعلان اپ مطلع می‌شود.
                 نتیجه بانک (وصول / برگشت) جدا از «تأیید پرداخت» سفارش است.
               </p>
-              <?php if ($viewCheques !== [] && order_cheques_all_funded($viewCheques) && $cur !== 'paid'): ?>
-                <p class="cms-ok">همه چک‌ها وصول شده‌اند — در صورت تمایل از تب اقدامات، پرداخت را تأیید کنید.</p>
+              <?php if ($viewCheques !== [] && $viewMarkPaidReadiness['can'] && $cur === 'payment_proof_sent'): ?>
+                <p class="cms-ok">چک در دفتر دریافت شد — از تب اقدامات پرداخت را تأیید و مرسوله را ارسال کنید. وصول بانک برای ارسال الزامی نیست.</p>
               <?php endif; ?>
 
               <?php if ($viewCheques === []): ?>
