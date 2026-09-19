@@ -263,11 +263,13 @@ function admin_push_notify_order_activity(PDO $pdo, int $orderId, string $activi
 
     $copy = admin_push_message_for_client_activity($order, $activityType, $message);
     $publicCode = (string) ($order['public_code'] ?? '');
+    $branchId = isset($order['branch_id']) ? (int) $order['branch_id'] : 0;
     $data = [
         'order_id' => (string) $orderId,
         'type' => (string) ($copy['type'] ?? $activityType),
         'public_code' => $publicCode,
         'activity' => $activityType,
+        'scope' => $branchId > 0 ? 'branches' : 'customers',
     ];
 
     if (admin_push_service_account_path() === null) {
