@@ -5,24 +5,11 @@ require_once __DIR__ . '/_common.php';
 require_once __DIR__ . '/_auth.php';
 require_once dirname(__DIR__) . '/cms/lib/orders.php';
 require_once dirname(__DIR__) . '/cms/lib/messages.php';
-require_once dirname(__DIR__) . '/cms/lib/branches.php';
-require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
-require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
-require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
-require_once dirname(__DIR__) . '/cms/lib/product-series-categories.php';
 
 site_auth_prepare_cors();
 
 try {
     $pdo = cms_pdo();
-    site_auth_ensure_schema($pdo);
-    orders_ensure_schema($pdo);
-    messages_ensure_schema($pdo);
-    cms_ensure_car_model_factories_schema($pdo);
-    cms_ensure_product_car_models_schema($pdo);
-    cms_ensure_product_categories_schema($pdo);
-    cms_series_ensure_categories_schema($pdo);
-
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
     if ($method === 'OPTIONS') {
@@ -30,6 +17,10 @@ try {
         header('Access-Control-Allow-Headers: Content-Type');
         api_json(['ok' => true]);
     }
+
+    site_auth_ensure_schema($pdo);
+    orders_ensure_schema($pdo);
+    messages_ensure_schema($pdo);
 
     $user = site_auth_current_user($pdo);
     if ($user === null) {
@@ -67,7 +58,14 @@ try {
         }
 
         $stmt = $pdo->prepare(
-            'SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100'
+            'SELECT o.*,
+                    (SELECT COALESCE(SUM(oi.quantity), 0)
+                     FROM order_items oi
+                     WHERE oi.order_id = o.id) AS item_count
+             FROM orders o
+             WHERE o.user_id = ?
+             ORDER BY o.created_at DESC, o.id DESC
+             LIMIT 100'
         );
         $stmt->execute([$userId]);
         $rows = $stmt->fetchAll() ?: [];
@@ -79,13 +77,11 @@ try {
         $orders = [];
         foreach ($rows as $row) {
             $id = (int) $row['id'];
-            $serialized = orders_serialize(
+            $orders[] = orders_serialize_client_list_row(
                 $row,
-                orders_fetch_items($pdo, $id),
-                orders_fetch_events($pdo, $id)
+                (int) ($row['item_count'] ?? 0),
+                $unreadByOrder[$id] ?? 0
             );
-            $serialized['unread_admin_events'] = $unreadByOrder[$id] ?? 0;
-            $orders[] = $serialized;
         }
         api_json(['ok' => true, 'orders' => $orders]);
     }
@@ -93,6 +89,16 @@ try {
     if ($method !== 'POST') {
         api_error('Method not allowed', 405);
     }
+
+    require_once dirname(__DIR__) . '/cms/lib/branches.php';
+    require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
+    require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
+    require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
+    require_once dirname(__DIR__) . '/cms/lib/product-series-categories.php';
+    cms_ensure_car_model_factories_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
+    cms_series_ensure_categories_schema($pdo);
 
     $body = site_auth_request_json();
     $rawItems = $body['items'] ?? null;

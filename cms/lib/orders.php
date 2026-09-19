@@ -851,6 +851,45 @@ function orders_serialize(array $order, array $items, array $events): array
     ];
 }
 
+/**
+ * Lightweight client list row — avoids loading items, events, and cheques per order.
+ *
+ * @param array<string, mixed> $order
+ * @return array<string, mixed>
+ */
+function orders_serialize_client_list_row(
+    array $order,
+    int $itemCount = 0,
+    int $unreadAdminEvents = 0
+): array {
+    return [
+        'id' => (int) $order['id'],
+        'public_code' => (string) $order['public_code'],
+        'user_id' => (int) $order['user_id'],
+        'phone' => (string) $order['phone'],
+        'status' => (string) $order['status'],
+        'payment_note' => null,
+        'payment_method' => null,
+        'payment_reference' => null,
+        'payment_file' => null,
+        'payment_files' => [],
+        'payment_warning' => null,
+        'payment_warning_state' => null,
+        'payment_submitted_at' => null,
+        'pre_invoice_file' => null,
+        'pre_invoice_created_at' => null,
+        'pre_invoice_due_at' => null,
+        'final_invoice_file' => null,
+        'final_invoice_created_at' => null,
+        'created_at' => (string) $order['created_at'],
+        'updated_at' => (string) $order['updated_at'],
+        'items' => [],
+        'events' => [],
+        'item_count' => $itemCount,
+        'unread_admin_events' => $unreadAdminEvents,
+    ];
+}
+
 function orders_normalize_payment_method(?string $raw): ?string
 {
     $value = strtolower(trim((string) $raw));
