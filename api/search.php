@@ -104,13 +104,15 @@ try {
     try {
         cms_series_ensure_categories_schema($pdo);
         $seriesCategorySql = cms_series_category_names_sql('s');
+        $rawQ = trim((string) ($_GET['q'] ?? ''));
+        [$visualSql, $visualParams] = search_visual_id_like_clause('s.visual_id', $rawQ);
         $stmt = $pdo->prepare(
             'SELECT s.id, s.name, s.slug, s.visual_id, ' . $seriesCategorySql . ' AS category_name
              FROM product_series s
              WHERE s.published = 1
                AND (' . search_name_sql('s.name') . ' LIKE ?
                     OR ' . search_name_sql('s.slug') . ' LIKE ?
-                    OR ' . search_name_sql('s.visual_id') . ' LIKE ?
+                    OR ' . $visualSql . '
                     OR EXISTS (
                       SELECT 1 FROM product_series_categories sc
                       JOIN categories c ON c.id = sc.category_id
@@ -120,7 +122,7 @@ try {
              ORDER BY s.sort_order ASC, s.name ASC
              LIMIT 5'
         );
-        $stmt->execute([$like, $like, $like, $like]);
+        $stmt->execute([$like, $like, ...$visualParams, $like]);
         foreach ($stmt->fetchAll() ?: [] as $row) {
             $series[] = [
                 'id' => (int) $row['id'],

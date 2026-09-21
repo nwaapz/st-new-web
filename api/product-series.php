@@ -329,10 +329,12 @@ try {
     $where = ['published = 1'];
     $listParams = [];
     if ($q !== '') {
+        $rawQ = trim((string) ($_GET['q'] ?? ''));
         $like = '%' . search_like_escape($q) . '%';
+        [$visualSql, $visualParams] = search_visual_id_like_clause('product_series.visual_id', $rawQ);
         $where[] = '(' . search_name_sql('product_series.name') . ' LIKE ? OR '
-            . search_name_sql('product_series.visual_id') . ' LIKE ? OR product_series.slug LIKE ?)';
-        array_push($listParams, $like, $like, $like);
+            . $visualSql . ' OR product_series.slug LIKE ?)';
+        array_push($listParams, $like, ...$visualParams, $like);
     }
     if ($categoryIds !== []) {
         $where[] = cms_series_category_in_filter_sql('product_series', count($categoryIds));

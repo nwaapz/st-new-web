@@ -369,9 +369,10 @@ if (!$showForm) {
     if ($listSearchQ !== '') {
         $qNorm = search_normalize($listSearchQ);
         $like = '%' . search_like_escape($qNorm) . '%';
+        [$visualSql, $visualParams] = search_visual_id_like_clause('s.visual_id', $listSearchQ);
         $where[] = '(' . search_name_sql('s.name') . ' LIKE ? OR '
-            . search_name_sql('s.visual_id') . ' LIKE ? OR s.slug LIKE ?)';
-        array_push($listParams, $like, $like, $like);
+            . $visualSql . ' OR s.slug LIKE ?)';
+        array_push($listParams, $like, ...$visualParams, $like);
     }
     $whereSql = implode(' AND ', $where);
     $categoryNamesSql = cms_series_category_names_sql('s');

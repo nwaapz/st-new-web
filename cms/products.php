@@ -9,6 +9,7 @@ require_once __DIR__ . '/lib/product-car-models.php';
 require_once __DIR__ . '/lib/product-categories.php';
 require_once __DIR__ . '/lib/product-series-categories.php';
 require_once __DIR__ . '/lib/admin-products.php';
+require_once __DIR__ . '/lib/admin-product-series.php';
 require_once __DIR__ . '/lib/search-text.php';
 
 cms_require_login();
@@ -568,14 +569,15 @@ if (!$showForm) {
         $where[] = cms_product_effective_category_in_filter_sql('p', 1);
         $listParams[] = $listCategoryId;
         $listParams[] = $listCategoryId;
-        $categorySeriesItems = admin_series_list_for_category($pdo, $listCategoryId);
+    }
+    if ($searchQ !== '' || $listCategoryId > 0) {
+        $categorySeriesItems = admin_product_series_list($pdo, $searchQ, 1, $listCategoryId)['items'];
     }
     if ($searchQ !== '') {
         $nameLike = '%' . search_like_escape(search_normalize($searchQ)) . '%';
-        $idLike = '%' . search_like_escape($searchQ) . '%';
-        $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR COALESCE(p.visual_id, \'\') LIKE ?)';
-        $listParams[] = $nameLike;
-        $listParams[] = $idLike;
+        [$visualSql, $visualParams] = search_visual_id_like_clause('p.visual_id', $searchQ);
+        $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR ' . $visualSql . ')';
+        array_push($listParams, $nameLike, ...$visualParams);
     }
     $whereSql = implode(' AND ', $where);
 
@@ -853,9 +855,9 @@ cms_layout_start('محصولات', cms_current_username(), 'shop');
   <?php endif; ?>
 </form>
 
-<?php if ($listCategoryId > 0 && $categorySeriesItems !== []): ?>
+<?php if ($categorySeriesItems !== []): ?>
 <div class="cms-panel" style="margin-bottom:1rem">
-  <h2 style="margin:0 0 .75rem;font-size:1rem">سری‌های این دسته</h2>
+  <h2 style="margin:0 0 .75rem;font-size:1rem"><?= $searchQ !== '' ? 'سری کیت‌های یافت‌شده' : 'سری‌های این دسته' ?></h2>
   <table class="cms-table">
     <thead><tr><th>سری کیت</th><th>شناسه</th><th>دسته</th><th>قطعات</th><th></th></tr></thead>
     <tbody>

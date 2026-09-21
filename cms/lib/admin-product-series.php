@@ -116,9 +116,10 @@ function admin_product_series_list(PDO $pdo, string $q = '', int $page = 1, int 
     }
     if ($q !== '') {
         $like = '%' . search_like_escape($q) . '%';
+        [$visualSql, $visualParams] = search_visual_id_like_clause('s.visual_id', $rawQ);
         $where .= ' AND (' . search_name_sql('s.name') . ' LIKE ? OR '
-            . search_name_sql('s.visual_id') . ' LIKE ? OR s.slug LIKE ?)';
-        array_push($params, $like, $like, $like);
+            . $visualSql . ' OR s.slug LIKE ?)';
+        array_push($params, $like, ...$visualParams, $like);
     }
 
     $countStmt = $pdo->prepare("SELECT COUNT(*) FROM product_series s WHERE {$where}");
