@@ -668,15 +668,24 @@ function orders_admin_list_where(
     string $clientPhone = '',
     int $branchId = 0
 ): array {
-    if ($scope !== 'branches' && $scope !== 'customers') {
+    if ($scope !== 'branches' && $scope !== 'customers' && $scope !== 'all') {
         $scope = 'customers';
     }
     $statusFilter = orders_normalize_list_status($statusFilter, $defaultStatus);
     $ongoingMode = orders_normalize_ongoing_mode($ongoingMode);
     $search = orders_list_search_clause($searchQ);
     $clientPhone = orders_normalize_search_query($clientPhone);
-    $scopeSql = $scope === 'branches' ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
-    $where = [$scopeSql];
+    if ($scope === 'all') {
+        $scopeSql = '1=1';
+        $where = ['1=1'];
+    } elseif ($scope === 'branches') {
+        $scopeSql = 'branch_id IS NOT NULL';
+        $where = [$scopeSql];
+    } else {
+        $scope = 'customers';
+        $scopeSql = 'branch_id IS NULL';
+        $where = [$scopeSql];
+    }
     $params = [];
 
     if ($clientPhone !== '') {
