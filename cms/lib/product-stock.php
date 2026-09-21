@@ -4,6 +4,47 @@ declare(strict_types=1);
 const PRODUCTS_STOCK_MAX = 999999;
 const PRODUCTS_STOCK_DEFAULT = 999;
 
+/** @param array<string, bool> $prodCols */
+function products_add_stock_qty_column(PDO $pdo, array $prodCols = []): void
+{
+    if ($prodCols === []) {
+        foreach ($pdo->query('SHOW COLUMNS FROM products')->fetchAll() ?: [] as $row) {
+            $prodCols[(string) ($row['Field'] ?? '')] = true;
+        }
+    }
+    if (isset($prodCols['stock_qty'])) {
+        return;
+    }
+
+    $base = 'ALTER TABLE products ADD COLUMN stock_qty INT UNSIGNED NOT NULL DEFAULT '
+        . PRODUCTS_STOCK_DEFAULT;
+    $attempts = [];
+    if (isset($prodCols['pack_size'])) {
+        $attempts[] = $base . ' AFTER pack_size';
+    }
+    if (isset($prodCols['price_text'])) {
+        $attempts[] = $base . ' AFTER price_text';
+    }
+    $attempts[] = $base;
+
+    $lastError = null;
+    foreach ($attempts as $sql) {
+        try {
+            $pdo->exec($sql);
+            return;
+        } catch (Throwable $e) {
+            $lastError = $e;
+        }
+    }
+
+    $detail = $lastError instanceof Throwable ? $lastError->getMessage() : '';
+    throw new RuntimeException(
+        'ستون موجودی انبار (stock_qty) روی جدول products ایجاد نشد.'
+        . ($detail !== '' ? ' ' . $detail : '')
+        . ' یک بار migrate-run.php را اجرا کنید.'
+    );
+}
+
 function products_ensure_stock_schema(PDO $pdo): void
 {
     static $ready = false;
@@ -11,13 +52,12 @@ function products_ensure_stock_schema(PDO $pdo): void
         return;
     }
 
-    $exists = $pdo->query("SHOW COLUMNS FROM products LIKE 'stock_qty'")->fetchAll();
-    if (count($exists) === 0) {
-        $pdo->exec(
-            'ALTER TABLE products ADD COLUMN stock_qty INT UNSIGNED NOT NULL DEFAULT '
-            . PRODUCTS_STOCK_DEFAULT
-            . ' AFTER pack_size'
-        );
+    $prodCols = [];
+    foreach ($pdo->query('SHOW COLUMNS FROM products')->fetchAll() ?: [] as $row) {
+        $prodCols[(string) ($row['Field'] ?? '')] = true;
+    }
+    if (!isset($prodCols['stock_qty'])) {
+        products_add_stock_qty_column($pdo, $prodCols);
     }
 
     $orderCols = [];

@@ -612,6 +612,22 @@ try {
     }
 
     try {
+        require_once __DIR__ . '/lib/product-stock.php';
+        $prodCols = [];
+        foreach ($pdo->query('SHOW COLUMNS FROM products')->fetchAll() ?: [] as $col) {
+            $prodCols[(string) ($col['Field'] ?? '')] = true;
+        }
+        if (!isset($prodCols['stock_qty'])) {
+            products_add_stock_qty_column($pdo, $prodCols);
+            $log[] = 'Added products.stock_qty';
+        } else {
+            $log[] = 'products.stock_qty already exists';
+        }
+    } catch (Throwable $e) {
+        $log[] = 'products.stock_qty: ' . $e->getMessage();
+    }
+
+    try {
         $itemCols = [];
         foreach ($pdo->query('SHOW COLUMNS FROM order_items')->fetchAll() ?: [] as $col) {
             $itemCols[(string) ($col['Field'] ?? '')] = true;
