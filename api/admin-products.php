@@ -96,7 +96,24 @@ try {
     ]);
 } catch (RuntimeException $e) {
     api_error($e->getMessage(), 400);
+} catch (PDOException $e) {
+    error_log('[admin-products] ' . $e->getMessage());
+    $msg = $e->getMessage();
+    if (str_contains($msg, 'Duplicate entry')) {
+        if (str_contains($msg, 'uq_prod_slug') || str_contains($msg, 'slug')) {
+            api_error('این اسلاگ قبلاً استفاده شده است', 400);
+        }
+        if (str_contains($msg, 'uq_prod_visual_id') || str_contains($msg, 'visual_id')) {
+            api_error('این شناسه نمایشی قبلاً استفاده شده است', 400);
+        }
+        api_error('اطلاعات تکراری است', 400);
+    }
+    if (str_contains($msg, 'stock_qty')) {
+        api_error('ستون موجودی انبار روی سرور آماده نیست. migrate-run.php را اجرا کنید.', 400);
+    }
+    api_error('خطای پایگاه داده: ' . preg_replace('/\s+\[.*$/', '', $msg), 500);
 } catch (Throwable $e) {
     error_log('[admin-products] ' . $e->getMessage());
-    api_error('خطای سرور', 500);
+    $detail = trim($e->getMessage());
+    api_error($detail !== '' ? ('خطای سرور: ' . $detail) : 'خطای سرور', 500);
 }

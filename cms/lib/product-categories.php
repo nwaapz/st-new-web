@@ -199,6 +199,13 @@ function cms_product_save_category_ids(PDO $pdo, int $productId, array $category
         throw new RuntimeException('هر محصول حداکثر دو دسته می‌تواند داشته باشد');
     }
 
+    $placeholders = implode(',', array_fill(0, count($unique), '?'));
+    $check = $pdo->prepare("SELECT COUNT(*) FROM categories WHERE id IN ({$placeholders})");
+    $check->execute($unique);
+    if ((int) $check->fetchColumn() !== count($unique)) {
+        throw new RuntimeException('یکی از دسته‌های انتخاب‌شده دیگر وجود ندارد');
+    }
+
     $pdo->prepare('DELETE FROM product_categories WHERE product_id = ?')->execute([$productId]);
     $stmt = $pdo->prepare(
         'INSERT INTO product_categories (product_id, category_id, sort_order) VALUES (?, ?, ?)'

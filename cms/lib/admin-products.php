@@ -287,6 +287,130 @@ function admin_products_delete(PDO $pdo, int $id): void
     $stmt->execute([$id]);
 }
 
+/** @return array<string, bool> */
+function admin_products_table_columns(PDO $pdo): array
+{
+    static $cache = null;
+    if (is_array($cache)) {
+        return $cache;
+    }
+
+    $cache = [];
+    foreach ($pdo->query('SHOW COLUMNS FROM products')->fetchAll() ?: [] as $row) {
+        $field = (string) ($row['Field'] ?? '');
+        if ($field !== '') {
+            $cache[$field] = true;
+        }
+    }
+
+    return $cache;
+}
+
+function admin_products_public_db_error(PDOException $e, string $context): string
+{
+    $msg = $e->getMessage();
+    if (str_contains($msg, 'Duplicate entry')) {
+        if (str_contains($msg, 'uq_prod_slug') || str_contains($msg, 'slug')) {
+            return 'این اسلاگ قبلاً استفاده شده است';
+        }
+        if (str_contains($msg, 'uq_prod_visual_id') || str_contains($msg, 'visual_id')) {
+            return 'این شناسه نمایشی قبلاً استفاده شده است';
+        }
+        return 'اطلاعات تکراری است';
+    }
+    if (str_contains($msg, 'foreign key constraint') || str_contains($msg, 'FOREIGN KEY')) {
+        return 'یکی از دسته‌های انتخاب‌شده معتبر نیست';
+    }
+    if (str_contains($msg, 'Unknown column')) {
+        return 'ستون پایگاه داده وجود ندارد. migrate-run.php را اجرا کنید';
+    }
+    if (str_contains($msg, "doesn't have a default value")) {
+        return 'فیلدهای الزامی پایگاه داده مقداردهی نشده‌اند. migrate-run.php را اجرا کنید';
+    }
+
+    $short = preg_replace('/\s+\[.*$/', '', $msg) ?? $msg;
+    return trim($context . ': ' . $short);
+}
+
+/** @param list<int> $categoryIds */
+function admin_products_default_car_model_id(PDO $pdo, array $categoryIds): int
+{
+    $row = $pdo->query('SELECT id FROM car_models ORDER BY sort_order ASC, id ASC LIMIT 1')->fetch();
+    $modelId = (int) ($row['id'] ?? 0);
+    if ($modelId <= 0) {
+        throw new RuntimeException('حداقل یک مدل خودرو در سیستم لازم است');
+    }
+
+    return $modelId;
+}
+
+/**
+ * @param array<string, mixed> $row
+ * @param list<int> $categoryIds
+ */
+function admin_products_apply_row(PDO $pdo, int $id, array $row, array $categoryIds): int
+{
+    $cols = admin_products_table_columns($pdo);
+
+    if ($id <= 0 && isset($cols['category_id']) && !array_key_exists('category_id', $row)) {
+        $firstCategory = (int) ($categoryIds[0] ?? 0);
+        if ($firstCategory <= 0) {
+            throw new RuntimeException('حداقل یک دسته محصول الزامی است');
+        }
+        $row['category_id'] = $firstCategory;
+    }
+    if ($id <= 0 && isset($cols['car_model_id']) && !array_key_exists('car_model_id', $row)) {
+        $row['car_model_id'] = admin_products_default_car_model_id($pdo, $categoryIds);
+    }
+
+    if ($id > 0) {
+        $setParts = [];
+        $values = [];
+        foreach ($row as $column => $value) {
+            if (!isset($cols[$column])) {
+                continue;
+            }
+            $setParts[] = '`' . $column . '`=?';
+            $values[] = $value;
+        }
+        if ($setParts === []) {
+            throw new RuntimeException('هیچ فیلد معتبری برای ذخیره محصول یافت نشد');
+        }
+        $values[] = $id;
+        $sql = 'UPDATE products SET ' . implode(', ', $setParts) . ' WHERE id=?';
+        try {
+            $pdo->prepare($sql)->execute($values);
+        } catch (PDOException $e) {
+            throw new RuntimeException(admin_products_public_db_error($e, 'ذخیره محصول'));
+        }
+
+        return $id;
+    }
+
+    $insertCols = [];
+    $placeholders = [];
+    $values = [];
+    foreach ($row as $column => $value) {
+        if (!isset($cols[$column])) {
+            continue;
+        }
+        $insertCols[] = '`' . $column . '`';
+        $placeholders[] = '?';
+        $values[] = $value;
+    }
+    if ($insertCols === []) {
+        throw new RuntimeException('هیچ فیلد معتبری برای ایجاد محصول یافت نشد');
+    }
+    $sql = 'INSERT INTO products (' . implode(', ', $insertCols) . ') VALUES (' . implode(', ', $placeholders) . ')';
+    try {
+        $pdo->prepare($sql)->execute($values);
+    } catch (PDOException $e) {
+        throw new RuntimeException(admin_products_public_db_error($e, 'ایجاد محصول'));
+    }
+
+    return (int) $pdo->lastInsertId();
+}
+
 /**
  * @param array<string, mixed> $data
  */
@@ -316,44 +440,43 @@ function admin_products_save(PDO $pdo, array $data): int
         throw new RuntimeException('نام محصول الزامی است');
     }
 
-    if ($id > 0) {
-        $stmt = $pdo->prepare(
-            'UPDATE products SET name=?, slug=?, visual_id=?, description=?, price_text=?, image=?, stock_qty=?, sort_order=?, published=? WHERE id=?'
-        );
-        $stmt->execute([
-            $name,
-            $slug,
-            $visualId,
-            $description !== '' ? $description : null,
-            $priceText !== '' ? $priceText : null,
-            $image,
-            $stockQty,
-            $sortOrder,
-            $published,
-            $id,
-        ]);
-        $productId = $id;
-    } else {
-        $stmt = $pdo->prepare(
-            'INSERT INTO products (name, slug, visual_id, description, price_text, image, stock_qty, sort_order, published)
-             VALUES (?,?,?,?,?,?,?,?,?)'
-        );
-        $stmt->execute([
-            $name,
-            $slug,
-            $visualId,
-            $description !== '' ? $description : null,
-            $priceText !== '' ? $priceText : null,
-            $image,
-            $stockQty,
-            $sortOrder,
-            $published,
-        ]);
-        $productId = (int) $pdo->lastInsertId();
+    $slugCheck = $pdo->prepare('SELECT id FROM products WHERE slug = ? AND id <> ? LIMIT 1');
+    $slugCheck->execute([$slug, $id]);
+    if ($slugCheck->fetch()) {
+        throw new RuntimeException('این اسلاگ قبلاً استفاده شده است');
+    }
+    if ($visualId !== null) {
+        $visualCheck = $pdo->prepare('SELECT id FROM products WHERE visual_id = ? AND id <> ? LIMIT 1');
+        $visualCheck->execute([$visualId, $id]);
+        if ($visualCheck->fetch()) {
+            throw new RuntimeException('این شناسه نمایشی قبلاً استفاده شده است');
+        }
     }
 
-    cms_product_save_category_ids($pdo, $productId, $categoryIds);
-    admin_products_replace_gallery($pdo, $productId, $gallery);
+    $row = [
+        'name' => $name,
+        'slug' => $slug,
+        'visual_id' => $visualId,
+        'description' => $description !== '' ? $description : null,
+        'price_text' => $priceText !== '' ? $priceText : null,
+        'image' => $image,
+        'stock_qty' => $stockQty,
+        'sort_order' => $sortOrder,
+        'published' => $published,
+    ];
+
+    $productId = admin_products_apply_row($pdo, $id, $row, $categoryIds);
+
+    try {
+        cms_product_save_category_ids($pdo, $productId, $categoryIds);
+    } catch (PDOException $e) {
+        throw new RuntimeException(admin_products_public_db_error($e, 'ذخیره دسته‌های محصول'));
+    }
+    try {
+        admin_products_replace_gallery($pdo, $productId, $gallery);
+    } catch (PDOException $e) {
+        throw new RuntimeException(admin_products_public_db_error($e, 'ذخیره گالری محصول'));
+    }
 
     return $productId;
 }

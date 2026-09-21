@@ -7,6 +7,9 @@ function admin_normalize_upload_path(?string $path): ?string
     if ($path === '') {
         return null;
     }
+    if (preg_match('#(/uploads/[^?#]+)#', $path, $matches)) {
+        $path = $matches[1];
+    }
     if (!str_starts_with($path, '/uploads/')) {
         throw new RuntimeException('مسیر تصویر نامعتبر است');
     }
