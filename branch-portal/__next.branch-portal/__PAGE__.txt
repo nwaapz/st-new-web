@@ -2,5 +2,5 @@
 2:"$Sreact.suspense"
 3:I[5598,["8500","static/chunks/8500-3953cc33eeceb44e.js","7914","static/chunks/7914-a8bfe07509c5b22c.js","5864","static/chunks/5864-55edb7f18e2c8089.js","5684","static/chunks/app/branch-portal/page-7fe31e0aef52b16f.js"],"BranchPortalView"]
 4:I[484,[],"OutletBoundary"]
-0:{"rsc":["$","$1","c",{"children":[["$","$2",null,{"fallback":["$","main",null,{"className":"branch-portal","children":["$","div",null,{"className":"branch-portal__inner","children":["$","p",null,{"className":"branch-portal__empty","children":"در حال آماده‌سازی…"}]}]}],"children":["$","$L3",null,{}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"T763QiMLwHpBCleuJ5f-Y"}
+0:{"rsc":["$","$1","c",{"children":[["$","$2",null,{"fallback":["$","main",null,{"className":"branch-portal","children":["$","div",null,{"className":"branch-portal__inner","children":["$","p",null,{"className":"branch-portal__empty","children":"در حال آماده‌سازی…"}]}]}],"children":["$","$L3",null,{}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"DIXz25OEAOmHCTyAr8l7F"}
 5:null

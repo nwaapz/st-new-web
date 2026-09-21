@@ -81,7 +81,7 @@ function products_ensure_stock_schema(PDO $pdo): void
     $ready = true;
 }
 
-function products_normalize_stock_qty(mixed $raw, int $default = PRODUCTS_STOCK_DEFAULT): int
+function products_normalize_stock_qty($raw, int $default = PRODUCTS_STOCK_DEFAULT): int
 {
     if ($raw === null || $raw === '') {
         return $default;

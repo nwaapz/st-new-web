@@ -99,16 +99,16 @@ try {
 } catch (PDOException $e) {
     error_log('[admin-products] ' . $e->getMessage());
     $msg = $e->getMessage();
-    if (str_contains($msg, 'Duplicate entry')) {
-        if (str_contains($msg, 'uq_prod_slug') || str_contains($msg, 'slug')) {
+    if (strpos($msg, 'Duplicate entry') !== false) {
+        if (strpos($msg, 'uq_prod_slug') !== false || strpos($msg, 'slug') !== false) {
             api_error('این اسلاگ قبلاً استفاده شده است', 400);
         }
-        if (str_contains($msg, 'uq_prod_visual_id') || str_contains($msg, 'visual_id')) {
+        if (strpos($msg, 'uq_prod_visual_id') !== false || strpos($msg, 'visual_id') !== false) {
             api_error('این شناسه نمایشی قبلاً استفاده شده است', 400);
         }
         api_error('اطلاعات تکراری است', 400);
     }
-    if (str_contains($msg, 'stock_qty')) {
+    if (strpos($msg, 'stock_qty') !== false) {
         api_error('ستون موجودی انبار روی سرور آماده نیست. migrate-run.php را اجرا کنید.', 400);
     }
     api_error('خطای پایگاه داده: ' . preg_replace('/\s+\[.*$/', '', $msg), 500);

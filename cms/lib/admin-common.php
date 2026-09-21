@@ -10,10 +10,10 @@ function admin_normalize_upload_path(?string $path): ?string
     if (preg_match('#(/uploads/[^?#]+)#', $path, $matches)) {
         $path = $matches[1];
     }
-    if (!str_starts_with($path, '/uploads/')) {
+    if (strpos($path, '/uploads/') !== 0) {
         throw new RuntimeException('مسیر تصویر نامعتبر است');
     }
-    if (str_contains($path, '..')) {
+    if (strpos($path, '..') !== false) {
         throw new RuntimeException('مسیر تصویر نامعتبر است');
     }
     return $path;
@@ -28,10 +28,22 @@ function admin_slug_from_payload(string $name, string $slug): string
     return $slug;
 }
 
-function admin_bool_from_payload(mixed $value, bool $default = true): bool
+function admin_bool_from_payload($value, bool $default = true): bool
 {
     if ($value === null) {
         return $default;
+    }
+    if (is_bool($value)) {
+        return $value;
+    }
+    if (is_string($value)) {
+        $normalized = strtolower(trim($value));
+        if ($normalized === 'false' || $normalized === '0') {
+            return false;
+        }
+        if ($normalized === 'true' || $normalized === '1') {
+            return true;
+        }
     }
     return (bool) $value;
 }

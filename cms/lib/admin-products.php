@@ -309,22 +309,22 @@ function admin_products_table_columns(PDO $pdo): array
 function admin_products_public_db_error(PDOException $e, string $context): string
 {
     $msg = $e->getMessage();
-    if (str_contains($msg, 'Duplicate entry')) {
-        if (str_contains($msg, 'uq_prod_slug') || str_contains($msg, 'slug')) {
+    if (strpos($msg, 'Duplicate entry') !== false) {
+        if (strpos($msg, 'uq_prod_slug') !== false || strpos($msg, 'slug') !== false) {
             return 'این اسلاگ قبلاً استفاده شده است';
         }
-        if (str_contains($msg, 'uq_prod_visual_id') || str_contains($msg, 'visual_id')) {
+        if (strpos($msg, 'uq_prod_visual_id') !== false || strpos($msg, 'visual_id') !== false) {
             return 'این شناسه نمایشی قبلاً استفاده شده است';
         }
         return 'اطلاعات تکراری است';
     }
-    if (str_contains($msg, 'foreign key constraint') || str_contains($msg, 'FOREIGN KEY')) {
+    if (strpos($msg, 'foreign key constraint') !== false || strpos($msg, 'FOREIGN KEY') !== false) {
         return 'یکی از دسته‌های انتخاب‌شده معتبر نیست';
     }
-    if (str_contains($msg, 'Unknown column')) {
+    if (strpos($msg, 'Unknown column') !== false) {
         return 'ستون پایگاه داده وجود ندارد. migrate-run.php را اجرا کنید';
     }
-    if (str_contains($msg, "doesn't have a default value")) {
+    if (strpos($msg, "doesn't have a default value") !== false) {
         return 'فیلدهای الزامی پایگاه داده مقداردهی نشده‌اند. migrate-run.php را اجرا کنید';
     }
 
