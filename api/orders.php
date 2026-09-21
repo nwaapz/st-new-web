@@ -113,7 +113,7 @@ try {
         }
         $productId = isset($raw['id']) ? (int) $raw['id'] : 0;
         $name = isset($raw['name']) ? trim((string) $raw['name']) : '';
-        $quantity = isset($raw['quantity']) ? (int) $raw['quantity'] : 0;
+        $quantity = isset($raw['quantity']) ? (int) $raw['quantity'] : 1;
         if ($productId === 0 || $name === '' || $quantity < 1) {
             continue;
         }

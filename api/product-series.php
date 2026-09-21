@@ -7,6 +7,7 @@ require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-series.php';
 require_once dirname(__DIR__) . '/cms/lib/product-series-categories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-stock.php';
 
 function product_series_api_ensure_schema(PDO $pdo): void
 {
@@ -254,6 +255,7 @@ function product_series_api_apply_price_mode(array &$item, bool $callForPrice, s
 try {
     $pdo = cms_pdo();
     product_series_api_ensure_schema($pdo);
+    products_ensure_stock_schema($pdo);
     cms_ensure_product_car_models_schema($pdo);
     cms_ensure_product_categories_schema($pdo);
 
@@ -293,6 +295,7 @@ try {
         $item = product_series_api_enrich($pdo, $item, $seriesId, true);
         $callForPrice = cms_call_for_price_enabled();
         product_series_api_apply_price_mode($item, $callForPrice, cms_call_for_price_label());
+        $item['orderable'] = products_series_is_orderable($pdo, $seriesId);
         api_json(['item' => $item, 'call_for_price' => $callForPrice]);
     }
 
@@ -365,6 +368,7 @@ try {
         $item = product_series_api_row($row, $productIds);
         $item = product_series_api_enrich($pdo, $item, $seriesId, false);
         product_series_api_apply_price_mode($item, $callForPrice, $callLabel);
+        $item['orderable'] = products_series_is_orderable($pdo, $seriesId);
         $items[] = $item;
     }
 

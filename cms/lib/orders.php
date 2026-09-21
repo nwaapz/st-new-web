@@ -1554,7 +1554,9 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
     require_once __DIR__ . '/product-car-models.php';
     require_once __DIR__ . '/product-categories.php';
     require_once __DIR__ . '/product-series-categories.php';
+    require_once __DIR__ . '/product-stock.php';
 
+    products_ensure_stock_schema($pdo);
     cms_ensure_car_model_factories_schema($pdo);
     cms_ensure_product_car_models_schema($pdo);
     cms_ensure_product_categories_schema($pdo);
@@ -1566,7 +1568,7 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
         }
         $productId = isset($raw['id']) ? (int) $raw['id'] : 0;
         $name = isset($raw['name']) ? trim((string) $raw['name']) : '';
-        $quantity = isset($raw['quantity']) ? (int) $raw['quantity'] : 0;
+        $quantity = isset($raw['quantity']) ? (int) $raw['quantity'] : 1;
         if ($productId === 0 || $name === '' || $quantity < 1) {
             continue;
         }
@@ -1620,6 +1622,9 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
             $seriesStmt->execute([$seriesId]);
             $series = $seriesStmt->fetch();
             if ($series) {
+                if (!products_series_is_orderable($pdo, $seriesId)) {
+                    throw new RuntimeException(products_unavailable_order_message());
+                }
                 $snapshot['name'] = (string) $series['name'];
                 $snapshot['slug'] = (string) ($series['slug'] ?? '');
                 $snapshot['price_text'] = $series['price_text'] !== null && trim((string) $series['price_text']) !== ''
@@ -1644,7 +1649,7 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
             $categoryNamesSql = cms_product_category_names_sql('p');
             $primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
             $prodStmt = $pdo->prepare(
-                'SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.pack_size, p.shop_display_image,
+                'SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.pack_size, p.published, p.stock_qty, p.shop_display_image,
                         COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
                         ' . $factoryNamesSql . ' AS factory_name,
                         ' . $modelNamesSql . ' AS model_name,
@@ -1657,6 +1662,9 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
             $prodStmt->execute([$productId]);
             $prod = $prodStmt->fetch();
             if ($prod) {
+                if ((int) ($prod['published'] ?? 0) !== 1 || (int) ($prod['stock_qty'] ?? 0) <= 0) {
+                    throw new RuntimeException(products_unavailable_order_message());
+                }
                 $snapshot['name'] = (string) $prod['name'];
                 $snapshot['slug'] = (string) ($prod['slug'] ?? '');
                 $snapshot['price_text'] = $prod['price_text'] !== null ? (string) $prod['price_text'] : $snapshot['price_text'];
@@ -2473,6 +2481,10 @@ function orders_cancel(PDO $pdo, array $order, string $actor, string $message = 
     }
 
     $pdo->beginTransaction();
+    require_once __DIR__ . '/product-stock.php';
+    if (products_order_stock_applied($pdo, $orderId)) {
+        products_restore_for_order($pdo, $orderId);
+    }
     $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
     $upd->execute(['cancelled', $orderId]);
     orders_add_event($pdo, $orderId, $current, 'cancelled', $actor, $eventMessage);
@@ -2714,6 +2726,8 @@ function orders_admin_apply_action(
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueAt)) {
             throw new RuntimeException('تاریخ سررسید پیش‌فاکتور نامعتبر است');
         }
+        require_once __DIR__ . '/product-stock.php';
+        products_decrement_for_order($pdo, $orderId);
         $upd = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');
         $upd->execute(['accepted', $orderId]);
         orders_add_event(

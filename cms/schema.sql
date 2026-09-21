@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS products (
   description TEXT NULL,
   price_text VARCHAR(128) NULL,
   pack_size INT UNSIGNED NULL,
+  stock_qty INT UNSIGNED NOT NULL DEFAULT 999,
   banner ENUM('none','new','off') NOT NULL DEFAULT 'none',
   image VARCHAR(512) NULL,
   video_path VARCHAR(512) NULL,

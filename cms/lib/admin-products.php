@@ -7,12 +7,14 @@ require_once __DIR__ . '/shop-search-intent.php';
 require_once __DIR__ . '/product-categories.php';
 require_once __DIR__ . '/product-car-models.php';
 require_once __DIR__ . '/product-series-categories.php';
+require_once __DIR__ . '/product-stock.php';
 
 const ADMIN_PRODUCT_GALLERY_MAX = 12;
 const ADMIN_PRODUCTS_PAGE_SIZE = 20;
 
 function admin_products_ensure_schema(PDO $pdo): void
 {
+    products_ensure_stock_schema($pdo);
     cms_ensure_product_categories_schema($pdo);
     $visualExists = $pdo->query("SHOW COLUMNS FROM products LIKE 'visual_id'")->fetchAll();
     if (count($visualExists) === 0) {
@@ -175,7 +177,7 @@ function admin_products_list(
     }
     $offset = ($page - 1) * ADMIN_PRODUCTS_PAGE_SIZE;
 
-    $sql = "SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.pack_size, p.image, p.published, p.sort_order,
+    $sql = "SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.pack_size, p.stock_qty, p.image, p.published, p.sort_order,
                    " . cms_product_category_names_sql('p') . " AS category_names,
                    " . cms_product_model_names_sql('p') . " AS car_model_names
             FROM products p
@@ -195,6 +197,7 @@ function admin_products_list(
             'pack_size' => isset($row['pack_size']) && $row['pack_size'] !== null && (int) $row['pack_size'] > 0
                 ? (int) $row['pack_size']
                 : null,
+            'stock_qty' => max(0, (int) ($row['stock_qty'] ?? PRODUCTS_STOCK_DEFAULT)),
             'image' => (string) ($row['image'] ?? ''),
             'category_names' => (string) ($row['category_names'] ?? ''),
             'car_model_names' => (string) ($row['car_model_names'] ?? ''),
@@ -267,6 +270,7 @@ function admin_products_get(PDO $pdo, int $id): ?array
         'description' => (string) ($row['description'] ?? ''),
         'price_text' => (string) ($row['price_text'] ?? ''),
         'image' => (string) ($row['image'] ?? ''),
+        'stock_qty' => max(0, (int) ($row['stock_qty'] ?? PRODUCTS_STOCK_DEFAULT)),
         'sort_order' => (int) ($row['sort_order'] ?? 0),
         'published' => (int) ($row['published'] ?? 0) === 1,
         'category_ids' => cms_product_load_category_ids($pdo, $id),
@@ -306,6 +310,7 @@ function admin_products_save(PDO $pdo, array $data): int
     $gallery = isset($data['gallery']) && is_array($data['gallery'])
         ? $data['gallery']
         : [];
+    $stockQty = products_normalize_stock_qty($data['stock_qty'] ?? null);
 
     if ($name === '') {
         throw new RuntimeException('نام محصول الزامی است');
@@ -313,7 +318,7 @@ function admin_products_save(PDO $pdo, array $data): int
 
     if ($id > 0) {
         $stmt = $pdo->prepare(
-            'UPDATE products SET name=?, slug=?, visual_id=?, description=?, price_text=?, image=?, sort_order=?, published=? WHERE id=?'
+            'UPDATE products SET name=?, slug=?, visual_id=?, description=?, price_text=?, image=?, stock_qty=?, sort_order=?, published=? WHERE id=?'
         );
         $stmt->execute([
             $name,
@@ -322,6 +327,7 @@ function admin_products_save(PDO $pdo, array $data): int
             $description !== '' ? $description : null,
             $priceText !== '' ? $priceText : null,
             $image,
+            $stockQty,
             $sortOrder,
             $published,
             $id,
@@ -329,8 +335,8 @@ function admin_products_save(PDO $pdo, array $data): int
         $productId = $id;
     } else {
         $stmt = $pdo->prepare(
-            'INSERT INTO products (name, slug, visual_id, description, price_text, image, sort_order, published)
-             VALUES (?,?,?,?,?,?,?,?)'
+            'INSERT INTO products (name, slug, visual_id, description, price_text, image, stock_qty, sort_order, published)
+             VALUES (?,?,?,?,?,?,?,?,?)'
         );
         $stmt->execute([
             $name,
@@ -339,6 +345,7 @@ function admin_products_save(PDO $pdo, array $data): int
             $description !== '' ? $description : null,
             $priceText !== '' ? $priceText : null,
             $image,
+            $stockQty,
             $sortOrder,
             $published,
         ]);

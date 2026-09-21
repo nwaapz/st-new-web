@@ -15,12 +15,14 @@ require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
 
 require_once dirname(__DIR__) . '/cms/lib/shop-search-intent.php';
+require_once dirname(__DIR__) . '/cms/lib/product-stock.php';
 
 
 
 try {
 
     $pdo = cms_pdo();
+    products_ensure_stock_schema($pdo);
 
     cms_ensure_car_model_factories_schema($pdo);
 
@@ -381,6 +383,8 @@ try {
         if ($displayCategory !== '') {
             $item['category_name'] = $displayCategory;
         }
+
+        $item['orderable'] = products_is_orderable($pdo, $pid);
 
     }
 

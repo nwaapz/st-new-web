@@ -5,6 +5,7 @@ require_once __DIR__ . '/_common.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-stock.php';
 
 function product_api_ensure_schema(PDO $pdo): void
 {
@@ -90,6 +91,7 @@ function product_api_ensure_schema(PDO $pdo): void
 try {
     $pdo = cms_pdo();
     product_api_ensure_schema($pdo);
+    products_ensure_stock_schema($pdo);
     cms_ensure_car_model_factories_schema($pdo);
     cms_ensure_product_car_models_schema($pdo);
     cms_ensure_product_categories_schema($pdo);
@@ -194,6 +196,7 @@ try {
         : null;
     $product['rating_count'] = (int) ($rating['rating_count'] ?? 0);
     $product['call_for_price'] = $callForPrice;
+    $product['orderable'] = products_is_orderable($pdo, $productId);
 
     api_json(['item' => $product]);
 } catch (Throwable $e) {
