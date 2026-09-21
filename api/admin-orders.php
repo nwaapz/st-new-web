@@ -51,7 +51,7 @@ try {
         $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
         $perPage = isset($_GET['per_page']) ? (int) $_GET['per_page'] : 20;
 
-        $scope = isset($_GET['scope']) ? trim((string) $_GET['scope']) : 'customers';
+        $scope = isset($_GET['scope']) ? trim((string) $_GET['scope']) : 'all';
 
         if ($view === 'manual_sale_meta') {
             $meta = orders_admin_manual_sale_meta($pdo);
@@ -91,6 +91,8 @@ try {
             'per_page' => $list['per_page'],
             'total_pages' => $list['total_pages'],
             'submitted_count' => $list['submitted_count'],
+            'branch_submitted_count' => $list['branch_submitted_count'] ?? 0,
+            'list_scope' => $list['list_scope'] ?? $scope,
             'status_labels' => orders_status_labels(),
             'all_statuses' => orders_all_statuses(),
             'ongoing_modes' => orders_ongoing_mode_labels(),
@@ -104,6 +106,14 @@ try {
 
     $body = admin_auth_request_json();
     $action = trim((string) ($body['action'] ?? ''));
+    if (
+        $action === ''
+        && isset($body['customer_type'], $body['items'])
+        && is_array($body['items'])
+        && (int) ($body['order_id'] ?? $body['id'] ?? 0) <= 0
+    ) {
+        $action = 'create';
+    }
     if ($action === 'create') {
         $adminUser = admin_auth_current_user($pdo);
         $result = orders_admin_create_manual($pdo, $body, $adminUser);

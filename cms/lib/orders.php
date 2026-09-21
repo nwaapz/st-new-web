@@ -2136,6 +2136,12 @@ function orders_admin_list(
     $submittedStmt->execute();
     $submittedCount = (int) $submittedStmt->fetchColumn();
 
+    $branchSubmittedStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM orders o WHERE o.branch_id IS NOT NULL AND o.status = 'submitted'"
+    );
+    $branchSubmittedStmt->execute();
+    $branchSubmittedCount = (int) $branchSubmittedStmt->fetchColumn();
+
     $items = [];
     foreach ($rows as $row) {
         $items[] = [
@@ -2175,6 +2181,8 @@ function orders_admin_list(
         'per_page' => $pageSize,
         'total_pages' => $totalPages,
         'submitted_count' => $submittedCount,
+        'branch_submitted_count' => $branchSubmittedCount,
+        'list_scope' => $scope,
     ];
 }
 
