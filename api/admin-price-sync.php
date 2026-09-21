@@ -186,6 +186,8 @@ try {
 
         'skipped' => $result['skipped'],
 
+        'updated_rows' => $result['updated_rows'] ?? [],
+
         'skip_reasons' => $skipReasons,
 
         'message' => $result['message'],

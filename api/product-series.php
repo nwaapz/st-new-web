@@ -23,6 +23,10 @@ function product_series_api_ensure_schema(PDO $pdo): void
     if (count($priceCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN price_text VARCHAR(128) NULL AFTER description');
     }
+    $packCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'pack_size'")->fetchAll();
+    if (count($packCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
+    }
     $detailCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'detail_lead_image'")->fetchAll();
     if (count($detailCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN detail_lead_image VARCHAR(512) NULL AFTER image');
@@ -182,6 +186,9 @@ function product_series_api_row(array $row, array $productIds = []): array
         'price_text' => isset($row['price_text']) && $row['price_text'] !== null && trim((string) $row['price_text']) !== ''
             ? (string) $row['price_text']
             : null,
+        'pack_size' => isset($row['pack_size']) && $row['pack_size'] !== null && (int) $row['pack_size'] > 0
+            ? (int) $row['pack_size']
+            : null,
         'sort_order' => (int) ($row['sort_order'] ?? 0),
         'product_ids' => $productIds,
     ];
@@ -262,7 +269,7 @@ try {
     $slug = isset($_GET['slug']) ? trim((string) $_GET['slug']) : '';
     $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 
-    $selectCols = 'id, name, slug, visual_id, description, price_text, image, detail_lead_image, image_setup_override, sort_order';
+    $selectCols = 'id, name, slug, visual_id, description, price_text, pack_size, image, detail_lead_image, image_setup_override, sort_order';
 
     if ($slug !== '' || $id > 0) {
         $where = ['published = 1'];

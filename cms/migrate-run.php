@@ -140,6 +140,13 @@ try {
     } else {
         $log[] = 'product_series.price_text already exists';
     }
+    $seriesPackCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'pack_size'")->fetchAll();
+    if (count($seriesPackCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
+        $log[] = 'Added product_series.pack_size column';
+    } else {
+        $log[] = 'product_series.pack_size already exists';
+    }
     $seriesVisualIdx = $pdo->query("SHOW INDEX FROM product_series WHERE Key_name = 'uq_series_visual_id'")->fetchAll();
     if (count($seriesVisualIdx) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD UNIQUE KEY uq_series_visual_id (visual_id)');

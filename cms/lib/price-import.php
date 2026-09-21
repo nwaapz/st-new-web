@@ -274,6 +274,11 @@ function price_import_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
 
+    $seriesPackCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'pack_size'")->fetchAll();
+    if (count($seriesPackCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
+    }
+
     $ready = true;
 }
 
@@ -431,7 +436,7 @@ function price_import_parse_rows(array $rawRows): array
         $visualId = price_import_cell_string($row[$cols['code']] ?? null);
         $parsed[] = [
             'excel_row' => $excelRowIndex + 1,
-            'visual_id' => $visualId,
+            'visual_id' => price_import_normalize_visual_id($visualId),
             'name_base' => $nameBase,
             'spec' => $spec,
             'name' => price_import_build_name($spec, $nameBase),
@@ -969,33 +974,112 @@ function price_import_row_issues(
     ];
 }
 
-/** @param list<array<string, mixed>> $rows */
-function price_import_find_product_by_visual_id(PDO $pdo, string $visualId): ?array
+function price_import_normalize_visual_id(string $visualId): string
 {
     $visualId = trim($visualId);
     if ($visualId === '') {
+        return '';
+    }
+    if (is_numeric($visualId)) {
+        return (string) (int) round((float) $visualId);
+    }
+
+    return $visualId;
+}
+
+/** @return list<string> */
+function price_import_visual_id_lookup_keys(string $visualId): array
+{
+    $visualId = price_import_normalize_visual_id($visualId);
+    if ($visualId === '') {
+        return [];
+    }
+
+    $keys = [$visualId];
+    if (ctype_digit($visualId)) {
+        $keys[] = 'ST-' . $visualId;
+        $keys[] = 'KIT-' . $visualId;
+        $keys[] = 'ST_' . $visualId;
+        $keys[] = 'KIT_' . $visualId;
+    }
+
+    foreach (['ST-', 'KIT-', 'ST_', 'KIT_'] as $prefix) {
+        if (stripos($visualId, $prefix) === 0) {
+            $stripped = substr($visualId, strlen($prefix));
+            $stripped = price_import_normalize_visual_id($stripped);
+            if ($stripped !== '' && $stripped !== $visualId) {
+                $keys[] = $stripped;
+            }
+        }
+    }
+
+    if (preg_match('/(\d+)$/', $visualId, $matches)) {
+        $suffix = price_import_normalize_visual_id((string) $matches[1]);
+        if ($suffix !== '' && $suffix !== $visualId) {
+            $keys[] = $suffix;
+        }
+    }
+
+    return array_values(array_unique(array_filter($keys, static fn (string $key): bool => $key !== '')));
+}
+
+/** @param list<string> $keys */
+function price_import_fetch_row_by_visual_id_keys(PDO $pdo, string $table, array $keys, string $columns): ?array
+{
+    if ($keys === []) {
         return null;
     }
+
+    $placeholders = implode(',', array_fill(0, count($keys), '?'));
     $stmt = $pdo->prepare(
-        'SELECT id, name, visual_id, price_text, pack_size, description FROM products WHERE visual_id = ? LIMIT 1'
+        "SELECT {$columns} FROM {$table} WHERE visual_id IN ({$placeholders}) LIMIT 1"
     );
-    $stmt->execute([$visualId]);
+    $stmt->execute($keys);
     $row = $stmt->fetch();
+
     return $row ?: null;
+}
+
+/** @param list<array<string, mixed>> $rows */
+function price_import_find_product_by_visual_id(PDO $pdo, string $visualId): ?array
+{
+    $keys = price_import_visual_id_lookup_keys($visualId);
+    if ($keys === []) {
+        return null;
+    }
+
+    return price_import_fetch_row_by_visual_id_keys(
+        $pdo,
+        'products',
+        $keys,
+        'id, name, visual_id, price_text, pack_size, description'
+    );
 }
 
 function price_import_find_series_by_visual_id(PDO $pdo, string $visualId): ?array
 {
-    $visualId = trim($visualId);
-    if ($visualId === '') {
+    $keys = price_import_visual_id_lookup_keys($visualId);
+    if ($keys === []) {
         return null;
     }
-    $stmt = $pdo->prepare(
-        'SELECT id, name, visual_id, price_text FROM product_series WHERE visual_id = ? LIMIT 1'
+
+    return price_import_fetch_row_by_visual_id_keys(
+        $pdo,
+        'product_series',
+        $keys,
+        'id, name, visual_id, price_text, pack_size'
     );
-    $stmt->execute([$visualId]);
-    $row = $stmt->fetch();
-    return $row ?: null;
+}
+
+/**
+ * @return array{product:?array<string,mixed>,series:?array<string,mixed>}
+ */
+function price_import_find_entities_by_visual_id(PDO $pdo, string $visualId): array
+{
+    return [
+        'product' => price_import_find_product_by_visual_id($pdo, $visualId),
+        'series' => price_import_find_series_by_visual_id($pdo, $visualId),
+    ];
 }
 
 /**
@@ -1015,6 +1099,7 @@ function price_import_resolve_by_visual_id(PDO $pdo, string $visualId): ?array
             'id' => (int) $product['id'],
             'name' => (string) ($product['name'] ?? ''),
             'price_text' => (string) ($product['price_text'] ?? ''),
+            'pack_size' => price_import_db_pack_size($product),
             'row' => $product,
         ];
     }
@@ -1026,6 +1111,7 @@ function price_import_resolve_by_visual_id(PDO $pdo, string $visualId): ?array
             'id' => (int) $series['id'],
             'name' => (string) ($series['name'] ?? ''),
             'price_text' => (string) ($series['price_text'] ?? ''),
+            'pack_size' => price_import_db_pack_size($series),
             'row' => $series,
         ];
     }
@@ -1053,8 +1139,9 @@ function price_import_apply_series_price(PDO $pdo, array $row, ?array $existing 
         return false;
     }
 
-    $stmt = $pdo->prepare('UPDATE product_series SET price_text = ? WHERE id = ?');
-    $stmt->execute([$priceText, (int) $existing['id']]);
+    $packSize = price_import_row_pack_size($row);
+    $stmt = $pdo->prepare('UPDATE product_series SET price_text = ?, pack_size = ? WHERE id = ?');
+    $stmt->execute([$priceText, $packSize, (int) $existing['id']]);
 
     return true;
 }
@@ -1109,6 +1196,7 @@ function price_import_refresh_session_rows(PDO $pdo, array $rows): array
                     $row['existing_series_id'] = (int) $existingSeries['id'];
                     $row['existing_name'] = (string) $existingSeries['name'];
                     $row['existing_price_text'] = (string) ($existingSeries['price_text'] ?? '');
+                    $row['existing_pack_size'] = price_import_db_pack_size($existingSeries);
                     $row['skip_cars'] = true;
                     $row['needs_car_setup'] = false;
                     unset($row['existing_product_id']);
@@ -1308,6 +1396,17 @@ function price_import_row_pack_size(array $row): ?int
     }
 
     return $packSize;
+}
+
+/** @param array<string, mixed>|null $row */
+function price_import_db_pack_size(?array $row): ?int
+{
+    if ($row === null || !array_key_exists('pack_size', $row) || $row['pack_size'] === null || $row['pack_size'] === '') {
+        return null;
+    }
+
+    $packSize = (int) $row['pack_size'];
+    return $packSize > 0 ? $packSize : null;
 }
 
 function price_import_description_with_warranty(?string $existing, string $warranty): ?string
@@ -1789,35 +1888,47 @@ function price_import_apply_batch(
 }
 
 /**
- * Admin mobile: update price_text only for existing products matched by visual_id.
+ * Admin mobile / Google Sheet: update price_text + pack_size for existing products and series.
  *
  * @param list<array<string, mixed>> $parsedRows
  * @return array{
  *   total_rows:int,
  *   updated:int,
- *   skipped:list<array{visual_id:string,name:string,excel_row:int,reason:string}>
+ *   skipped:list<array{visual_id:string,name:string,excel_row:int,reason:string,entity?:string}>,
+ *   updated_rows:list<array{visual_id:string,name:string,excel_row:int,entity:string,pack_size:?int}>
  * }
  */
 function price_import_apply_prices_only(PDO $pdo, array $parsedRows): array
 {
     $updated = 0;
     $skipped = [];
+    $updatedRows = [];
 
     $pdo->beginTransaction();
     try {
         foreach ($parsedRows as $row) {
-            $visualId = trim((string) ($row['visual_id'] ?? ''));
+            $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
             $name = trim((string) ($row['name'] ?? ''));
             $excelRow = (int) ($row['excel_row'] ?? 0);
             $priceText = trim((string) ($row['price_text'] ?? ''));
+            $newPackSize = price_import_row_pack_size($row);
 
-            $skip = static function (string $reason) use (&$skipped, $visualId, $name, $excelRow): void {
-                $skipped[] = [
+            $skip = static function (string $reason, string $entity = '') use (
+                &$skipped,
+                $visualId,
+                $name,
+                $excelRow
+            ): void {
+                $entry = [
                     'visual_id' => $visualId,
                     'name' => $name,
                     'excel_row' => $excelRow,
                     'reason' => $reason,
                 ];
+                if ($entity !== '') {
+                    $entry['entity'] = $entity;
+                }
+                $skipped[] = $entry;
             };
 
             if ($visualId === '') {
@@ -1829,31 +1940,70 @@ function price_import_apply_prices_only(PDO $pdo, array $parsedRows): array
                 continue;
             }
 
-            $resolved = price_import_resolve_by_visual_id($pdo, $visualId);
-            if ($resolved === null) {
-                $skip('محصول یا سری کیت با این کد در سایت یافت نشد — فقط قیمت موارد موجود به‌روز می‌شود');
+            $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
+            $product = $entities['product'];
+            $series = $entities['series'];
+
+            if (!$product && !$series) {
+                $skip('محصول یا سری کیت با این کد در سایت یافت نشد — شناسه نمایشی سری باید همان کد کالا باشد');
                 continue;
             }
 
             if ($name === '') {
-                $name = $resolved['name'];
+                if ($series) {
+                    $name = (string) ($series['name'] ?? '');
+                } elseif ($product) {
+                    $name = (string) ($product['name'] ?? '');
+                }
             }
 
-            $existingPrice = trim((string) ($resolved['price_text'] ?? ''));
-            if ($existingPrice === $priceText) {
-                $skip('قیمت تغییر نکرد');
-                continue;
-            }
+            $updatedProduct = false;
+            $updatedSeries = false;
 
             try {
-                if ($resolved['entity'] === 'series') {
-                    $stmt = $pdo->prepare('UPDATE product_series SET price_text = ? WHERE id = ?');
-                    $stmt->execute([$priceText, (int) $resolved['id']]);
-                } else {
-                    $stmt = $pdo->prepare('UPDATE products SET price_text = ? WHERE id = ?');
-                    $stmt->execute([$priceText, (int) $resolved['id']]);
+                if ($product) {
+                    $existingPrice = trim((string) ($product['price_text'] ?? ''));
+                    $existingPackSize = price_import_db_pack_size($product);
+                    if ($existingPrice !== $priceText || $existingPackSize !== $newPackSize) {
+                        $stmt = $pdo->prepare('UPDATE products SET price_text = ?, pack_size = ? WHERE id = ?');
+                        $stmt->execute([$priceText, $newPackSize, (int) $product['id']]);
+                        $updatedProduct = true;
+                    }
                 }
+
+                if ($series) {
+                    $existingPrice = trim((string) ($series['price_text'] ?? ''));
+                    $existingPackSize = price_import_db_pack_size($series);
+                    if ($existingPrice !== $priceText || $existingPackSize !== $newPackSize) {
+                        $stmt = $pdo->prepare('UPDATE product_series SET price_text = ?, pack_size = ? WHERE id = ?');
+                        $stmt->execute([$priceText, $newPackSize, (int) $series['id']]);
+                        $updatedSeries = true;
+                    }
+                }
+
+                if (!$updatedProduct && !$updatedSeries) {
+                    $entityHint = $product && $series ? 'both' : ($series ? 'series' : 'product');
+                    $skip('قیمت و تعداد بسته تغییر نکرد', $entityHint);
+                    continue;
+                }
+
+                $entityParts = [];
+                if ($updatedProduct) {
+                    $entityParts[] = 'product';
+                }
+                if ($updatedSeries) {
+                    $entityParts[] = 'series';
+                }
+                $entityLabel = count($entityParts) === 2 ? 'both' : $entityParts[0];
+
                 $updated++;
+                $updatedRows[] = [
+                    'visual_id' => $visualId,
+                    'name' => $name,
+                    'excel_row' => $excelRow,
+                    'entity' => $entityLabel,
+                    'pack_size' => $newPackSize,
+                ];
             } catch (Throwable $e) {
                 $skip($e->getMessage());
             }
@@ -1869,6 +2019,7 @@ function price_import_apply_prices_only(PDO $pdo, array $parsedRows): array
         'total_rows' => count($parsedRows),
         'updated' => $updated,
         'skipped' => $skipped,
+        'updated_rows' => $updatedRows,
     ];
 }
 
@@ -2173,7 +2324,7 @@ function price_import_sync_from_google_sheet(PDO $pdo): array
 
         $status = price_import_get_sync_status();
         $message = sprintf(
-            '%d ردیف خوانده شد — %d قیمت به‌روز شد — %d ردیف به‌روز نشد',
+            '%d ردیف خوانده شد — %d مورد (قیمت/تعداد بسته) به‌روز شد — %d ردیف به‌روز نشد',
             $result['total_rows'],
             $result['updated'],
             count($result['skipped'])

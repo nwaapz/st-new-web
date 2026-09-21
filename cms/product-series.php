@@ -30,6 +30,10 @@ function product_series_ensure_schema(PDO $pdo): void
     if (count($priceCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN price_text VARCHAR(128) NULL AFTER description');
     }
+    $packCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'pack_size'")->fetchAll();
+    if (count($packCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
+    }
     $detailCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'detail_lead_image'")->fetchAll();
     if (count($detailCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN detail_lead_image VARCHAR(512) NULL AFTER image');
@@ -216,6 +220,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $visualId = trim((string) ($_POST['visual_id'] ?? ''));
         $visualId = $visualId !== '' ? $visualId : null;
         $priceText = trim((string) ($_POST['price_text'] ?? ''));
+        $packSizeRaw = trim((string) ($_POST['pack_size'] ?? ''));
+        $packSize = $packSizeRaw === '' ? null : max(0, (int) $packSizeRaw);
+        if ($packSize === 0) {
+            $packSize = null;
+        }
         $description = trim((string) ($_POST['description'] ?? ''));
         $image = cms_handle_optional_upload('image', (string) ($_POST['image'] ?? ''));
         $detailLeadImage = trim((string) ($_POST['detail_lead_image'] ?? ''));
@@ -265,7 +274,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, image=?,
+                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, image=?,
                  detail_lead_image=?, image_setup_override=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
@@ -274,6 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $visualId,
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
+                $packSize,
                 $image !== '' ? $image : null,
                 $detailLeadImage !== '' ? $detailLeadImage : null,
                 $imageSetupOverride !== '' ? $imageSetupOverride : null,
@@ -286,9 +296,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_flash('سری به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO product_series (name, slug, visual_id, description, price_text, image,
+                'INSERT INTO product_series (name, slug, visual_id, description, price_text, pack_size, image,
                  detail_lead_image, image_setup_override, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name,
@@ -296,6 +306,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $visualId,
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
+                $packSize,
                 $image !== '' ? $image : null,
                 $detailLeadImage !== '' ? $detailLeadImage : null,
                 $imageSetupOverride !== '' ? $imageSetupOverride : null,
@@ -387,7 +398,7 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
 <div class="cms-page-head">
   <div>
     <h1 style="margin:0">سری محصولات</h1>
-    <p class="cms-muted" style="margin:.35rem 0 0">هر سری = یک کیت در فروشگاه با شناسه نمایشی؛ قطعات انتخاب‌شده در صفحه جزئیات سری نمایش داده می‌شوند</p>
+    <p class="cms-muted" style="margin:.35rem 0 0">هر سری = یک کیت در فروشگاه. «شناسه نمایشی» باید همان «کد کالا» در Excel/Google Sheet باشد تا قیمت و تعداد بسته خودکار به‌روز شود.</p>
   </div>
   <?php if (!$showForm): ?>
     <a class="cms-btn" href="product-series.php?new=1">افزودن سری</a>
@@ -434,11 +445,17 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
   </div>
   <label class="cms-field"><span class="cms-label">شناسه نمایشی</span>
     <input class="cms-input" name="visual_id" dir="ltr" value="<?= cms_h($edit['visual_id'] ?? '') ?>" placeholder="KIT-1001">
-    <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">کد یکتا برای نمایش در کارت فروشگاه و جستجو</span>
+    <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">همان «کد کالا» در Excel/Google Sheet (مثلاً 1484). بدون این کد، قیمت و تعداد بسته از شیت روی سری اعمال نمی‌شود.</span>
   </label>
   <div class="cms-grid-2">
     <label class="cms-field"><span class="cms-label">قیمت (متن نمایشی)</span>
       <input class="cms-input" name="price_text" value="<?= cms_h($edit['price_text'] ?? '') ?>" placeholder="۱٬۲۵۰٬۰۰۰ تومان">
+    </label>
+    <label class="cms-field"><span class="cms-label">تعداد در هر بسته</span>
+      <input class="cms-input" type="number" min="1" name="pack_size" dir="ltr"
+        value="<?= isset($edit['pack_size']) && $edit['pack_size'] !== null && (int) $edit['pack_size'] > 0 ? (int) $edit['pack_size'] : '' ?>"
+        placeholder="مثلاً ۱۲ — خالی = فقط فروش تکی">
+      <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">اگر پر باشد، مشتری می‌تواند عدد یا بسته بخرد.</span>
     </label>
   </div>
   <label class="cms-field"><span class="cms-label">توضیحات</span>

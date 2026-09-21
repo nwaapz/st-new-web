@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS product_series (
   visual_id VARCHAR(64) NULL,
   description TEXT NULL,
   price_text VARCHAR(128) NULL,
+  pack_size INT UNSIGNED NULL,
   image VARCHAR(512) NULL,
   detail_lead_image VARCHAR(512) NULL,
   image_setup_override VARCHAR(512) NULL,

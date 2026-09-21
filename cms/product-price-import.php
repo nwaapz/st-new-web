@@ -413,7 +413,8 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
   <h2>Google Sheet (بروزرسانی خودکار)</h2>
   <p class="cms-muted">
     آدرس Google Sheet عمومی را وارد کنید (دسترسی: «Anyone with the link can view»).
-    اپ مدیریت فروش هنگام ورود و با دکمه بروزرسانی، قیمت‌ها را از این شیت می‌خواند.
+    اپ مدیریت فروش هنگام ورود و با دکمه بروزرسانی، قیمت و تعداد بسته را از این شیت می‌خواند.
+    برای سری کیت‌ها، <strong>شناسه نمایشی</strong> در «سری محصولات» باید همان «کد کالا» شیت باشد (مثلاً 1484).
   </p>
   <form method="post" class="cms-form">
     <input type="hidden" name="action" value="save_sheet_url">
@@ -616,7 +617,6 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
               <?php endif; ?>
             </div>
 
-            <?php if ($action !== 'update_series'): ?>
             <div class="price-import-field<?= $needsPack ? ' needs-attention' : '' ?>">
               <span class="price-import-field__label">تعداد در کارتن</span>
               <?php if ($priceFieldsApplied && ($action === 'update' || $action === 'update_series')): ?>
@@ -625,11 +625,10 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
               <?php else: ?>
                 <input class="cms-input" type="number" min="0" name="rows[<?= $index ?>][pack_size]" value="<?= cms_h((string) ($row['pack_size'] ?? '')) ?>">
               <?php endif; ?>
-              <?php if ($action === 'update' && !empty($row['existing_pack_size'])): ?>
+              <?php if (($action === 'update' || $action === 'update_series') && !empty($row['existing_pack_size'])): ?>
                 <span class="price-import-field__hint">قبلی: <?= cms_h((string) $row['existing_pack_size']) ?></span>
               <?php endif; ?>
             </div>
-            <?php endif; ?>
 
             <?php if ($action === 'create'): ?>
               <div class="price-import-field<?= $needsCategory ? ' needs-attention' : '' ?>">
@@ -649,7 +648,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
             <div class="price-import-field price-import-field--wide">
               <?php if ($action === 'update_series'): ?>
                 <span class="price-import-field__label">سری کیت</span>
-                <p class="price-import-field__hint price-import-skip-cars-note">فقط قیمت این سری کیت به‌روز می‌شود.</p>
+                <p class="price-import-field__hint price-import-skip-cars-note">قیمت و تعداد بسته این سری کیت به‌روز می‌شود.</p>
               <?php elseif ($skipCars): ?>
                 <span class="price-import-field__label">خودروها</span>
                 <p class="price-import-field__hint price-import-skip-cars-note">خودروها از قبل ثبت شده — فقط قیمت به‌روز می‌شود.</p>

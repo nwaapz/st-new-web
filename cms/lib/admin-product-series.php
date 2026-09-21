@@ -20,6 +20,10 @@ function admin_product_series_ensure_schema(PDO $pdo): void
     if (count($priceCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN price_text VARCHAR(128) NULL AFTER description');
     }
+    $packCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'pack_size'")->fetchAll();
+    if (count($packCol) === 0) {
+        $pdo->exec('ALTER TABLE product_series ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
+    }
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS product_series_images (
           id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -143,6 +147,9 @@ function admin_product_series_list(PDO $pdo, string $q = '', int $page = 1, int 
             'slug' => (string) ($row['slug'] ?? ''),
             'visual_id' => (string) ($row['visual_id'] ?? ''),
             'price_text' => (string) ($row['price_text'] ?? ''),
+            'pack_size' => isset($row['pack_size']) && $row['pack_size'] !== null && (int) $row['pack_size'] > 0
+                ? (int) $row['pack_size']
+                : null,
             'image' => (string) ($row['image'] ?? ''),
             'category_names' => (string) ($row['category_names'] ?? ''),
             'product_count' => (int) ($row['product_count'] ?? 0),
@@ -176,6 +183,9 @@ function admin_product_series_get(PDO $pdo, int $id): ?array
         'visual_id' => (string) ($row['visual_id'] ?? ''),
         'description' => (string) ($row['description'] ?? ''),
         'price_text' => (string) ($row['price_text'] ?? ''),
+        'pack_size' => isset($row['pack_size']) && $row['pack_size'] !== null && (int) $row['pack_size'] > 0
+            ? (int) $row['pack_size']
+            : null,
         'image' => (string) ($row['image'] ?? ''),
         'sort_order' => (int) ($row['sort_order'] ?? 0),
         'published' => (int) ($row['published'] ?? 0) === 1,
@@ -208,6 +218,11 @@ function admin_product_series_save(PDO $pdo, array $data): int
     $visualId = $visualId !== '' ? $visualId : null;
     $description = trim((string) ($data['description'] ?? ''));
     $priceText = trim((string) ($data['price_text'] ?? ''));
+    $packSizeRaw = trim((string) ($data['pack_size'] ?? ''));
+    $packSize = $packSizeRaw === '' ? null : max(0, (int) $packSizeRaw);
+    if ($packSize === 0) {
+        $packSize = null;
+    }
     $image = admin_normalize_upload_path(isset($data['image']) ? (string) $data['image'] : null);
     $sortOrder = (int) ($data['sort_order'] ?? 0);
     $published = admin_bool_from_payload($data['published'] ?? true) ? 1 : 0;
@@ -229,7 +244,7 @@ function admin_product_series_save(PDO $pdo, array $data): int
     try {
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, image=?, sort_order=?, published=? WHERE id=?'
+                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, image=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
                 $name,
@@ -237,6 +252,7 @@ function admin_product_series_save(PDO $pdo, array $data): int
                 $visualId,
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
+                $packSize,
                 $image,
                 $sortOrder,
                 $published,
@@ -245,8 +261,8 @@ function admin_product_series_save(PDO $pdo, array $data): int
             $seriesId = $id;
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO product_series (name, slug, visual_id, description, price_text, image, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?)'
+                'INSERT INTO product_series (name, slug, visual_id, description, price_text, pack_size, image, sort_order, published)
+                 VALUES (?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name,
@@ -254,6 +270,7 @@ function admin_product_series_save(PDO $pdo, array $data): int
                 $visualId,
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
+                $packSize,
                 $image,
                 $sortOrder,
                 $published,

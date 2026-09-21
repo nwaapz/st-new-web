@@ -61,8 +61,9 @@ try {
             'updated' => $result['updated'],
             'skipped_count' => count($result['skipped']),
             'skipped' => $result['skipped'],
+            'updated_rows' => $result['updated_rows'] ?? [],
             'message' => sprintf(
-                '%d ردیف خوانده شد — %d قیمت به‌روز شد — %d ردیف به‌روز نشد',
+                '%d ردیف خوانده شد — %d مورد (قیمت/تعداد بسته) به‌روز شد — %d ردیف به‌روز نشد',
                 $result['total_rows'],
                 $result['updated'],
                 count($result['skipped'])

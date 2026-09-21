@@ -1613,7 +1613,7 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
             $seriesId = -$productId;
             $categoryNamesSql = cms_series_category_names_sql('s');
             $seriesStmt = $pdo->prepare(
-                'SELECT s.id, s.name, s.slug, s.visual_id, s.price_text, s.image,
+                'SELECT s.id, s.name, s.slug, s.visual_id, s.price_text, s.pack_size, s.image,
                         ' . $categoryNamesSql . ' AS category_name
                  FROM product_series s
                  WHERE s.id = ? AND s.published = 1
@@ -1638,9 +1638,22 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
                 if ($series['visual_id'] !== null && trim((string) $series['visual_id']) !== '') {
                     $snapshot['visual_id'] = (string) $series['visual_id'];
                 }
+                $livePack = isset($series['pack_size']) && $series['pack_size'] !== null
+                    ? (int) $series['pack_size']
+                    : 0;
+                if ($livePack > 0) {
+                    $snapshot['pack_size'] = $livePack;
+                } else {
+                    $snapshot['pack_size'] = null;
+                    $snapshot['unit_type'] = 'piece';
+                }
+                if ($snapshot['unit_type'] === 'pack' && (!$snapshot['pack_size'] || (int) $snapshot['pack_size'] <= 0)) {
+                    $snapshot['unit_type'] = 'piece';
+                }
+            } elseif ($unitType === 'pack' && $clientPack <= 0) {
+                $snapshot['unit_type'] = 'piece';
+                $snapshot['pack_size'] = null;
             }
-            $snapshot['unit_type'] = 'piece';
-            $snapshot['pack_size'] = null;
         }
 
         if (!$isSeriesKit) {
