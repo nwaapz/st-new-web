@@ -122,7 +122,7 @@ try {
              ORDER BY s.sort_order ASC, s.name ASC
              LIMIT 5'
         );
-        $stmt->execute([$like, $like, ...$visualParams, $like]);
+        $stmt->execute(array_merge([$like, $like], $visualParams, [$like]));
         foreach ($stmt->fetchAll() ?: [] as $row) {
             $series[] = [
                 'id' => (int) $row['id'],

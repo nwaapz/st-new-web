@@ -164,7 +164,8 @@ function admin_products_list(
             . $visualSql . ' OR '
             . cms_product_any_category_name_search_sql('p', search_name_sql('c_s.name') . ' LIKE ?') . ' OR '
             . $modelNamesSqlForQ . ' LIKE ?)';
-        array_push($params, $like, ...$visualParams, $like, $like);
+        array_push($params, $like, ...$visualParams);
+        array_push($params, $like, $like);
     }
 
     $whereSql = implode(' AND ', $where);

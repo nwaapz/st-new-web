@@ -334,7 +334,8 @@ try {
         [$visualSql, $visualParams] = search_visual_id_like_clause('product_series.visual_id', $rawQ);
         $where[] = '(' . search_name_sql('product_series.name') . ' LIKE ? OR '
             . $visualSql . ' OR product_series.slug LIKE ?)';
-        array_push($listParams, $like, ...$visualParams, $like);
+        array_push($listParams, $like, ...$visualParams);
+        array_push($listParams, $like);
     }
     if ($categoryIds !== []) {
         $where[] = cms_series_category_in_filter_sql('product_series', count($categoryIds));

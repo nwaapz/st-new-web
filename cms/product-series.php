@@ -372,7 +372,8 @@ if (!$showForm) {
         [$visualSql, $visualParams] = search_visual_id_like_clause('s.visual_id', $listSearchQ);
         $where[] = '(' . search_name_sql('s.name') . ' LIKE ? OR '
             . $visualSql . ' OR s.slug LIKE ?)';
-        array_push($listParams, $like, ...$visualParams, $like);
+        array_push($listParams, $like, ...$visualParams);
+        array_push($listParams, $like);
     }
     $whereSql = implode(' AND ', $where);
     $categoryNamesSql = cms_series_category_names_sql('s');
