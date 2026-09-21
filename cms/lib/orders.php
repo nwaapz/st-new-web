@@ -239,6 +239,15 @@ function orders_ensure_schema(PDO $pdo): void
         /* exists */
     }
 
+    if (!isset($cols['customer_name'])) {
+        try {
+            $pdo->exec('ALTER TABLE orders ADD COLUMN customer_name VARCHAR(191) NULL AFTER phone');
+            $cols['customer_name'] = true;
+        } catch (Throwable $e) {
+            /* ignore */
+        }
+    }
+
     // Backfill: existing warning text without state counts as open.
     try {
         $pdo->exec(
@@ -655,7 +664,9 @@ function orders_admin_list_where(
     string $statusFilter,
     string $searchQ,
     string $defaultStatus = 'all',
-    string $ongoingMode = 'new_order'
+    string $ongoingMode = 'new_order',
+    string $clientPhone = '',
+    int $branchId = 0
 ): array {
     if ($scope !== 'branches' && $scope !== 'customers') {
         $scope = 'customers';
@@ -663,9 +674,19 @@ function orders_admin_list_where(
     $statusFilter = orders_normalize_list_status($statusFilter, $defaultStatus);
     $ongoingMode = orders_normalize_ongoing_mode($ongoingMode);
     $search = orders_list_search_clause($searchQ);
+    $clientPhone = orders_normalize_search_query($clientPhone);
     $scopeSql = $scope === 'branches' ? 'branch_id IS NOT NULL' : 'branch_id IS NULL';
     $where = [$scopeSql];
     $params = [];
+
+    if ($clientPhone !== '') {
+        $where[] = 'o.phone = ?';
+        $params[] = $clientPhone;
+    }
+    if ($branchId > 0) {
+        $where[] = 'o.branch_id = ?';
+        $params[] = $branchId;
+    }
 
     if (!$search['is_identifier']) {
         if ($statusFilter === 'ongoing') {
@@ -791,6 +812,10 @@ function orders_serialize(array $order, array $items, array $events): array
         'public_code' => (string) $order['public_code'],
         'user_id' => (int) $order['user_id'],
         'phone' => (string) $order['phone'],
+        'customer_name' => isset($order['customer_name']) && $order['customer_name'] !== null
+            && trim((string) $order['customer_name']) !== ''
+            ? trim((string) $order['customer_name'])
+            : null,
         'branch_id' => isset($order['branch_id']) && $order['branch_id'] !== null
             ? (int) $order['branch_id']
             : null,
@@ -1783,11 +1808,20 @@ function orders_create_from_normalized(
     array $normalized,
     array $branchSnap,
     ?int $salesUserId,
-    string $submitNote
+    string $submitNote,
+    array $createOptions = []
 ): int {
     if ($normalized === []) {
         throw new InvalidArgumentException('اقلام سفارش نامعتبر است');
     }
+
+    $eventActor = trim((string) ($createOptions['event_actor'] ?? 'client'));
+    if ($eventActor === '') {
+        $eventActor = 'client';
+    }
+    $customerName = trim((string) ($createOptions['customer_name'] ?? ''));
+    $notifyAdmins = !array_key_exists('notify_admins', $createOptions) || (bool) $createOptions['notify_admins'];
+    $adminUserId = isset($createOptions['admin_user_id']) ? (int) $createOptions['admin_user_id'] : null;
 
     $salesUserName = null;
     if ($salesUserId !== null && $salesUserId > 0) {
@@ -1802,9 +1836,9 @@ function orders_create_from_normalized(
         $publicCode = orders_generate_public_code($pdo);
         $ins = $pdo->prepare(
             'INSERT INTO orders (
-               public_code, user_id, sales_user_id, sales_user_name, phone, status,
+               public_code, user_id, sales_user_id, sales_user_name, phone, customer_name, status,
                branch_id, branch_name, branch_city, branch_province_name, branch_phone
-             ) VALUES (?, ?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
+             ) VALUES (?, ?, ?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
         );
         $ins->execute([
             $publicCode,
@@ -1812,6 +1846,7 @@ function orders_create_from_normalized(
             $salesUserId,
             $salesUserName,
             $phone,
+            $customerName !== '' ? $customerName : null,
             $branchSnap['branch_id'],
             $branchSnap['branch_name'],
             $branchSnap['branch_city'],
@@ -1844,7 +1879,7 @@ function orders_create_from_normalized(
             ]);
         }
 
-        orders_add_event($pdo, $orderId, null, 'submitted', 'client', $submitNote);
+        orders_add_event($pdo, $orderId, null, 'submitted', $eventActor, $submitNote, $adminUserId);
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -1853,21 +1888,184 @@ function orders_create_from_normalized(
         throw $e;
     }
 
-    if (!function_exists('admin_push_notify_new_order')) {
-        $pushLib = __DIR__ . '/admin-push.php';
-        if (is_readable($pushLib)) {
-            require_once $pushLib;
+    if ($notifyAdmins) {
+        if (!function_exists('admin_push_notify_new_order')) {
+            $pushLib = __DIR__ . '/admin-push.php';
+            if (is_readable($pushLib)) {
+                require_once $pushLib;
+            }
         }
-    }
-    if (function_exists('admin_push_notify_new_order')) {
-        try {
-            admin_push_notify_new_order($pdo, $orderId);
-        } catch (Throwable $pushErr) {
-            error_log('[orders_create_from_normalized] push failed: ' . $pushErr->getMessage());
+        if (function_exists('admin_push_notify_new_order')) {
+            try {
+                admin_push_notify_new_order($pdo, $orderId);
+            } catch (Throwable $pushErr) {
+                error_log('[orders_create_from_normalized] push failed: ' . $pushErr->getMessage());
+            }
         }
     }
 
     return $orderId;
+}
+
+/**
+ * @return array{id:int,phone:string}
+ */
+function orders_resolve_site_user_for_phone(PDO $pdo, string $phone, ?int $branchId = null): array
+{
+    require_once dirname(__DIR__, 2) . '/api/_auth.php';
+    require_once __DIR__ . '/melipayamak.php';
+
+    site_auth_ensure_schema($pdo);
+    $phone = cms_sms_normalize_phone($phone);
+    if (!site_auth_is_valid_mobile($phone)) {
+        throw new RuntimeException('شماره موبایل نامعتبر است');
+    }
+
+    $find = $pdo->prepare('SELECT id, phone FROM site_users WHERE phone = ? LIMIT 1');
+    $find->execute([$phone]);
+    $row = $find->fetch();
+    if ($row) {
+        if ($branchId !== null && $branchId > 0) {
+            $pdo->prepare('UPDATE site_users SET branch_id = ? WHERE id = ?')
+                ->execute([$branchId, (int) $row['id']]);
+        }
+        return ['id' => (int) $row['id'], 'phone' => (string) $row['phone']];
+    }
+
+    $pdo->prepare('INSERT INTO site_users (phone, branch_id) VALUES (?, ?)')
+        ->execute([$phone, ($branchId !== null && $branchId > 0) ? $branchId : null]);
+
+    return ['id' => (int) $pdo->lastInsertId(), 'phone' => $phone];
+}
+
+function orders_sales_user_id_for_branch(PDO $pdo, int $branchId): ?int
+{
+    if ($branchId <= 0) {
+        return null;
+    }
+    require_once __DIR__ . '/sales-users.php';
+    sales_users_ensure_schema($pdo);
+    $stmt = $pdo->prepare(
+        'SELECT id FROM sales_users WHERE branch_id = ? AND published = 1 ORDER BY id ASC LIMIT 1'
+    );
+    $stmt->execute([$branchId]);
+    $id = (int) ($stmt->fetchColumn() ?: 0);
+    return $id > 0 ? $id : null;
+}
+
+/**
+ * @return array{branches:list<array{id:int,name:string,city:string}>,series_supported:bool}
+ */
+function orders_admin_manual_sale_meta(PDO $pdo): array
+{
+    require_once __DIR__ . '/sales-users.php';
+    sales_users_ensure_schema($pdo);
+
+    return [
+        'branches' => sales_users_branch_options($pdo),
+        'series_supported' => true,
+    ];
+}
+
+/**
+ * @param array<string, mixed> $body
+ * @param array{id:int,username:string}|null $adminUser
+ * @return array<string, mixed>
+ */
+function orders_admin_create_manual(PDO $pdo, array $body, ?array $adminUser): array
+{
+    $customerType = trim((string) ($body['customer_type'] ?? ''));
+    $rawItems = $body['items'] ?? null;
+    if (!is_array($rawItems) || $rawItems === []) {
+        throw new RuntimeException('اقلام سفارش الزامی است');
+    }
+
+    $normalized = orders_normalize_cart_items($pdo, $rawItems);
+    if ($normalized === []) {
+        throw new RuntimeException('اقلام سفارش نامعتبر است');
+    }
+
+    $note = trim((string) ($body['note'] ?? ''));
+    if ($note === '') {
+        $note = 'فروش دستی توسط مدیر';
+    }
+
+    require_once __DIR__ . '/melipayamak.php';
+    require_once dirname(__DIR__, 2) . '/api/_auth.php';
+
+    $salesUserId = null;
+    $customerName = null;
+    $branchSnap = orders_branch_snapshot_for_branch_id($pdo, 0);
+
+    if ($customerType === 'branch') {
+        $branchId = (int) ($body['branch_id'] ?? 0);
+        if ($branchId <= 0) {
+            throw new RuntimeException('نماینده انتخاب نشده است');
+        }
+        $branchSnap = orders_branch_snapshot_for_branch_id($pdo, $branchId);
+        if ($branchSnap['branch_id'] === null) {
+            throw new RuntimeException('نماینده یافت نشد');
+        }
+        $phone = trim((string) ($branchSnap['branch_phone'] ?? ''));
+        if ($phone === '') {
+            throw new RuntimeException('شماره نماینده ثبت نشده است');
+        }
+        $phone = cms_sms_normalize_phone($phone);
+        $siteUser = orders_resolve_site_user_for_phone($pdo, $phone, $branchId);
+        $salesUserId = orders_sales_user_id_for_branch($pdo, $branchId);
+    } elseif ($customerType === 'external') {
+        $phone = cms_sms_normalize_phone(trim((string) ($body['phone'] ?? '')));
+        if (!site_auth_is_valid_mobile($phone)) {
+            throw new RuntimeException('شماره موبایل مشتری نامعتبر است');
+        }
+        $customerName = trim((string) ($body['customer_name'] ?? ''));
+        if ($customerName === '') {
+            throw new RuntimeException('نام مشتری الزامی است');
+        }
+        $siteUser = orders_resolve_site_user_for_phone($pdo, $phone, null);
+    } else {
+        throw new RuntimeException('نوع مشتری نامعتبر است');
+    }
+
+    $orderId = orders_create_from_normalized(
+        $pdo,
+        (int) $siteUser['id'],
+        (string) $siteUser['phone'],
+        $normalized,
+        $branchSnap,
+        $salesUserId,
+        $note,
+        [
+            'event_actor' => 'admin',
+            'customer_name' => $customerName,
+            'notify_admins' => false,
+            'admin_user_id' => $adminUser !== null ? (int) $adminUser['id'] : null,
+        ]
+    );
+
+    $order = orders_get_by_id($pdo, $orderId);
+    if ($order === null) {
+        throw new RuntimeException('خطا در ایجاد سفارش');
+    }
+
+    $items = orders_fetch_items($pdo, $orderId);
+    $events = orders_fetch_events($pdo, $orderId);
+    $orderPayload = orders_admin_serialize($order, $items, $events);
+
+    if (!function_exists('invoices_display_totals_from_items')) {
+        require_once __DIR__ . '/invoices.php';
+    }
+
+    return [
+        'ok' => true,
+        'order_id' => $orderId,
+        'pricing_api_version' => 2,
+        'order' => $orderPayload,
+        'totals' => invoices_display_totals_from_items($orderPayload['items'] ?? $items),
+        'status_labels' => orders_status_labels(),
+        'allowed_transitions' => orders_allowed_transitions()[(string) $order['status']] ?? [],
+        'can_delete' => orders_can_delete((string) $order['status']),
+    ];
 }
 
 /**
@@ -1887,9 +2085,11 @@ function orders_admin_list(
     string $searchQ = '',
     int $page = 1,
     int $pageSize = 20,
-    string $ongoingMode = 'new_order'
+    string $ongoingMode = 'new_order',
+    string $clientPhone = '',
+    int $branchId = 0
 ): array {
-    $listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'all', $ongoingMode);
+    $listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'all', $ongoingMode, $clientPhone, $branchId);
     $scope = $listWhere['scope'];
     $scopeSql = $listWhere['scope_sql'];
     $whereSql = $listWhere['sql'];
@@ -1933,6 +2133,10 @@ function orders_admin_list(
             'id' => (int) $row['id'],
             'public_code' => (string) $row['public_code'],
             'phone' => (string) $row['phone'],
+            'customer_name' => isset($row['customer_name']) && $row['customer_name'] !== null
+                && trim((string) $row['customer_name']) !== ''
+                ? trim((string) $row['customer_name'])
+                : null,
             'status' => (string) $row['status'],
             'branch_id' => isset($row['branch_id']) && $row['branch_id'] !== null
                 ? (int) $row['branch_id']
@@ -1962,6 +2166,150 @@ function orders_admin_list(
         'per_page' => $pageSize,
         'total_pages' => $totalPages,
         'submitted_count' => $submittedCount,
+    ];
+}
+
+/**
+ * Unique independent customers (branch_id IS NULL) who have placed at least one order.
+ *
+ * @return array{
+ *   items: list<array<string, mixed>>,
+ *   total: int,
+ *   page: int,
+ *   per_page: int,
+ *   total_pages: int
+ * }
+ */
+function orders_admin_clients_list(
+    PDO $pdo,
+    string $searchQ = '',
+    int $page = 1,
+    int $pageSize = 30,
+    string $scope = 'customers'
+): array {
+    if ($scope !== 'branches') {
+        $scope = 'customers';
+    }
+    $searchQ = orders_normalize_search_query($searchQ);
+    $params = [];
+    $isBranches = $scope === 'branches';
+
+    if ($isBranches) {
+        $where = ['o.branch_id IS NOT NULL'];
+        if ($searchQ !== '') {
+            $like = '%' . $searchQ . '%';
+            $where[] = '(COALESCE(o.branch_name, \'\') LIKE ?
+                OR COALESCE(o.branch_phone, \'\') LIKE ?
+                OR o.phone LIKE ?
+                OR COALESCE(o.branch_city, \'\') LIKE ?
+                OR COALESCE(o.branch_province_name, \'\') LIKE ?)';
+            $params = [$like, $like, $like, $like, $like];
+        }
+        $groupExpr = 'o.branch_id';
+        $groupSelect = 'o.branch_id AS party_key';
+        $joinSelect = 'g.party_key AS branch_id,
+                       o.phone,
+                       o.branch_name,
+                       o.branch_phone,
+                       o.branch_city,
+                       o.branch_province_name,
+                       o.sales_user_id,
+                       o.sales_user_name';
+    } else {
+        $where = ['o.branch_id IS NULL', "TRIM(o.phone) <> ''"];
+        if ($searchQ !== '') {
+            $like = '%' . $searchQ . '%';
+            $where[] = '(o.phone LIKE ? OR COALESCE(o.sales_user_name, \'\') LIKE ?)';
+            $params = [$like, $like];
+        }
+        $groupExpr = 'o.phone';
+        $groupSelect = 'o.phone AS party_key';
+        $joinSelect = 'g.party_key AS phone,
+                       o.sales_user_id,
+                       o.sales_user_name';
+    }
+    $whereSql = implode(' AND ', $where);
+
+    if ($page < 1) {
+        $page = 1;
+    }
+    if ($pageSize < 1) {
+        $pageSize = 30;
+    }
+
+    $countStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM (SELECT {$groupExpr} FROM orders o WHERE {$whereSql} GROUP BY {$groupExpr}) grouped"
+    );
+    $countStmt->execute($params);
+    $totalRows = (int) $countStmt->fetchColumn();
+    $totalPages = max(1, (int) ceil($totalRows / $pageSize));
+    if ($page > $totalPages) {
+        $page = $totalPages;
+    }
+    $offset = ($page - 1) * $pageSize;
+
+    $sql = "SELECT g.order_count,
+                   g.last_order_at,
+                   g.last_order_id,
+                   {$joinSelect}
+            FROM (
+                SELECT {$groupSelect},
+                       COUNT(*) AS order_count,
+                       MAX(o.created_at) AS last_order_at,
+                       MAX(o.id) AS last_order_id
+                FROM orders o
+                WHERE {$whereSql}
+                GROUP BY {$groupExpr}
+            ) g
+            INNER JOIN orders o ON o.id = g.last_order_id
+            ORDER BY g.last_order_at DESC, g.last_order_id DESC
+            LIMIT " . (int) $pageSize . ' OFFSET ' . (int) $offset;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll() ?: [];
+
+    $items = [];
+    foreach ($rows as $row) {
+        $salesName = isset($row['sales_user_name']) && $row['sales_user_name'] !== null
+            ? trim((string) $row['sales_user_name'])
+            : '';
+        $branchName = isset($row['branch_name']) && $row['branch_name'] !== null
+            ? trim((string) $row['branch_name'])
+            : '';
+        $branchPhone = isset($row['branch_phone']) && $row['branch_phone'] !== null
+            ? trim((string) $row['branch_phone'])
+            : '';
+        $branchCity = isset($row['branch_city']) && $row['branch_city'] !== null
+            ? trim((string) $row['branch_city'])
+            : '';
+        $branchProvince = isset($row['branch_province_name']) && $row['branch_province_name'] !== null
+            ? trim((string) $row['branch_province_name'])
+            : '';
+        $items[] = [
+            'phone' => (string) ($row['phone'] ?? ''),
+            'order_count' => (int) ($row['order_count'] ?? 0),
+            'last_order_at' => (string) ($row['last_order_at'] ?? ''),
+            'last_order_id' => (int) ($row['last_order_id'] ?? 0),
+            'sales_user_id' => isset($row['sales_user_id']) && $row['sales_user_id'] !== null
+                ? (int) $row['sales_user_id']
+                : null,
+            'sales_user_name' => $salesName !== '' ? $salesName : null,
+            'branch_id' => isset($row['branch_id']) && $row['branch_id'] !== null
+                ? (int) $row['branch_id']
+                : null,
+            'branch_name' => $branchName !== '' ? $branchName : null,
+            'branch_phone' => $branchPhone !== '' ? $branchPhone : null,
+            'branch_city' => $branchCity !== '' ? $branchCity : null,
+            'branch_province_name' => $branchProvince !== '' ? $branchProvince : null,
+        ];
+    }
+
+    return [
+        'items' => $items,
+        'total' => $totalRows,
+        'page' => $page,
+        'per_page' => $pageSize,
+        'total_pages' => $totalPages,
     ];
 }
 
@@ -2178,6 +2526,12 @@ function orders_admin_apply_action(
     if ($action === 'add_cheque') {
         $result = order_cheques_add($pdo, $order, $cheque);
         orders_admin_audit($pdo, $order, 'add_cheque');
+
+        return $result;
+    }
+    if ($action === 'update_cheque') {
+        $result = order_cheques_update($pdo, $order, $cheque);
+        orders_admin_audit($pdo, $order, 'update_cheque');
 
         return $result;
     }

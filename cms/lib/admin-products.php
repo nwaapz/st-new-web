@@ -175,7 +175,7 @@ function admin_products_list(
     }
     $offset = ($page - 1) * ADMIN_PRODUCTS_PAGE_SIZE;
 
-    $sql = "SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.published, p.sort_order,
+    $sql = "SELECT p.id, p.name, p.slug, p.visual_id, p.price_text, p.pack_size, p.image, p.published, p.sort_order,
                    " . cms_product_category_names_sql('p') . " AS category_names,
                    " . cms_product_model_names_sql('p') . " AS car_model_names
             FROM products p
@@ -192,6 +192,9 @@ function admin_products_list(
             'slug' => (string) ($row['slug'] ?? ''),
             'visual_id' => (string) ($row['visual_id'] ?? ''),
             'price_text' => (string) ($row['price_text'] ?? ''),
+            'pack_size' => isset($row['pack_size']) && $row['pack_size'] !== null && (int) $row['pack_size'] > 0
+                ? (int) $row['pack_size']
+                : null,
             'image' => (string) ($row['image'] ?? ''),
             'category_names' => (string) ($row['category_names'] ?? ''),
             'car_model_names' => (string) ($row['car_model_names'] ?? ''),

@@ -360,6 +360,9 @@ function orders_admin_audit(PDO $pdo, array $order, string $action, ?array $deta
         case 'add_cheque':
             $verb = 'چک جدید برای سفارش ' . $code . ' ثبت کرد';
             break;
+        case 'update_cheque':
+            $verb = 'چک سفارش ' . $code . ' را ویرایش کرد';
+            break;
         case 'set_cheque_result':
             $verb = 'نتیجه چک سفارش ' . $code . ' را ثبت کرد';
             break;
@@ -374,6 +377,9 @@ function orders_admin_audit(PDO $pdo, array $order, string $action, ?array $deta
     switch ($action) {
         case 'add_cheque':
             $auditAction = 'order.cheque.add';
+            break;
+        case 'update_cheque':
+            $auditAction = 'order.cheque.update';
             break;
         case 'set_cheque_result':
             $auditAction = 'order.cheque.result';

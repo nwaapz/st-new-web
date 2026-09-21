@@ -134,6 +134,33 @@ function invoices_totals_from_items(array $items): array
     return ['total' => $total, 'lines' => $lines];
 }
 
+/**
+ * Admin display totals: saved unit price, otherwise catalog default.
+ * Do not use for invoice PDFs or payment remaining.
+ *
+ * @param list<array<string, mixed>> $items
+ * @return array{total:int, lines:list<array{unit:int|null, line:int|null, unit_label:string, line_label:string}>}
+ */
+function invoices_display_totals_from_items(array $items): array
+{
+    $displayItems = [];
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $row = $item;
+        $saved = trim((string) ($item['price_text'] ?? ''));
+        if ($saved === '') {
+            $catalog = trim((string) ($item['catalog_price_text'] ?? ''));
+            if ($catalog !== '') {
+                $row['price_text'] = $catalog;
+            }
+        }
+        $displayItems[] = $row;
+    }
+    return invoices_totals_from_items($displayItems);
+}
+
 function invoices_uploads_dir(): string
 {
     $dir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'invoices';

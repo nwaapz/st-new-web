@@ -341,6 +341,57 @@ function order_cheques_add(PDO $pdo, array $order, array $input): array
     return ['message' => 'چک ثبت شد و اطلاع‌رسانی ارسال شد'];
 }
 
+/**
+ * @param array<string, mixed> $input
+ */
+function order_cheques_update(PDO $pdo, array $order, array $input): array
+{
+    order_cheques_ensure_schema($pdo);
+    $orderId = (int) ($order['id'] ?? 0);
+    $chequeId = (int) ($input['id'] ?? 0);
+    if ($orderId <= 0 || $chequeId <= 0) {
+        throw new RuntimeException('سفارش نامعتبر');
+    }
+    $row = order_cheques_get($pdo, $chequeId, $orderId);
+    if ($row === null) {
+        throw new RuntimeException('چک یافت نشد');
+    }
+
+    $receivedOn = order_cheques_normalize_date(
+        (string) ($input['received_on'] ?? date('Y-m-d')),
+        'تاریخ دریافت'
+    );
+    $dueOn = order_cheques_normalize_date((string) ($input['due_on'] ?? ''), 'سررسید چک');
+    $serial = trim((string) ($input['serial'] ?? ''));
+    $amount = trim((string) ($input['amount_text'] ?? ''));
+    if (function_exists('mb_substr')) {
+        $serial = mb_substr($serial, 0, 64);
+        $amount = mb_substr($amount, 0, 128);
+    } else {
+        $serial = substr($serial, 0, 64);
+        $amount = substr($amount, 0, 128);
+    }
+
+    $prevDue = (string) ($row['due_on'] ?? '');
+    $sql = 'UPDATE order_cheques SET received_on = ?, due_on = ?, serial = ?, amount_text = ?';
+    $params = [
+        $receivedOn,
+        $dueOn,
+        $serial !== '' ? $serial : null,
+        $amount !== '' ? $amount : null,
+    ];
+    if ($dueOn !== $prevDue) {
+        $sql .= ', reminder_sent_at = NULL';
+    }
+    $sql .= ' WHERE id = ? AND order_id = ?';
+    $params[] = $chequeId;
+    $params[] = $orderId;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    return ['message' => 'چک به‌روز شد'];
+}
+
 function order_cheques_set_result(PDO $pdo, array $order, int $chequeId, string $result): array
 {
     order_cheques_ensure_schema($pdo);

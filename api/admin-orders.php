@@ -30,29 +30,59 @@ try {
                 api_error('سفارش یافت نشد', 404);
             }
             $items = orders_fetch_items($pdo, $orderId);
+            $orderPayload = orders_admin_serialize(
+                $order,
+                $items,
+                orders_fetch_events($pdo, $orderId)
+            );
             api_json([
                 'ok' => true,
                 'pricing_api_version' => 2,
-                'order' => orders_admin_serialize(
-                    $order,
-                    $items,
-                    orders_fetch_events($pdo, $orderId)
-                ),
-                'totals' => invoices_totals_from_items($items),
+                'order' => $orderPayload,
+                'totals' => invoices_display_totals_from_items($orderPayload['items'] ?? $items),
                 'status_labels' => orders_status_labels(),
                 'allowed_transitions' => orders_allowed_transitions()[(string) $order['status']] ?? [],
                 'can_delete' => orders_can_delete((string) $order['status']),
             ]);
         }
 
-        $scope = isset($_GET['scope']) ? trim((string) $_GET['scope']) : 'customers';
-        $status = isset($_GET['status']) ? trim((string) $_GET['status']) : 'all';
-        $ongoingMode = isset($_GET['ongoing_mode']) ? trim((string) $_GET['ongoing_mode']) : 'new_order';
+        $view = isset($_GET['view']) ? trim((string) $_GET['view']) : '';
         $q = isset($_GET['q']) ? trim((string) $_GET['q']) : '';
         $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
         $perPage = isset($_GET['per_page']) ? (int) $_GET['per_page'] : 20;
 
-        $list = orders_admin_list($pdo, $scope, $status, $q, $page, $perPage, $ongoingMode);
+        $scope = isset($_GET['scope']) ? trim((string) $_GET['scope']) : 'customers';
+
+        if ($view === 'manual_sale_meta') {
+            $meta = orders_admin_manual_sale_meta($pdo);
+            api_json([
+                'ok' => true,
+                'branches' => $meta['branches'],
+                'series_supported' => $meta['series_supported'],
+            ]);
+        }
+
+        if ($view === 'clients') {
+            if ($perPage < 1) {
+                $perPage = 30;
+            }
+            $list = orders_admin_clients_list($pdo, $q, $page, $perPage, $scope);
+            api_json([
+                'ok' => true,
+                'clients' => $list['items'],
+                'total' => $list['total'],
+                'page' => $list['page'],
+                'per_page' => $list['per_page'],
+                'total_pages' => $list['total_pages'],
+            ]);
+        }
+
+        $status = isset($_GET['status']) ? trim((string) $_GET['status']) : 'all';
+        $ongoingMode = isset($_GET['ongoing_mode']) ? trim((string) $_GET['ongoing_mode']) : 'new_order';
+        $phone = isset($_GET['phone']) ? trim((string) $_GET['phone']) : '';
+        $branchId = isset($_GET['branch_id']) ? (int) $_GET['branch_id'] : 0;
+
+        $list = orders_admin_list($pdo, $scope, $status, $q, $page, $perPage, $ongoingMode, $phone, $branchId);
         api_json([
             'ok' => true,
             'orders' => $list['items'],
@@ -73,8 +103,14 @@ try {
     }
 
     $body = admin_auth_request_json();
-    $orderId = (int) ($body['order_id'] ?? $body['id'] ?? 0);
     $action = trim((string) ($body['action'] ?? ''));
+    if ($action === 'create') {
+        $adminUser = admin_auth_current_user($pdo);
+        $result = orders_admin_create_manual($pdo, $body, $adminUser);
+        api_json($result, 201);
+    }
+
+    $orderId = (int) ($body['order_id'] ?? $body['id'] ?? 0);
     $message = trim((string) ($body['message'] ?? ''));
     $preInvoiceDueAt = trim((string) ($body['pre_invoice_due_at'] ?? ''));
     $cheque = [
@@ -123,16 +159,17 @@ try {
     }
 
     $items = orders_fetch_items($pdo, $orderId);
+    $orderPayload = orders_admin_serialize(
+        $order,
+        $items,
+        orders_fetch_events($pdo, $orderId)
+    );
     $response = [
         'ok' => true,
         'pricing_api_version' => 2,
         'message' => $result['message'],
-        'order' => orders_admin_serialize(
-            $order,
-            $items,
-            orders_fetch_events($pdo, $orderId)
-        ),
-        'totals' => invoices_totals_from_items($items),
+        'order' => $orderPayload,
+        'totals' => invoices_display_totals_from_items($orderPayload['items'] ?? $items),
         'allowed_transitions' => orders_allowed_transitions()[(string) $order['status']] ?? [],
         'can_delete' => orders_can_delete((string) $order['status']),
     ];
