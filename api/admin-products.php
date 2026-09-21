@@ -83,6 +83,17 @@ try {
         ]);
     }
 
+    if ($action === 'update_stock') {
+        $id = (int) ($body['id'] ?? 0);
+        $result = admin_products_update_stock($pdo, $id, $body['stock_qty'] ?? null);
+        api_json([
+            'ok' => true,
+            'message' => 'موجودی به‌روز شد',
+            'id' => $result['id'],
+            'stock_qty' => $result['stock_qty'],
+        ]);
+    }
+
     $savedId = admin_products_save($pdo, $body);
     $product = admin_products_get($pdo, $savedId);
     if ($product === null) {

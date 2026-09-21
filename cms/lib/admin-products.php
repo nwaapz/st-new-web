@@ -412,6 +412,35 @@ function admin_products_apply_row(PDO $pdo, int $id, array $row, array $category
 }
 
 /**
+ * @param mixed $stockQtyRaw
+ * @return array{id:int, stock_qty:int}
+ */
+function admin_products_update_stock(PDO $pdo, int $id, $stockQtyRaw): array
+{
+    admin_products_ensure_schema($pdo);
+
+    if ($id <= 0) {
+        throw new RuntimeException('شناسه الزامی است');
+    }
+
+    $stockQty = products_normalize_stock_qty($stockQtyRaw);
+
+    $exists = $pdo->prepare('SELECT id FROM products WHERE id = ? LIMIT 1');
+    $exists->execute([$id]);
+    if (!$exists->fetch()) {
+        throw new RuntimeException('محصول یافت نشد');
+    }
+
+    $stmt = $pdo->prepare('UPDATE products SET stock_qty = ? WHERE id = ?');
+    $stmt->execute([$stockQty, $id]);
+
+    return [
+        'id' => $id,
+        'stock_qty' => $stockQty,
+    ];
+}
+
+/**
  * @param array<string, mixed> $data
  */
 function admin_products_save(PDO $pdo, array $data): int
