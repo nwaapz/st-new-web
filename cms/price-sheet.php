@@ -102,6 +102,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_redirect(price_sheet_page_url($postFromWarehouse));
         }
 
+        if ($action === 'sync_categories') {
+            $syncResult = price_sheet_sync_categories_from_catalog($pdo);
+            cms_admin_audit($pdo, 'price_sheet.sync_categories', [
+                'entity_type' => 'price_sheet',
+                'summary' => cms_current_username() . ' — هماهنگ‌سازی دسته‌های لیست قیمت با فروشگاه',
+                'detail' => $syncResult,
+            ]);
+            cms_flash(sprintf(
+                'دسته‌ها هماهنگ شد — %s منتقل، %s بدون تغییر، %s بدون دسته در فروشگاه',
+                cms_to_persian_digits((string) $syncResult['moved']),
+                cms_to_persian_digits((string) $syncResult['unchanged']),
+                cms_to_persian_digits((string) $syncResult['unresolved'])
+            ));
+            cms_redirect(price_sheet_page_url($postFromWarehouse));
+        }
+
         if ($action === 'publish_all') {
             $publishResult = price_sheet_publish($pdo, null);
             cms_flash($publishResult['message']);
@@ -133,7 +149,8 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   <header class="cms-price-sheet__intro">
     <h1 style="margin:0">لیست قیمت<?= $fromWarehouse ? ' — انبار' : '' ?></h1>
     <p class="cms-muted">
-      ستون «خودرو» فقط خواندنی است — برای کیت‌ها از <a href="product-series.php">سری محصولات</a> و برای محصولات از <a href="products.php">محصولات</a> تنظیم می‌شود.
+      ردیف‌ها بر اساس <strong>دسته محصول در فروشگاه</strong> (از <a href="products.php">محصولات</a> و <a href="product-series.php">سری محصولات</a>) در قاب‌های دسته‌بندی چیده می‌شوند — نه بر اساس سرتیتر Excel.
+      ستون «خودرو» فقط خواندنی است.
       قیمت‌ها در پیش‌نویس ذخیره می‌شوند و با «انتشار» روی سایت و پورتال نمایندگان اعمال می‌شوند.
       موجودی انبار با «ذخیره پیش‌نویس» روی محصول مرتبط (با همان کد کالا) به‌روز می‌شود.
       قیمت بسته از واحد × کارتن محاسبه می‌شود؛ در صورت ویرایش قیمت بسته، قیمت واحد تنظیم می‌شود.
@@ -152,6 +169,15 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         <?php endif; ?>
         <button class="cms-btn cms-btn--primary" type="submit" <?= $status['draft_rows'] <= 0 ? 'disabled' : '' ?>>
           انتشار همه
+        </button>
+      </form>
+      <form method="post" style="display:inline">
+        <input type="hidden" name="action" value="sync_categories">
+        <?php if ($fromWarehouse): ?>
+          <input type="hidden" name="from_warehouse" value="1">
+        <?php endif; ?>
+        <button class="cms-btn cms-btn--secondary" type="submit" <?= $status['draft_rows'] <= 0 ? 'disabled' : '' ?>>
+          هماهنگ‌سازی دسته‌ها با فروشگاه
         </button>
       </form>
       <?php if ($status['draft_rows'] <= 0): ?>

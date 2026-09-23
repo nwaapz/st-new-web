@@ -2,5 +2,5 @@
 2:"$Sreact.suspense"
 3:I[6380,["5864","static/chunks/5864-2c8f252c01cc656e.js","977","static/chunks/app/contact/page-5695ec30b1f44db9.js"],"ContactPageView"]
 4:I[484,[],"OutletBoundary"]
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"contact-page","children":["$","$2",null,{"fallback":["$","div",null,{"className":"contact-page__loading","children":"در حال بارگذاری…"}],"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"vwuQkrFS2U9qa2_Vqe2sH"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"contact-page","children":["$","$2",null,{"fallback":["$","div",null,{"className":"contact-page__loading","children":"در حال بارگذاری…"}],"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"ajpL3O93kt721lnX0nbwj"}
 5:null

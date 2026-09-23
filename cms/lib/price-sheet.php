@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/price-import.php';
 require_once __DIR__ . '/admin-audit.php';
 require_once __DIR__ . '/product-car-models.php';
+require_once __DIR__ . '/product-categories.php';
+require_once __DIR__ . '/product-series-categories.php';
 require_once __DIR__ . '/product-stock.php';
 require_once __DIR__ . '/product-series.php';
 
@@ -325,6 +327,204 @@ function price_sheet_apply_catalog_meta_to_row(array &$sheetRow, ?array $catalog
     if (($sheetRow['stock_qty'] ?? null) === null && ($catalogMeta['stock_qty'] ?? null) !== null) {
         $sheetRow['stock_qty'] = $catalogMeta['stock_qty'];
     }
+}
+
+function price_sheet_resolve_catalog_category_id(PDO $pdo, string $visualId): ?int
+{
+    $visualId = price_import_normalize_visual_id($visualId);
+    if ($visualId === '') {
+        return null;
+    }
+
+    cms_ensure_product_categories_schema($pdo);
+    cms_series_ensure_categories_schema($pdo);
+
+    $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
+    $product = $entities['product'] ?? null;
+    if (is_array($product) && (int) ($product['id'] ?? 0) > 0) {
+        $categoryIds = cms_product_load_category_ids($pdo, (int) $product['id']);
+        if ($categoryIds !== []) {
+            return (int) $categoryIds[0];
+        }
+    }
+
+    $series = $entities['series'] ?? null;
+    if (is_array($series) && (int) ($series['id'] ?? 0) > 0) {
+        $categoryIds = cms_series_load_category_ids($pdo, (int) $series['id']);
+        if ($categoryIds !== []) {
+            return (int) $categoryIds[0];
+        }
+    }
+
+    return null;
+}
+
+/**
+ * @param array{visual_id:string,name:string,model_name:string,warranty_text:string,price_text:string,pack_size:?int,stock_qty:?int} $fields
+ */
+function price_sheet_persist_draft_row(
+    PDO $pdo,
+    int $frameCategoryId,
+    int $rowId,
+    int $targetCategoryId,
+    array $fields,
+    int $sortOrder
+): void {
+    if ($targetCategoryId <= 0) {
+        $targetCategoryId = $frameCategoryId;
+    }
+
+    $visualId = $fields['visual_id'];
+    $dupStmt = $pdo->prepare(
+        'SELECT id FROM price_sheet_rows WHERE category_id = ? AND visual_id = ? LIMIT 1'
+    );
+    $dupStmt->execute([$targetCategoryId, $visualId]);
+    $existingTargetId = (int) ($dupStmt->fetchColumn() ?: 0);
+
+    $updateStmt = $pdo->prepare(
+        'UPDATE price_sheet_rows
+         SET category_id = ?, visual_id = ?, name = ?, model_name = ?, warranty_text = ?, price_text = ?, pack_size = ?, stock_qty = ?, sort_order = ?
+         WHERE id = ?'
+    );
+    $insertStmt = $pdo->prepare(
+        'INSERT INTO price_sheet_rows (category_id, visual_id, name, model_name, warranty_text, price_text, pack_size, stock_qty, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $deleteByIdStmt = $pdo->prepare('DELETE FROM price_sheet_rows WHERE id = ?');
+
+    $bindUpdate = static function (PDOStatement $stmt, int $keepId) use ($targetCategoryId, $fields, $sortOrder): void {
+        $stmt->execute([
+            $targetCategoryId,
+            $fields['visual_id'],
+            $fields['name'],
+            $fields['model_name'],
+            $fields['warranty_text'],
+            $fields['price_text'],
+            $fields['pack_size'],
+            $fields['stock_qty'],
+            $sortOrder,
+            $keepId,
+        ]);
+    };
+
+    if ($existingTargetId > 0) {
+        $bindUpdate($updateStmt, $existingTargetId);
+        if ($rowId > 0 && $rowId !== $existingTargetId) {
+            $deleteByIdStmt->execute([$rowId]);
+        }
+        return;
+    }
+
+    if ($rowId > 0) {
+        $bindUpdate($updateStmt, $rowId);
+        return;
+    }
+
+    $insertStmt->execute([
+        $targetCategoryId,
+        $fields['visual_id'],
+        $fields['name'],
+        $fields['model_name'],
+        $fields['warranty_text'],
+        $fields['price_text'],
+        $fields['pack_size'],
+        $fields['stock_qty'],
+        $sortOrder,
+    ]);
+}
+
+function price_sheet_move_row_to_category(PDO $pdo, int $rowId, int $targetCategoryId): bool
+{
+    if ($rowId <= 0 || $targetCategoryId <= 0) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT id, category_id, visual_id, name, model_name, warranty_text, price_text, pack_size, stock_qty, sort_order
+         FROM price_sheet_rows
+         WHERE id = ?
+         LIMIT 1'
+    );
+    $stmt->execute([$rowId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return false;
+    }
+
+    $currentCategoryId = (int) ($row['category_id'] ?? 0);
+    if ($currentCategoryId === $targetCategoryId) {
+        return false;
+    }
+
+    price_sheet_persist_draft_row(
+        $pdo,
+        $currentCategoryId,
+        $rowId,
+        $targetCategoryId,
+        [
+            'visual_id' => price_import_normalize_visual_id((string) ($row['visual_id'] ?? '')),
+            'name' => (string) ($row['name'] ?? ''),
+            'model_name' => price_sheet_clean_cell_value((string) ($row['model_name'] ?? '')),
+            'warranty_text' => price_sheet_clean_cell_value((string) ($row['warranty_text'] ?? '')),
+            'price_text' => (string) ($row['price_text'] ?? ''),
+            'pack_size' => $row['pack_size'] !== null ? (int) $row['pack_size'] : null,
+            'stock_qty' => $row['stock_qty'] !== null ? (int) $row['stock_qty'] : null,
+        ],
+        (int) ($row['sort_order'] ?? 0)
+    );
+
+    return true;
+}
+
+/**
+ * @return array{moved:int,unchanged:int,unresolved:int}
+ */
+function price_sheet_sync_categories_from_catalog(PDO $pdo): array
+{
+    price_sheet_ensure_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
+    cms_series_ensure_categories_schema($pdo);
+
+    $rows = $pdo->query(
+        'SELECT id, category_id, visual_id
+         FROM price_sheet_rows
+         ORDER BY id ASC'
+    )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $moved = 0;
+    $unchanged = 0;
+    $unresolved = 0;
+
+    foreach ($rows as $row) {
+        $rowId = (int) ($row['id'] ?? 0);
+        $currentCategoryId = (int) ($row['category_id'] ?? 0);
+        $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
+        $targetCategoryId = price_sheet_resolve_catalog_category_id($pdo, $visualId);
+
+        if ($targetCategoryId === null || $targetCategoryId <= 0) {
+            $unresolved++;
+            continue;
+        }
+
+        if ($targetCategoryId === $currentCategoryId) {
+            $unchanged++;
+            continue;
+        }
+
+        if (price_sheet_move_row_to_category($pdo, $rowId, $targetCategoryId)) {
+            $moved++;
+        }
+    }
+
+    if ($moved > 0) {
+        price_sheet_touch_draft_updated($pdo);
+    }
+
+    return [
+        'moved' => $moved,
+        'unchanged' => $unchanged,
+        'unresolved' => $unresolved,
+    ];
 }
 
 /**
@@ -767,32 +967,24 @@ function price_sheet_apply_posted_rows(
             throw new RuntimeException('قیمت برای کد ' . $visualId . ' خالی است');
         }
 
-        if ($rowId > 0) {
-            $updateStmt->execute([
-                $visualId,
-                $name,
-                $modelName,
-                $warrantyText,
-                $priceText,
-                $packSize,
-                $stockQty,
-                $sortOrder,
-                $rowId,
-                $categoryId,
-            ]);
-        } else {
-            $insertStmt->execute([
-                $categoryId,
-                $visualId,
-                $name,
-                $modelName,
-                $warrantyText,
-                $priceText,
-                $packSize,
-                $stockQty,
-                $sortOrder,
-            ]);
-        }
+        $targetCategoryId = price_sheet_resolve_catalog_category_id($pdo, $visualId) ?? $categoryId;
+
+        price_sheet_persist_draft_row(
+            $pdo,
+            $categoryId,
+            $rowId,
+            $targetCategoryId,
+            [
+                'visual_id' => $visualId,
+                'name' => $name,
+                'model_name' => $modelName,
+                'warranty_text' => $warrantyText,
+                'price_text' => $priceText,
+                'pack_size' => $packSize,
+                'stock_qty' => $stockQty,
+            ],
+            $sortOrder
+        );
 
         price_sheet_sync_row_to_product($pdo, $visualId, [
             'name' => $name,
@@ -1047,12 +1239,6 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
 
     $imported = 0;
     $skipped = 0;
-    $sortOrder = $sortStart;
-    if ($sortOrder <= 0) {
-        $maxStmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order), -1) FROM price_sheet_rows WHERE category_id = ?');
-        $maxStmt->execute([$categoryId]);
-        $sortOrder = (int) $maxStmt->fetchColumn() + 1;
-    }
 
     $upsertStmt = $pdo->prepare(
         'INSERT INTO price_sheet_rows (category_id, visual_id, name, model_name, warranty_text, price_text, pack_size, stock_qty, sort_order)
@@ -1066,6 +1252,12 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
             stock_qty = COALESCE(VALUES(stock_qty), stock_qty),
             sort_order = VALUES(sort_order)'
     );
+    $maxSortStmt = $pdo->prepare(
+        'SELECT COALESCE(MAX(sort_order), -1) FROM price_sheet_rows WHERE category_id = ?'
+    );
+
+    /** @var array<int, int> $sortByCategory */
+    $sortByCategory = [];
 
     foreach ($parsedRows as $row) {
         $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
@@ -1075,6 +1267,13 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
             continue;
         }
 
+        $rowCategoryId = price_sheet_resolve_catalog_category_id($pdo, $visualId) ?? $categoryId;
+        if (!isset($sortByCategory[$rowCategoryId])) {
+            $maxSortStmt->execute([$rowCategoryId]);
+            $sortByCategory[$rowCategoryId] = (int) $maxSortStmt->fetchColumn() + 1;
+        }
+        $sortOrder = $sortByCategory[$rowCategoryId];
+
         $name = trim((string) ($row['name'] ?? ''));
         $modelName = price_sheet_clean_cell_value((string) ($row['cars_raw'] ?? ''));
         $warrantyText = price_sheet_clean_cell_value((string) ($row['warranty'] ?? ''));
@@ -1082,7 +1281,7 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
         $stockQty = null;
 
         $upsertStmt->execute([
-            $categoryId,
+            $rowCategoryId,
             $visualId,
             $name,
             $modelName,
@@ -1093,7 +1292,7 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
             $sortOrder,
         ]);
         $imported++;
-        $sortOrder++;
+        $sortByCategory[$rowCategoryId]++;
     }
 
     return ['imported' => $imported, 'skipped' => $skipped];
@@ -1103,8 +1302,16 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
  * @param array<string,mixed> $row
  * @param list<array<string,mixed>> $categories
  */
-function price_sheet_resolve_row_category_id(array $row, array $categories): ?int
+function price_sheet_resolve_row_category_id(PDO $pdo, array $row, array $categories): ?int
 {
+    $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
+    if ($visualId !== '') {
+        $catalogCategoryId = price_sheet_resolve_catalog_category_id($pdo, $visualId);
+        if ($catalogCategoryId !== null && $catalogCategoryId > 0) {
+            return $catalogCategoryId;
+        }
+    }
+
     $hints = [
         (string) ($row['section_hint'] ?? ''),
         (string) ($row['name_base'] ?? ''),
@@ -1177,7 +1384,7 @@ function price_sheet_import_from_google_sheet(PDO $pdo, string $sheetUrl): array
                 continue;
             }
 
-            $categoryId = price_sheet_resolve_row_category_id($row, $categories);
+            $categoryId = price_sheet_resolve_row_category_id($pdo, $row, $categories);
             if ($categoryId === null || $categoryId <= 0) {
                 $skippedUnmapped++;
                 if (count($unmappedSamples) < 12) {
