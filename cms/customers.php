@@ -28,6 +28,11 @@ cms_layout_start('امور مشتریان', cms_current_username(), 'customers')
     <p style="font-size:1.6rem;margin:0;font-weight:700"><?= (int) $counts['new_orders'] ?></p>
     <p class="cms-muted">سفارش‌های جدید در انتظار بررسی انبار</p>
   </a>
+  <a class="cms-panel cms-hub-card" href="price-sheet.php?from=warehouse">
+    <h2>لیست قیمت</h2>
+    <p style="font-size:1rem;margin:0;font-weight:700">جدول قیمت نمایندگان</p>
+    <p class="cms-muted">ویرایش پیش‌نویس و انتشار — همان چیدمان پورتال شعب</p>
+  </a>
   <a class="cms-panel cms-hub-card" href="messages.php">
     <h2>پیام مشتریان</h2>
     <p style="font-size:1.6rem;margin:0;font-weight:700"><?= (int) $counts['support_unread'] ?></p>

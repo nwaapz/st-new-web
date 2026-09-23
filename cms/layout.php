@@ -4,6 +4,35 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib/uploads.php';
 require_once __DIR__ . '/lib/admin-attention.php';
 
+function cms_subnav_link_is_active(string $href, string $script, string $aliasParent = ''): bool
+{
+    if (strpos($href, '?') !== false) {
+        $path = parse_url($href, PHP_URL_PATH);
+        $hrefScript = $path ? basename((string) $path) : $href;
+        if ($script !== $hrefScript) {
+            return false;
+        }
+        parse_str((string) parse_url($href, PHP_URL_QUERY), $expectedQuery);
+        foreach ($expectedQuery as $key => $value) {
+            if ((string) ($_GET[$key] ?? '') !== (string) $value) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    if ($href === 'price-sheet.php' && $script === 'price-sheet.php') {
+        return (string) ($_GET['from'] ?? '') !== 'warehouse';
+    }
+
+    if ($script === $href) {
+        return true;
+    }
+
+    return $aliasParent !== '' && $aliasParent === $href;
+}
+
 /**
  * @param 'website'|'shop'|'customers'|'advanced'|'' $section
  */
@@ -62,6 +91,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
         $subNav = [
             'customers.php' => 'خلاصه',
             'orders.php' => 'سفارش‌ها',
+            'price-sheet.php?from=warehouse' => 'لیست قیمت',
             'messages.php' => 'پیام‌ها',
             'branch-messages.php' => 'پیام نمایندگان',
             'branch-tickets.php' => 'تیکت نمایندگان',
@@ -83,7 +113,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=24">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=25">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';
@@ -119,6 +149,22 @@ function cms_layout_start(string $title, string $username = '', string $section 
         'hero-mobile.php' => 'hero.php',
     ];
 
+    if ($subNav !== []) {
+        echo '<nav class="cms-subnav" aria-label="زیرمنو">';
+        foreach ($subNav as $href => $label) {
+            $isExternal = strpos($href, 'http') === 0 || strpos($href, '/font-lab') !== false;
+            $parentActive = (!$isExternal && cms_subnav_link_is_active(
+                $href,
+                $script,
+                (string) ($subNavAliases[$script] ?? '')
+            ));
+            $active = $parentActive ? ' is-active' : '';
+            $attrs = $isExternal ? ' target="_blank" rel="noopener"' : '';
+            echo '<a class="cms-subnav__link' . $active . '" href="' . cms_h($href) . '"' . $attrs . '>' . cms_h($label) . '</a>';
+        }
+        echo '</nav>';
+    }
+
     $nestedGroups = [
         'customerclub.php' => [
             'customerclub.php' => 'صفحه ورود',
@@ -135,18 +181,6 @@ function cms_layout_start(string $title, string $username = '', string $section 
     ];
     $nestedParent = $subNavAliases[$script] ?? $script;
     $nestedNav = $nestedGroups[$nestedParent] ?? [];
-
-    if ($subNav !== []) {
-        echo '<nav class="cms-subnav" aria-label="زیرمنو">';
-        foreach ($subNav as $href => $label) {
-            $isExternal = strpos($href, 'http') === 0 || strpos($href, '/font-lab') !== false;
-            $parentActive = (!$isExternal && ($script === $href || ($subNavAliases[$script] ?? '') === $href));
-            $active = $parentActive ? ' is-active' : '';
-            $attrs = $isExternal ? ' target="_blank" rel="noopener"' : '';
-            echo '<a class="cms-subnav__link' . $active . '" href="' . cms_h($href) . '"' . $attrs . '>' . cms_h($label) . '</a>';
-        }
-        echo '</nav>';
-    }
 
     if ($nestedNav !== []) {
         echo '<nav class="cms-subnav cms-subnav--nested" aria-label="زیرمنوی بخش">';

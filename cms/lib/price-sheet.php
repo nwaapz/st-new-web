@@ -3,6 +3,75 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/price-import.php';
 require_once __DIR__ . '/admin-audit.php';
+require_once __DIR__ . '/product-car-models.php';
+
+function price_sheet_warranty_text(?string $description): string
+{
+    $raw = trim((string) $description);
+    if ($raw === '') {
+        return '—';
+    }
+    if (preg_match('/^گارانتی:\s*(.+)/u', $raw, $match)) {
+        $value = trim((string) ($match[1] ?? ''));
+        return $value !== '' ? $value : '—';
+    }
+
+    return '—';
+}
+
+function price_sheet_parse_toman_amount(string $raw): ?int
+{
+    $text = trim($raw);
+    if ($text === '') {
+        return null;
+    }
+
+    $normalized = '';
+    $persianDigits = [
+        '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+        '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+        '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+    ];
+    $length = mb_strlen($text, 'UTF-8');
+    for ($i = 0; $i < $length; $i++) {
+        $ch = mb_substr($text, $i, 1, 'UTF-8');
+        if ($ch === '٬' || $ch === '،' || $ch === ',' || $ch === ' ' || $ch === "\u{00A0}") {
+            continue;
+        }
+        $normalized .= $persianDigits[$ch] ?? $ch;
+    }
+
+    $normalized = preg_replace('/تومان$/u', '', $normalized);
+    $normalized = trim((string) $normalized);
+    if ($normalized === '' || preg_match('/ریال/u', $text)) {
+        return null;
+    }
+    if (!preg_match('/^\d+$/', $normalized) || strlen($normalized) > 12) {
+        return null;
+    }
+
+    return (int) $normalized;
+}
+
+function price_sheet_pack_price_text(string $unitPrice, ?int $packSize): string
+{
+    $unit = price_sheet_parse_toman_amount($unitPrice);
+    if ($unit === null || $packSize === null || $packSize <= 0) {
+        return '—';
+    }
+
+    $amount = $unit * $packSize;
+    $grouped = number_format($amount, 0, '', ',');
+    $grouped = str_replace(',', '٬', $grouped);
+
+    return cms_to_persian_digits($grouped) . ' تومان';
+}
+
+function price_sheet_page_url(bool $fromWarehouse = false): string
+{
+    return $fromWarehouse ? 'price-sheet.php?from=warehouse' : 'price-sheet.php';
+}
 
 function price_sheet_ensure_schema(PDO $pdo): void
 {
@@ -147,6 +216,84 @@ function price_sheet_list_rows(PDO $pdo, int $categoryId): array
  * @param list<array{id?:int,visual_id?:string,name?:string,price_text?:string,pack_size?:int|string|null,delete?:bool}> $postedRows
  * @return array{saved:int,deleted:int}
  */
+function price_sheet_apply_posted_rows(
+    PDO $pdo,
+    int $categoryId,
+    array $postedRows,
+    PDOStatement $deleteStmt,
+    PDOStatement $updateStmt,
+    PDOStatement $insertStmt
+): array {
+    $saved = 0;
+    $deleted = 0;
+    $sortOrder = 0;
+
+    foreach ($postedRows as $input) {
+        if (!is_array($input)) {
+            continue;
+        }
+
+        $rowId = (int) ($input['id'] ?? 0);
+        if (!empty($input['delete'])) {
+            if ($rowId > 0) {
+                $deleteStmt->execute([$rowId, $categoryId]);
+                if ($deleteStmt->rowCount() > 0) {
+                    $deleted++;
+                }
+            }
+            continue;
+        }
+
+        $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
+        $name = trim((string) ($input['name'] ?? ''));
+        $priceText = trim((string) ($input['price_text'] ?? ''));
+        $packRaw = trim((string) ($input['pack_size'] ?? ''));
+        $packSize = $packRaw === '' ? null : max(0, (int) $packRaw);
+        if ($packSize === 0) {
+            $packSize = null;
+        }
+
+        if ($visualId === '' && $priceText === '' && $name === '') {
+            continue;
+        }
+        if ($visualId === '') {
+            throw new RuntimeException('کد کالا نمی‌تواند خالی باشد');
+        }
+        if ($priceText === '') {
+            throw new RuntimeException('قیمت برای کد ' . $visualId . ' خالی است');
+        }
+
+        if ($rowId > 0) {
+            $updateStmt->execute([
+                $visualId,
+                $name,
+                $priceText,
+                $packSize,
+                $sortOrder,
+                $rowId,
+                $categoryId,
+            ]);
+        } else {
+            $insertStmt->execute([
+                $categoryId,
+                $visualId,
+                $name,
+                $priceText,
+                $packSize,
+                $sortOrder,
+            ]);
+        }
+        $saved++;
+        $sortOrder++;
+    }
+
+    return ['saved' => $saved, 'deleted' => $deleted];
+}
+
+/**
+ * @param list<array{id?:int,visual_id?:string,name?:string,price_text?:string,pack_size?:int|string|null,delete?:bool}> $postedRows
+ * @return array{saved:int,deleted:int}
+ */
 function price_sheet_save_rows(PDO $pdo, int $categoryId, array $postedRows): array
 {
     price_sheet_ensure_schema($pdo);
@@ -160,9 +307,54 @@ function price_sheet_save_rows(PDO $pdo, int $categoryId, array $postedRows): ar
         throw new RuntimeException('دسته یافت نشد');
     }
 
-    $saved = 0;
-    $deleted = 0;
-    $sortOrder = 0;
+    $pdo->beginTransaction();
+    try {
+        $deleteStmt = $pdo->prepare('DELETE FROM price_sheet_rows WHERE id = ? AND category_id = ?');
+        $updateStmt = $pdo->prepare(
+            'UPDATE price_sheet_rows
+             SET visual_id = ?, name = ?, price_text = ?, pack_size = ?, sort_order = ?
+             WHERE id = ? AND category_id = ?'
+        );
+        $insertStmt = $pdo->prepare(
+            'INSERT INTO price_sheet_rows (category_id, visual_id, name, price_text, pack_size, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $result = price_sheet_apply_posted_rows(
+            $pdo,
+            $categoryId,
+            $postedRows,
+            $deleteStmt,
+            $updateStmt,
+            $insertStmt
+        );
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+
+    if ($result['saved'] > 0 || $result['deleted'] > 0) {
+        price_sheet_touch_draft_updated($pdo);
+    }
+
+    return $result;
+}
+
+/**
+ * @param array<int|string, list<array{id?:int,visual_id?:string,name?:string,price_text?:string,pack_size?:int|string|null,delete?:bool}>> $postedFrames
+ * @return array{saved:int,deleted:int}
+ */
+function price_sheet_save_frames(PDO $pdo, array $postedFrames): array
+{
+    price_sheet_ensure_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
+
+    if ($postedFrames === []) {
+        throw new RuntimeException('ردیفی برای ذخیره ارسال نشد');
+    }
+
+    $savedTotal = 0;
+    $deletedTotal = 0;
 
     $pdo->beginTransaction();
     try {
@@ -176,64 +368,29 @@ function price_sheet_save_rows(PDO $pdo, int $categoryId, array $postedRows): ar
             'INSERT INTO price_sheet_rows (category_id, visual_id, name, price_text, pack_size, sort_order)
              VALUES (?, ?, ?, ?, ?, ?)'
         );
+        $catStmt = $pdo->prepare('SELECT id FROM categories WHERE id = ? LIMIT 1');
 
-        foreach ($postedRows as $input) {
-            if (!is_array($input)) {
+        foreach ($postedFrames as $categoryIdRaw => $postedRows) {
+            $categoryId = (int) $categoryIdRaw;
+            if ($categoryId <= 0 || !is_array($postedRows)) {
                 continue;
             }
 
-            $rowId = (int) ($input['id'] ?? 0);
-            if (!empty($input['delete'])) {
-                if ($rowId > 0) {
-                    $deleteStmt->execute([$rowId, $categoryId]);
-                    if ($deleteStmt->rowCount() > 0) {
-                        $deleted++;
-                    }
-                }
-                continue;
+            $catStmt->execute([$categoryId]);
+            if (!$catStmt->fetch()) {
+                throw new RuntimeException('دسته یافت نشد');
             }
 
-            $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
-            $name = trim((string) ($input['name'] ?? ''));
-            $priceText = trim((string) ($input['price_text'] ?? ''));
-            $packRaw = trim((string) ($input['pack_size'] ?? ''));
-            $packSize = $packRaw === '' ? null : max(0, (int) $packRaw);
-            if ($packSize === 0) {
-                $packSize = null;
-            }
-
-            if ($visualId === '' && $priceText === '' && $name === '') {
-                continue;
-            }
-            if ($visualId === '') {
-                throw new RuntimeException('کد کالا نمی‌تواند خالی باشد');
-            }
-            if ($priceText === '') {
-                throw new RuntimeException('قیمت برای کد ' . $visualId . ' خالی است');
-            }
-
-            if ($rowId > 0) {
-                $updateStmt->execute([
-                    $visualId,
-                    $name,
-                    $priceText,
-                    $packSize,
-                    $sortOrder,
-                    $rowId,
-                    $categoryId,
-                ]);
-            } else {
-                $insertStmt->execute([
-                    $categoryId,
-                    $visualId,
-                    $name,
-                    $priceText,
-                    $packSize,
-                    $sortOrder,
-                ]);
-            }
-            $saved++;
-            $sortOrder++;
+            $result = price_sheet_apply_posted_rows(
+                $pdo,
+                $categoryId,
+                $postedRows,
+                $deleteStmt,
+                $updateStmt,
+                $insertStmt
+            );
+            $savedTotal += $result['saved'];
+            $deletedTotal += $result['deleted'];
         }
 
         $pdo->commit();
@@ -242,11 +399,128 @@ function price_sheet_save_rows(PDO $pdo, int $categoryId, array $postedRows): ar
         throw $e;
     }
 
-    if ($saved > 0 || $deleted > 0) {
+    if ($savedTotal > 0 || $deletedTotal > 0) {
         price_sheet_touch_draft_updated($pdo);
     }
 
-    return ['saved' => $saved, 'deleted' => $deleted];
+    return ['saved' => $savedTotal, 'deleted' => $deletedTotal];
+}
+
+/**
+ * @return list<array{
+ *   category_id:int,
+ *   category_name:string,
+ *   sort_order:int,
+ *   rows:list<array<string,mixed>>
+ * }>
+ */
+function price_sheet_list_frames(PDO $pdo): array
+{
+    price_sheet_ensure_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
+
+    $categoryStmt = $pdo->query(
+        'SELECT id, name, COALESCE(sort_order, 9999) AS sort_order
+         FROM categories
+         ORDER BY sort_order ASC, name ASC'
+    );
+    $categories = $categoryStmt ? $categoryStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+    $stmt = $pdo->query(
+        'SELECT r.id, r.category_id, r.visual_id, r.name, r.price_text, r.pack_size, r.sort_order
+         FROM price_sheet_rows r
+         ORDER BY r.category_id ASC, r.sort_order ASC, r.id ASC'
+    );
+
+    /** @var array<int, list<array<string,mixed>>> $rowsByCategory */
+    $rowsByCategory = [];
+    $visualIds = [];
+
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $categoryId = (int) ($row['category_id'] ?? 0);
+        if ($categoryId <= 0) {
+            continue;
+        }
+
+        $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
+        if ($visualId !== '') {
+            $visualIds[$visualId] = true;
+        }
+
+        $packSize = $row['pack_size'];
+        $rowsByCategory[$categoryId][] = [
+            'id' => (int) ($row['id'] ?? 0),
+            'category_id' => $categoryId,
+            'visual_id' => $visualId,
+            'name' => (string) ($row['name'] ?? ''),
+            'price_text' => (string) ($row['price_text'] ?? ''),
+            'pack_size' => $packSize !== null ? (int) $packSize : null,
+            'sort_order' => (int) ($row['sort_order'] ?? 0),
+            'model_name' => '—',
+            'warranty_text' => '—',
+            'pack_price_text' => '—',
+        ];
+    }
+
+    /** @var array<string, array{model_name:string,warranty_text:string}> $productByVisual */
+    $productByVisual = [];
+    if ($visualIds !== []) {
+        $modelSql = cms_product_model_names_sql('p');
+        $placeholders = implode(',', array_fill(0, count($visualIds), '?'));
+        $productStmt = $pdo->prepare(
+            "SELECT p.visual_id, p.description, {$modelSql} AS model_name
+             FROM products p
+             WHERE p.visual_id IN ({$placeholders})"
+        );
+        $productStmt->execute(array_keys($visualIds));
+        foreach ($productStmt->fetchAll(PDO::FETCH_ASSOC) as $productRow) {
+            $visualId = price_import_normalize_visual_id((string) ($productRow['visual_id'] ?? ''));
+            if ($visualId === '') {
+                continue;
+            }
+            $productByVisual[$visualId] = [
+                'model_name' => trim((string) ($productRow['model_name'] ?? '')),
+                'warranty_text' => price_sheet_warranty_text((string) ($productRow['description'] ?? '')),
+            ];
+        }
+    }
+
+    $frames = [];
+    foreach ($categories as $category) {
+        $categoryId = (int) ($category['id'] ?? 0);
+        if ($categoryId <= 0) {
+            continue;
+        }
+
+        $frameRows = $rowsByCategory[$categoryId] ?? [];
+        if ($frameRows === []) {
+            continue;
+        }
+
+        foreach ($frameRows as &$sheetRow) {
+            $visualId = (string) ($sheetRow['visual_id'] ?? '');
+            $productMeta = $productByVisual[$visualId] ?? null;
+            if ($productMeta !== null) {
+                $modelName = trim($productMeta['model_name']);
+                $sheetRow['model_name'] = $modelName !== '' ? $modelName : '—';
+                $sheetRow['warranty_text'] = $productMeta['warranty_text'];
+            }
+            $sheetRow['pack_price_text'] = price_sheet_pack_price_text(
+                (string) ($sheetRow['price_text'] ?? ''),
+                $sheetRow['pack_size'] ?? null
+            );
+        }
+        unset($sheetRow);
+
+        $frames[] = [
+            'category_id' => $categoryId,
+            'category_name' => (string) ($category['name'] ?? ''),
+            'sort_order' => (int) ($category['sort_order'] ?? 9999),
+            'rows' => $frameRows,
+        ];
+    }
+
+    return $frames;
 }
 
 function price_sheet_delete_row(PDO $pdo, int $rowId, int $categoryId): bool

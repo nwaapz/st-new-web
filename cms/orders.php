@@ -233,6 +233,7 @@ if ($viewOrder) {
     <h1 style="margin:0">سفارش‌ها</h1>
     <p class="cms-muted" style="margin:.35rem 0 0">سفارش جدید → مدارک پرداخت → پرداخت → ارسال → تحویل</p>
   </div>
+  <a class="cms-btn cms-btn--secondary" href="price-sheet.php?from=warehouse">لیست قیمت</a>
 </div>
 
 <div class="cms-orders-tabs" role="tablist" aria-label="نوع سفارش">

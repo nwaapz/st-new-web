@@ -2870,3 +2870,131 @@ a.cms-kpi:hover {
     grid-template-columns: 1fr;
   }
 }
+
+.cms-price-sheet {
+  margin-bottom: 1.5rem;
+}
+
+.cms-price-sheet__intro {
+  margin-bottom: 0.85rem;
+}
+
+.cms-price-sheet__intro p {
+  margin: 0.4rem 0 0;
+  line-height: 1.65;
+}
+
+.cms-price-sheet__frame {
+  margin-top: 1rem;
+  border: 1px solid rgba(232, 212, 176, 0.28);
+  background: rgba(16, 16, 16, 0.92);
+  overflow: hidden;
+}
+
+.cms-price-sheet__frame-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  background: rgba(232, 212, 176, 0.08);
+  border-bottom: 1px solid rgba(232, 212, 176, 0.22);
+}
+
+.cms-price-sheet__frame-head h2 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 750;
+  color: rgba(232, 212, 176, 0.95);
+}
+
+.cms-price-sheet__frame-head span {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.cms-price-sheet__scroll {
+  overflow-x: auto;
+}
+
+.cms-price-sheet__table {
+  width: 100%;
+  min-width: 54rem;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.cms-price-sheet__table th,
+.cms-price-sheet__table td {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.35rem 0.45rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.cms-price-sheet__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #161616;
+  color: rgba(232, 212, 176, 0.88);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cms-price-sheet__table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cms-price-sheet__table tbody tr:hover {
+  background: rgba(232, 212, 176, 0.06);
+}
+
+.cms-price-sheet__code {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 5.5rem;
+}
+
+.cms-price-sheet__name {
+  text-align: right;
+  min-width: 10rem;
+}
+
+.cms-price-sheet__price,
+.cms-price-sheet__pack-price {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 6.5rem;
+}
+
+.cms-price-sheet__delete {
+  width: 3rem;
+}
+
+.cms-price-sheet__input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.82rem;
+}
+
+.cms-price-sheet__input--num {
+  min-width: 5rem;
+  text-align: center;
+}
+
+.cms-price-sheet__frame-actions {
+  padding: 0.55rem 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cms-price-sheet__tools summary {
+  user-select: none;
+}
+
+.cms-price-sheet__toolbar .cms-btn-row {
+  align-items: center;
+}

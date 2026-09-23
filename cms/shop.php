@@ -173,6 +173,11 @@ cms_layout_start('فروشگاه', cms_current_username(), 'shop');
     <p class="cms-muted" style="margin:0 0 .35rem">در انتظار تأیید</p>
     <p style="font-size:1.6rem;margin:0;font-weight:700"><?= $counts['reviews_pending'] ?></p>
   </a>
+  <a class="cms-panel cms-hub-card" href="price-sheet.php">
+    <h2>لیست قیمت</h2>
+    <p class="cms-muted" style="margin:0 0 .35rem">پیش‌نویس و انتشار</p>
+    <p style="font-size:1rem;margin:0;font-weight:700">جدول قیمت نمایندگان</p>
+  </a>
 </div>
 <p class="cms-muted" style="margin-top:1rem">اگر دیتابیس قدیمی است یک‌بار <a href="migrate-run.php">آپدیت ساختار</a> را اجرا کنید.</p>
 <?php cms_layout_end(); ?>
