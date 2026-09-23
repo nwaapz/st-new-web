@@ -57,6 +57,16 @@ function cms_series_factory_names_sql(string $seriesAlias = 'ps'): string
              WHERE psi_fn.series_id = ' . $seriesAlias . '.id)';
 }
 
+function cms_series_model_names_sql(string $seriesAlias = 'ps'): string
+{
+    return '(SELECT GROUP_CONCAT(DISTINCT m2.name ORDER BY m2.sort_order ASC, m2.name ASC SEPARATOR \' · \')
+             FROM product_series_items psi_m
+             JOIN products p_m ON p_m.id = psi_m.product_id
+             JOIN product_car_models pcm ON pcm.product_id = p_m.id
+             JOIN car_models m2 ON m2.id = pcm.car_model_id
+             WHERE psi_m.series_id = ' . $seriesAlias . '.id)';
+}
+
 /** @return list<int> */
 function cms_series_load_factory_ids(PDO $pdo, int $seriesId): array
 {

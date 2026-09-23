@@ -5,6 +5,7 @@ require_once __DIR__ . '/price-import.php';
 require_once __DIR__ . '/admin-audit.php';
 require_once __DIR__ . '/product-car-models.php';
 require_once __DIR__ . '/product-stock.php';
+require_once __DIR__ . '/product-series.php';
 
 function price_sheet_warranty_text(?string $description): string
 {
@@ -174,6 +175,141 @@ function price_sheet_sync_row_to_product(PDO $pdo, string $visualId, array $fiel
 }
 
 /**
+ * @param array{name?:string,warranty_text?:string,model_name?:string} $fields
+ */
+function price_sheet_sync_row_to_series(PDO $pdo, string $visualId, array $fields): void
+{
+    price_sheet_ensure_series_model_column($pdo);
+    $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
+    $series = $entities['series'] ?? null;
+    if (!is_array($series) || (int) ($series['id'] ?? 0) <= 0) {
+        return;
+    }
+
+    $seriesId = (int) $series['id'];
+    $stmt = $pdo->prepare('SELECT name, description, model_name FROM product_series WHERE id = ? LIMIT 1');
+    $stmt->execute([$seriesId]);
+    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$existing) {
+        return;
+    }
+
+    $existingName = trim((string) ($existing['name'] ?? ''));
+    $existingDescription = (string) ($existing['description'] ?? '');
+    $name = trim((string) ($fields['name'] ?? ''));
+    $warrantyText = price_sheet_clean_cell_value((string) ($fields['warranty_text'] ?? ''));
+    $modelName = price_sheet_clean_cell_value((string) ($fields['model_name'] ?? ''));
+    $newDescription = price_import_description_with_warranty($existingDescription, $warrantyText);
+
+    $update = $pdo->prepare(
+        'UPDATE product_series SET name = ?, model_name = ?, description = ? WHERE id = ?'
+    );
+    $update->execute([
+        $name !== '' ? $name : $existingName,
+        $modelName,
+        $newDescription,
+        $seriesId,
+    ]);
+}
+
+/**
+ * @param list<string> $visualIds
+ * @return array<string, array{model_name:string,warranty_text:string,stock_qty:?int,is_series:bool}>
+ */
+function price_sheet_load_catalog_meta_by_visual_ids(PDO $pdo, array $visualIds): array
+{
+    if ($visualIds === []) {
+        return [];
+    }
+
+    products_ensure_stock_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
+    price_sheet_ensure_series_model_column($pdo);
+
+    /** @var array<string, array{model_name:string,warranty_text:string,stock_qty:?int,is_series:bool}> $metaByVisual */
+    $metaByVisual = [];
+    $placeholders = implode(',', array_fill(0, count($visualIds), '?'));
+    $params = array_values($visualIds);
+
+    $productModelSql = cms_product_model_names_sql('p');
+    $productStmt = $pdo->prepare(
+        "SELECT p.visual_id, p.description, p.stock_qty, {$productModelSql} AS model_name
+         FROM products p
+         WHERE p.visual_id IN ({$placeholders})"
+    );
+    $productStmt->execute($params);
+    foreach ($productStmt->fetchAll(PDO::FETCH_ASSOC) as $productRow) {
+        $visualId = price_import_normalize_visual_id((string) ($productRow['visual_id'] ?? ''));
+        if ($visualId === '') {
+            continue;
+        }
+        $productStock = $productRow['stock_qty'];
+        $metaByVisual[$visualId] = [
+            'model_name' => trim((string) ($productRow['model_name'] ?? '')),
+            'warranty_text' => price_sheet_warranty_text((string) ($productRow['description'] ?? '')),
+            'stock_qty' => $productStock !== null ? max(0, (int) $productStock) : null,
+            'is_series' => false,
+        ];
+    }
+
+    $seriesStmt = $pdo->prepare(
+        "SELECT s.visual_id, s.description, s.model_name
+         FROM product_series s
+         WHERE s.visual_id IN ({$placeholders})"
+    );
+    $seriesStmt->execute($params);
+    foreach ($seriesStmt->fetchAll(PDO::FETCH_ASSOC) as $seriesRow) {
+        $visualId = price_import_normalize_visual_id((string) ($seriesRow['visual_id'] ?? ''));
+        if ($visualId === '') {
+            continue;
+        }
+
+        $seriesModel = price_sheet_clean_cell_value((string) ($seriesRow['model_name'] ?? ''));
+        $seriesWarranty = price_sheet_warranty_text((string) ($seriesRow['description'] ?? ''));
+        $existing = $metaByVisual[$visualId] ?? null;
+
+        if ($existing === null) {
+            $metaByVisual[$visualId] = [
+                'model_name' => $seriesModel,
+                'warranty_text' => $seriesWarranty,
+                'stock_qty' => null,
+                'is_series' => true,
+            ];
+            continue;
+        }
+
+        $existing['is_series'] = true;
+        if (($existing['warranty_text'] === '' || $existing['warranty_text'] === '—') && $seriesWarranty !== '—') {
+            $existing['warranty_text'] = $seriesWarranty;
+        }
+        $metaByVisual[$visualId] = $existing;
+    }
+
+    return $metaByVisual;
+}
+
+/**
+ * @param array<string,mixed> $sheetRow
+ * @param array{model_name:string,warranty_text:string,stock_qty:?int,is_series?:bool}|null $catalogMeta
+ */
+function price_sheet_apply_catalog_meta_to_row(array &$sheetRow, ?array $catalogMeta): void
+{
+    if ($catalogMeta === null) {
+        return;
+    }
+
+    if (($sheetRow['model_name'] ?? '') === '') {
+        $sheetRow['model_name'] = price_sheet_clean_cell_value((string) ($catalogMeta['model_name'] ?? ''));
+    }
+    if (($sheetRow['warranty_text'] ?? '') === '') {
+        $sheetRow['warranty_text'] = price_sheet_clean_cell_value((string) ($catalogMeta['warranty_text'] ?? ''));
+    }
+    if (($sheetRow['stock_qty'] ?? null) === null && ($catalogMeta['stock_qty'] ?? null) !== null) {
+        $sheetRow['stock_qty'] = $catalogMeta['stock_qty'];
+    }
+}
+
+/**
  * @param array<string,mixed> $row
  */
 function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): array
@@ -185,6 +321,7 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
         ? (int) $row['pack_size']
         : null;
     $warrantyText = price_sheet_clean_cell_value((string) ($row['warranty_text'] ?? ''));
+    $modelName = price_sheet_clean_cell_value((string) ($row['model_name'] ?? ''));
     $stockQty = array_key_exists('stock_qty', $row) && $row['stock_qty'] !== null
         ? (int) $row['stock_qty']
         : null;
@@ -263,9 +400,30 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
         $seriesId = (int) ($series['id'] ?? 0);
         $existingPrice = trim((string) ($series['price_text'] ?? ''));
         $existingPackSize = price_import_db_pack_size($series);
-        if ($existingPrice !== $priceText || $existingPackSize !== $newPackSize) {
-            $stmt = $pdo->prepare('UPDATE product_series SET price_text = ?, pack_size = ? WHERE id = ?');
-            $stmt->execute([$priceText, $newPackSize, $seriesId]);
+        $seriesRow = $pdo->prepare('SELECT name, description, model_name FROM product_series WHERE id = ? LIMIT 1');
+        $seriesRow->execute([$seriesId]);
+        $seriesExisting = $seriesRow->fetch(PDO::FETCH_ASSOC) ?: [];
+        $existingSeriesName = trim((string) ($seriesExisting['name'] ?? ''));
+        $existingSeriesDescription = (string) ($seriesExisting['description'] ?? '');
+        $existingSeriesModel = price_sheet_clean_cell_value((string) ($seriesExisting['model_name'] ?? ''));
+        $newSeriesDescription = price_import_description_with_warranty($existingSeriesDescription, $warrantyText);
+        $seriesNameChanged = $name !== '' && $name !== $existingSeriesName;
+        $seriesDescriptionChanged = (string) ($newSeriesDescription ?? '') !== $existingSeriesDescription;
+        $seriesModelChanged = $modelName !== $existingSeriesModel;
+        $seriesPriceChanged = $existingPrice !== $priceText || $existingPackSize !== $newPackSize;
+
+        if ($seriesPriceChanged || $seriesNameChanged || $seriesDescriptionChanged || $seriesModelChanged) {
+            $stmt = $pdo->prepare(
+                'UPDATE product_series SET price_text = ?, pack_size = ?, name = ?, model_name = ?, description = ? WHERE id = ?'
+            );
+            $stmt->execute([
+                $priceText,
+                $newPackSize,
+                $name !== '' ? $name : $existingSeriesName,
+                $modelName,
+                $newSeriesDescription,
+                $seriesId,
+            ]);
             $updatedSeries = true;
         }
     }
@@ -384,6 +542,21 @@ function price_sheet_ensure_schema(PDO $pdo): void
     }
 
     price_sheet_ensure_extended_columns($pdo);
+    price_sheet_ensure_series_model_column($pdo);
+}
+
+function price_sheet_ensure_series_model_column(PDO $pdo): void
+{
+    $cols = [];
+    foreach ($pdo->query('SHOW COLUMNS FROM product_series')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $cols[(string) ($row['Field'] ?? '')] = true;
+    }
+    if (!isset($cols['model_name'])) {
+        $pdo->exec(
+            "ALTER TABLE product_series
+             ADD COLUMN model_name VARCHAR(512) NOT NULL DEFAULT '' AFTER name"
+        );
+    }
 }
 
 function price_sheet_ensure_extended_columns(PDO $pdo): void
@@ -599,6 +772,11 @@ function price_sheet_apply_posted_rows(
             'warranty_text' => $warrantyText,
             'stock_qty' => $stockQty,
         ]);
+        price_sheet_sync_row_to_series($pdo, $visualId, [
+            'name' => $name,
+            'warranty_text' => $warrantyText,
+            'model_name' => $modelName,
+        ]);
         $saved++;
         $sortOrder++;
     }
@@ -781,31 +959,8 @@ function price_sheet_list_frames(PDO $pdo): array
         ];
     }
 
-    /** @var array<string, array{model_name:string,warranty_text:string,stock_qty:?int}> $productByVisual */
-    $productByVisual = [];
-    if ($visualIds !== []) {
-        products_ensure_stock_schema($pdo);
-        $modelSql = cms_product_model_names_sql('p');
-        $placeholders = implode(',', array_fill(0, count($visualIds), '?'));
-        $productStmt = $pdo->prepare(
-            "SELECT p.visual_id, p.description, p.stock_qty, {$modelSql} AS model_name
-             FROM products p
-             WHERE p.visual_id IN ({$placeholders})"
-        );
-        $productStmt->execute(array_keys($visualIds));
-        foreach ($productStmt->fetchAll(PDO::FETCH_ASSOC) as $productRow) {
-            $visualId = price_import_normalize_visual_id((string) ($productRow['visual_id'] ?? ''));
-            if ($visualId === '') {
-                continue;
-            }
-            $productStock = $productRow['stock_qty'];
-            $productByVisual[$visualId] = [
-                'model_name' => trim((string) ($productRow['model_name'] ?? '')),
-                'warranty_text' => price_sheet_warranty_text((string) ($productRow['description'] ?? '')),
-                'stock_qty' => $productStock !== null ? max(0, (int) $productStock) : null,
-            ];
-        }
-    }
+    /** @var array<string, array{model_name:string,warranty_text:string,stock_qty:?int,is_series:bool}> $catalogByVisual */
+    $catalogByVisual = price_sheet_load_catalog_meta_by_visual_ids($pdo, array_keys($visualIds));
 
     $frames = [];
     foreach ($categories as $category) {
@@ -821,17 +976,7 @@ function price_sheet_list_frames(PDO $pdo): array
 
         foreach ($frameRows as &$sheetRow) {
             $visualId = (string) ($sheetRow['visual_id'] ?? '');
-            $productMeta = $productByVisual[$visualId] ?? null;
-
-            if (($sheetRow['model_name'] ?? '') === '' && $productMeta !== null) {
-                $sheetRow['model_name'] = price_sheet_clean_cell_value($productMeta['model_name']);
-            }
-            if (($sheetRow['warranty_text'] ?? '') === '' && $productMeta !== null) {
-                $sheetRow['warranty_text'] = price_sheet_clean_cell_value($productMeta['warranty_text']);
-            }
-            if (($sheetRow['stock_qty'] ?? null) === null && $productMeta !== null && $productMeta['stock_qty'] !== null) {
-                $sheetRow['stock_qty'] = $productMeta['stock_qty'];
-            }
+            price_sheet_apply_catalog_meta_to_row($sheetRow, $catalogByVisual[$visualId] ?? null);
 
             $sheetRow['pack_price_text'] = price_sheet_pack_price_text(
                 (string) ($sheetRow['price_text'] ?? ''),
