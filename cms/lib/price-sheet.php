@@ -266,7 +266,11 @@ function price_sheet_load_catalog_meta_by_visual_ids(PDO $pdo, array $visualIds)
     }
 
     $seriesStmt = $pdo->prepare(
-        "SELECT s.visual_id, s.description, s.model_name
+        "SELECT s.visual_id, s.description,
+                (SELECT GROUP_CONCAT(m.name ORDER BY pscm.sort_order ASC, m.sort_order ASC, m.name ASC SEPARATOR ' · ')
+                 FROM product_series_car_models pscm
+                 JOIN car_models m ON m.id = pscm.car_model_id
+                 WHERE pscm.series_id = s.id) AS model_name
          FROM product_series s
          WHERE s.visual_id IN ({$placeholders})"
     );

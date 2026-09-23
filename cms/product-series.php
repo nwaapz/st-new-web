@@ -5,6 +5,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/product-car-models.php';
 require_once __DIR__ . '/lib/product-categories.php';
+require_once __DIR__ . '/lib/car-model-factories.php';
 require_once __DIR__ . '/lib/product-series-categories.php';
 require_once __DIR__ . '/lib/search-text.php';
 require_once __DIR__ . '/lib/admin-audit.php';
@@ -14,6 +15,7 @@ const SERIES_GALLERY_MAX = 12;
 cms_require_login();
 $pdo = cms_pdo();
 cms_ensure_product_car_models_schema($pdo);
+cms_ensure_car_model_factories_schema($pdo);
 cms_ensure_product_categories_schema($pdo);
 
 function product_series_ensure_schema(PDO $pdo): void
@@ -167,10 +169,18 @@ $listCategoryId = max(0, (int) ($_GET['category_id'] ?? 0));
 $listSearchQ = trim((string) ($_GET['q'] ?? ''));
 $selectedProductIds = [];
 $selectedCategoryIds = [];
+$selectedCarModelIds = [];
 $gallery = [];
 
 $categories = $pdo->query(
     'SELECT id, name FROM categories WHERE published = 1 ORDER BY sort_order ASC, name ASC'
+)->fetchAll();
+
+$factoryNamesSql = cms_car_model_factory_names_sql('m');
+$models = $pdo->query(
+    "SELECT m.id, m.name, {$factoryNamesSql} AS factory_name
+     FROM car_models m
+     ORDER BY m.sort_order ASC, m.name ASC"
 )->fetchAll();
 
 $modelNamesSql = cms_product_model_names_sql('p');
@@ -196,6 +206,7 @@ if (isset($_GET['edit'])) {
     $idsStmt->execute([(int) $edit['id']]);
     $selectedProductIds = array_map('intval', $idsStmt->fetchAll(PDO::FETCH_COLUMN));
     $selectedCategoryIds = cms_series_load_category_ids($pdo, (int) $edit['id']);
+    $selectedCarModelIds = cms_series_load_car_model_ids($pdo, (int) $edit['id']);
     $gallery = series_load_gallery($pdo, (int) $edit['id']);
 }
 
@@ -233,7 +244,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $packSize = null;
         }
         $description = trim((string) ($_POST['description'] ?? ''));
-        $modelName = trim((string) ($_POST['model_name'] ?? ''));
+        $carModelIds = isset($_POST['car_model_ids']) && is_array($_POST['car_model_ids'])
+            ? $_POST['car_model_ids']
+            : [];
         $image = cms_handle_optional_upload('image', (string) ($_POST['image'] ?? ''));
         $detailLeadImage = trim((string) ($_POST['detail_lead_image'] ?? ''));
         $imageSetupOverride = trim((string) ($_POST['image_setup_override'] ?? ''));
@@ -282,12 +295,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE product_series SET name=?, model_name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, image=?,
+                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, image=?,
                  detail_lead_image=?, image_setup_override=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
                 $name,
-                $modelName,
                 $slug,
                 $visualId,
                 $description !== '' ? $description : null,
@@ -305,13 +317,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_flash('سری به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO product_series (name, model_name, slug, visual_id, description, price_text, pack_size, image,
+                'INSERT INTO product_series (name, slug, visual_id, description, price_text, pack_size, image,
                  detail_lead_image, image_setup_override, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name,
-                $modelName,
                 $slug,
                 $visualId,
                 $description !== '' ? $description : null,
@@ -329,6 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         cms_series_save_category_ids($pdo, $seriesId, $categoryIds);
+        cms_series_save_car_model_ids($pdo, $seriesId, $carModelIds);
 
         $pdo->prepare('DELETE FROM product_series_items WHERE series_id = ?')->execute([$seriesId]);
         if ($productIds !== []) {
@@ -447,6 +459,40 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
     </label>
   </div>
 
+  <fieldset class="cms-field" style="border:0;padding:0;margin:0 0 1rem">
+    <legend class="cms-label" style="padding:0;margin-bottom:.5rem">مدل‌های خودرو (کارخانه / مدل)</legend>
+    <p class="cms-muted" style="margin:0 0 .5rem;font-size:.85rem">حداقل یک خودرو الزامی است. در لیست قیمت انبار و فیلتر فروشگاه از همین انتخاب‌ها استفاده می‌شود.</p>
+    <?php if ($models === []): ?>
+      <p class="cms-muted" style="margin:0">هنوز مدلی ثبت نشده. ابتدا از <a href="car-models.php">مدل‌ها</a> اضافه کنید.</p>
+    <?php else: ?>
+      <div class="cms-check-list-filter" data-cms-check-list-filter>
+        <input
+          type="search"
+          class="cms-input cms-check-list-filter__input"
+          placeholder="جستجو کارخانه یا مدل…"
+          autocomplete="off"
+          aria-label="جستجو مدل خودرو"
+        >
+        <p class="cms-check-list-filter__empty cms-muted" hidden>موردی یافت نشد</p>
+        <div class="cms-check-list">
+          <?php foreach ($models as $m): ?>
+            <?php
+            $mid = (int) $m['id'];
+            $searchHaystack = trim((string) (($m['factory_name'] ?? '') . ' ' . ($m['name'] ?? '')));
+            ?>
+            <label
+              class="cms-check cms-check-list__item"
+              data-cms-check-search="<?= cms_h($searchHaystack) ?>"
+            >
+              <input type="checkbox" name="car_model_ids[]" value="<?= $mid ?>" <?= in_array($mid, $selectedCarModelIds, true) ? 'checked' : '' ?>>
+              <span><?= cms_h(($m['factory_name'] ?? '') . ' / ' . ($m['name'] ?? '')) ?></span>
+            </label>
+          <?php endforeach; ?>
+        </div>
+      </div>
+    <?php endif; ?>
+  </fieldset>
+
   <div class="cms-grid-2">
     <label class="cms-field"><span class="cms-label">نام سری</span>
       <input class="cms-input" name="name" required value="<?= cms_h($edit['name'] ?? '') ?>">
@@ -458,10 +504,6 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
   <label class="cms-field"><span class="cms-label">شناسه نمایشی</span>
     <input class="cms-input" name="visual_id" dir="ltr" value="<?= cms_h($edit['visual_id'] ?? '') ?>" placeholder="KIT-1001">
     <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">همان «کد کالا» در Excel/Google Sheet (مثلاً 1484). بدون این کد، قیمت و تعداد بسته از شیت روی سری اعمال نمی‌شود.</span>
-  </label>
-  <label class="cms-field"><span class="cms-label">خودرو</span>
-    <input class="cms-input" name="model_name" value="<?= cms_h($edit['model_name'] ?? '') ?>" placeholder="مثلاً پژو ۲۰۶، سمند">
-    <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">در لیست قیمت انبار برای این کیت نمایش داده می‌شود. خودرو را اینجا ویرایش کنید، نه در شیت انبار.</span>
   </label>
   <div class="cms-grid-2">
     <label class="cms-field"><span class="cms-label">قیمت (متن نمایشی)</span>

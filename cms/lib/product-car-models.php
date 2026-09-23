@@ -270,6 +270,78 @@ function cms_product_load_car_model_entries_map(PDO $pdo, array $productIds): ar
     return $map;
 }
 
+function cms_series_model_names_sql(string $seriesAlias = 'ps'): string
+{
+    return '(SELECT GROUP_CONCAT(m2.name ORDER BY pscm.sort_order ASC, m2.sort_order ASC, m2.name ASC SEPARATOR \' · \')
+             FROM product_series_car_models pscm
+             JOIN car_models m2 ON m2.id = pscm.car_model_id
+             WHERE pscm.series_id = ' . $seriesAlias . '.id)';
+}
+
+/** @return list<int> */
+function cms_series_load_car_model_ids(PDO $pdo, int $seriesId): array
+{
+    cms_ensure_product_car_models_schema($pdo);
+    $stmt = $pdo->prepare(
+        'SELECT car_model_id FROM product_series_car_models
+         WHERE series_id = ?
+         ORDER BY sort_order ASC, car_model_id ASC'
+    );
+    $stmt->execute([$seriesId]);
+    $ids = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $ids[] = (int) $row['car_model_id'];
+    }
+
+    return $ids;
+}
+
+/** @param list<int|string> $carModelIds */
+function cms_series_save_car_model_ids(PDO $pdo, int $seriesId, array $carModelIds): void
+{
+    cms_ensure_product_car_models_schema($pdo);
+    $unique = [];
+    foreach ($carModelIds as $carModelId) {
+        $carModelId = (int) $carModelId;
+        if ($carModelId > 0 && !in_array($carModelId, $unique, true)) {
+            $unique[] = $carModelId;
+        }
+    }
+    if ($unique === []) {
+        throw new RuntimeException('حداقل یک مدل خودرو الزامی است');
+    }
+
+    $pdo->prepare('DELETE FROM product_series_car_models WHERE series_id = ?')->execute([$seriesId]);
+    $stmt = $pdo->prepare(
+        'INSERT INTO product_series_car_models (series_id, car_model_id, sort_order) VALUES (?, ?, ?)'
+    );
+    foreach ($unique as $sortOrder => $carModelId) {
+        $stmt->execute([$seriesId, $carModelId, $sortOrder]);
+    }
+}
+
+function cms_ensure_product_series_car_models_schema(PDO $pdo): void
+{
+    static $ready = false;
+    if ($ready) {
+        return;
+    }
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS product_series_car_models (
+          series_id INT UNSIGNED NOT NULL,
+          car_model_id INT UNSIGNED NOT NULL,
+          sort_order INT NOT NULL DEFAULT 0,
+          PRIMARY KEY (series_id, car_model_id),
+          KEY idx_pscm_model (car_model_id),
+          CONSTRAINT fk_pscm_series FOREIGN KEY (series_id) REFERENCES product_series (id) ON DELETE CASCADE,
+          CONSTRAINT fk_pscm_model FOREIGN KEY (car_model_id) REFERENCES car_models (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
+    $ready = true;
+}
+
 function cms_ensure_product_car_models_schema(PDO $pdo): void
 {
     static $ready = false;
@@ -323,6 +395,8 @@ function cms_ensure_product_car_models_schema(PDO $pdo): void
             /* exists */
         }
     }
+
+    cms_ensure_product_series_car_models_schema($pdo);
 
     $ready = true;
 }
