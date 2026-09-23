@@ -122,8 +122,9 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   <header class="cms-price-sheet__intro">
     <h1 style="margin:0">لیست قیمت<?= $fromWarehouse ? ' — انبار' : '' ?></h1>
     <p class="cms-muted">
-      قیمت‌ها در پیش‌نویس ذخیره می‌شوند و تا زمان «انتشار» روی سایت و پورتال نمایندگان اعمال نمی‌شوند.
-      قیمت بسته برابر است با قیمت واحد ضربدر تعداد در کارتن.
+      همه ستون‌ها قابل ویرایش هستند. قیمت‌ها در پیش‌نویس ذخیره می‌شوند و با «انتشار» روی سایت و پورتال نمایندگان اعمال می‌شوند.
+      موجودی انبار با «ذخیره پیش‌نویس» روی محصول مرتبط (با همان کد کالا) به‌روز می‌شود.
+      قیمت بسته از واحد × کارتن محاسبه می‌شود؛ در صورت ویرایش قیمت بسته، قیمت واحد تنظیم می‌شود.
       <?php if (!$fromWarehouse): ?>
         برای ایجاد محصول جدید از <a href="product-price-import.php">ورود قیمت از Excel</a> استفاده کنید.
       <?php endif; ?>
@@ -207,11 +208,19 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                   <th scope="col">تعداد در کارتن</th>
                   <th scope="col">قیمت واحد</th>
                   <th scope="col">قیمت بسته</th>
+                  <th scope="col">موجودی انبار</th>
                   <th scope="col">حذف</th>
                 </tr>
               </thead>
               <tbody class="cms-price-sheet__rows" data-category-id="<?= $categoryId ?>">
                 <?php foreach ($frameRows as $index => $row): ?>
+                  <?php
+                    $packPriceValue = (string) ($row['pack_price_text'] ?? '');
+                    if ($packPriceValue === '—') {
+                        $packPriceValue = '';
+                    }
+                    $stockValue = $row['stock_qty'] !== null ? (string) $row['stock_qty'] : '';
+                  ?>
                   <tr>
                     <td class="cms-price-sheet__code">
                       <input type="hidden" name="frames[<?= $categoryId ?>][<?= $index ?>][id]" value="<?= (int) $row['id'] ?>">
@@ -220,15 +229,24 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                     <td class="cms-price-sheet__name">
                       <input class="cms-input cms-price-sheet__input" name="frames[<?= $categoryId ?>][<?= $index ?>][name]" value="<?= cms_h((string) $row['name']) ?>">
                     </td>
-                    <td><?= cms_h((string) ($row['model_name'] ?? '—')) ?></td>
-                    <td><?= cms_h((string) ($row['warranty_text'] ?? '—')) ?></td>
+                    <td>
+                      <input class="cms-input cms-price-sheet__input" name="frames[<?= $categoryId ?>][<?= $index ?>][model_name]" value="<?= cms_h((string) ($row['model_name'] ?? '')) ?>">
+                    </td>
+                    <td>
+                      <input class="cms-input cms-price-sheet__input" name="frames[<?= $categoryId ?>][<?= $index ?>][warranty_text]" value="<?= cms_h((string) ($row['warranty_text'] ?? '')) ?>">
+                    </td>
                     <td>
                       <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][pack_size]" value="<?= $row['pack_size'] !== null ? cms_h((string) $row['pack_size']) : '' ?>" dir="ltr" data-pack-input>
                     </td>
                     <td class="cms-price-sheet__price">
                       <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][price_text]" value="<?= cms_h((string) $row['price_text']) ?>" dir="ltr" data-price-input>
                     </td>
-                    <td class="cms-price-sheet__price cms-price-sheet__pack-price" data-pack-price><?= cms_h((string) ($row['pack_price_text'] ?? '—')) ?></td>
+                    <td class="cms-price-sheet__price">
+                      <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][pack_price_text]" value="<?= cms_h($packPriceValue) ?>" dir="ltr" data-pack-price-input>
+                    </td>
+                    <td>
+                      <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][stock_qty]" value="<?= cms_h($stockValue) ?>" dir="ltr" inputmode="numeric">
+                    </td>
                     <td class="cms-price-sheet__delete"><input type="checkbox" name="frames[<?= $categoryId ?>][<?= $index ?>][delete]" value="1"></td>
                   </tr>
                 <?php endforeach; ?>
@@ -348,28 +366,47 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     return grouped.replace(/\d/g, function (d) { return persianDigits[d] || d; }) + ' تومان';
   }
 
-  function updatePackPrice(row) {
+  function updatePackPrice(row, fromUnit) {
     var priceInput = row.querySelector('[data-price-input]');
     var packInput = row.querySelector('[data-pack-input]');
-    var packCell = row.querySelector('[data-pack-price]');
-    if (!priceInput || !packInput || !packCell) return;
-    var unit = parseToman(priceInput.value);
+    var packPriceInput = row.querySelector('[data-pack-price-input]');
+    if (!priceInput || !packInput || !packPriceInput) return;
     var packSize = parseInt(normalizeDigits(packInput.value), 10);
-    if (unit === null || !packSize || packSize <= 0) {
-      packCell.textContent = '—';
+    if (!packSize || packSize <= 0) {
+      if (fromUnit) packPriceInput.value = '';
       return;
     }
-    packCell.textContent = formatToman(unit * packSize);
+    if (fromUnit === false) {
+      var packAmount = parseToman(packPriceInput.value);
+      if (packAmount !== null && packAmount > 0) {
+        var unitAmount = Math.floor(packAmount / packSize);
+        if (unitAmount > 0) {
+          priceInput.value = formatToman(unitAmount);
+        }
+      }
+      return;
+    }
+    var unit = parseToman(priceInput.value);
+    if (unit === null) {
+      packPriceInput.value = '';
+      return;
+    }
+    packPriceInput.value = formatToman(unit * packSize);
   }
 
   function bindRow(row) {
     var priceInput = row.querySelector('[data-price-input]');
     var packInput = row.querySelector('[data-pack-input]');
-    if (priceInput) priceInput.addEventListener('input', function () { updatePackPrice(row); });
-    if (packInput) packInput.addEventListener('input', function () { updatePackPrice(row); });
+    var packPriceInput = row.querySelector('[data-pack-price-input]');
+    if (priceInput) priceInput.addEventListener('input', function () { updatePackPrice(row, true); });
+    if (packInput) packInput.addEventListener('input', function () { updatePackPrice(row, true); });
+    if (packPriceInput) packPriceInput.addEventListener('input', function () { updatePackPrice(row, false); });
   }
 
-  document.querySelectorAll('.cms-price-sheet__rows tr').forEach(bindRow);
+  document.querySelectorAll('.cms-price-sheet__rows tr').forEach(function (row) {
+    bindRow(row);
+    updatePackPrice(row, true);
+  });
 
   document.querySelectorAll('[data-add-row]').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -386,13 +423,16 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         '<td class="cms-price-sheet__name">' +
           '<input class="cms-input cms-price-sheet__input" name="frames[' + categoryId + '][' + index + '][name]" value="">' +
         '</td>' +
-        '<td>—</td>' +
-        '<td>—</td>' +
+        '<td><input class="cms-input cms-price-sheet__input" name="frames[' + categoryId + '][' + index + '][model_name]" value=""></td>' +
+        '<td><input class="cms-input cms-price-sheet__input" name="frames[' + categoryId + '][' + index + '][warranty_text]" value=""></td>' +
         '<td><input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][pack_size]" value="" dir="ltr" data-pack-input></td>' +
         '<td class="cms-price-sheet__price">' +
           '<input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][price_text]" value="" dir="ltr" data-price-input>' +
         '</td>' +
-        '<td class="cms-price-sheet__price cms-price-sheet__pack-price" data-pack-price>—</td>' +
+        '<td class="cms-price-sheet__price">' +
+          '<input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][pack_price_text]" value="" dir="ltr" data-pack-price-input>' +
+        '</td>' +
+        '<td><input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][stock_qty]" value="" dir="ltr" inputmode="numeric"></td>' +
         '<td class="cms-price-sheet__delete"><input type="checkbox" name="frames[' + categoryId + '][' + index + '][delete]" value="1"></td>';
       tbody.appendChild(tr);
       bindRow(tr);

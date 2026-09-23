@@ -113,7 +113,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=25">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=26">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';

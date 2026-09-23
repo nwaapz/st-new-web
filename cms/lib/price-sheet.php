@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/price-import.php';
 require_once __DIR__ . '/admin-audit.php';
 require_once __DIR__ . '/product-car-models.php';
+require_once __DIR__ . '/product-stock.php';
 
 function price_sheet_warranty_text(?string $description): string
 {
@@ -73,6 +74,280 @@ function price_sheet_page_url(bool $fromWarehouse = false): string
     return $fromWarehouse ? 'price-sheet.php?from=warehouse' : 'price-sheet.php';
 }
 
+function price_sheet_format_toman_amount(int $amount): string
+{
+    $grouped = number_format(max(0, $amount), 0, '', ',');
+    $grouped = str_replace(',', '٬', $grouped);
+
+    return cms_to_persian_digits($grouped) . ' تومان';
+}
+
+function price_sheet_clean_cell_value(?string $value): string
+{
+    $value = trim((string) $value);
+    if ($value === '' || $value === '—') {
+        return '';
+    }
+
+    return $value;
+}
+
+/**
+ * @param array<string,mixed> $input
+ */
+function price_sheet_resolve_row_fields(array $input): array
+{
+    $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
+    $name = trim((string) ($input['name'] ?? ''));
+    $modelName = price_sheet_clean_cell_value((string) ($input['model_name'] ?? ''));
+    $warrantyText = price_sheet_clean_cell_value((string) ($input['warranty_text'] ?? ''));
+    $priceText = trim((string) ($input['price_text'] ?? ''));
+    $packPriceText = trim((string) ($input['pack_price_text'] ?? ''));
+    $packRaw = trim((string) ($input['pack_size'] ?? ''));
+    $packSize = $packRaw === '' ? null : max(0, (int) $packRaw);
+    if ($packSize === 0) {
+        $packSize = null;
+    }
+
+    if ($priceText === '' && $packPriceText !== '' && $packSize !== null && $packSize > 0) {
+        $packAmount = price_sheet_parse_toman_amount($packPriceText);
+        if ($packAmount !== null && $packAmount > 0) {
+            $unitAmount = (int) floor($packAmount / $packSize);
+            if ($unitAmount > 0) {
+                $priceText = price_sheet_format_toman_amount($unitAmount);
+            }
+        }
+    }
+
+    $stockRaw = trim((string) ($input['stock_qty'] ?? ''));
+    $stockQty = null;
+    if ($stockRaw !== '') {
+        $stockQty = products_normalize_stock_qty($stockRaw, 0);
+    }
+
+    return [
+        'visual_id' => $visualId,
+        'name' => $name,
+        'model_name' => $modelName,
+        'warranty_text' => $warrantyText,
+        'price_text' => $priceText,
+        'pack_size' => $packSize,
+        'stock_qty' => $stockQty,
+    ];
+}
+
+function price_sheet_sync_product_stock(PDO $pdo, string $visualId, ?int $stockQty): void
+{
+    price_sheet_sync_row_to_product($pdo, $visualId, ['stock_qty' => $stockQty]);
+}
+
+/**
+ * @param array{name?:string,warranty_text?:string,stock_qty?:int|null} $fields
+ */
+function price_sheet_sync_row_to_product(PDO $pdo, string $visualId, array $fields): void
+{
+    products_ensure_stock_schema($pdo);
+    $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
+    $product = $entities['product'] ?? null;
+    if (!is_array($product) || (int) ($product['id'] ?? 0) <= 0) {
+        return;
+    }
+
+    $productId = (int) $product['id'];
+    $existingName = trim((string) ($product['name'] ?? ''));
+    $existingDescription = (string) ($product['description'] ?? '');
+    $name = trim((string) ($fields['name'] ?? ''));
+    $warrantyText = price_sheet_clean_cell_value((string) ($fields['warranty_text'] ?? ''));
+    $newDescription = price_import_description_with_warranty($existingDescription, $warrantyText);
+    $stockQty = array_key_exists('stock_qty', $fields) ? $fields['stock_qty'] : null;
+    $currentStock = products_stock_qty($pdo, $productId);
+
+    $stmt = $pdo->prepare(
+        'UPDATE products SET name = ?, description = ?, stock_qty = ? WHERE id = ?'
+    );
+    $stmt->execute([
+        $name !== '' ? $name : $existingName,
+        $newDescription,
+        $stockQty !== null ? $stockQty : $currentStock,
+        $productId,
+    ]);
+}
+
+/**
+ * @param array<string,mixed> $row
+ */
+function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): array
+{
+    $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
+    $name = trim((string) ($row['name'] ?? ''));
+    $priceText = trim((string) ($row['price_text'] ?? ''));
+    $newPackSize = isset($row['pack_size']) && $row['pack_size'] !== null
+        ? (int) $row['pack_size']
+        : null;
+    $warrantyText = price_sheet_clean_cell_value((string) ($row['warranty_text'] ?? ''));
+    $stockQty = array_key_exists('stock_qty', $row) && $row['stock_qty'] !== null
+        ? (int) $row['stock_qty']
+        : null;
+
+    $result = [
+        'visual_id' => $visualId,
+        'name' => $name,
+        'excel_row' => $excelRow,
+        'updated' => false,
+        'reason' => '',
+        'entity' => '',
+    ];
+
+    if ($visualId === '') {
+        $result['reason'] = 'کد کالا خالی است';
+        return $result;
+    }
+    if ($priceText === '') {
+        $result['reason'] = 'قیمت نامعتبر یا خالی است';
+        return $result;
+    }
+
+    products_ensure_stock_schema($pdo);
+    $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
+    $product = $entities['product'] ?? null;
+    $series = $entities['series'] ?? null;
+
+    if (!$product && !$series) {
+        $result['reason'] = 'محصول یا سری کیت با این کد در سایت یافت نشد';
+        return $result;
+    }
+
+    if ($name === '') {
+        if (is_array($series)) {
+            $name = (string) ($series['name'] ?? '');
+        } elseif (is_array($product)) {
+            $name = (string) ($product['name'] ?? '');
+        }
+    }
+
+    $updatedProduct = false;
+    $updatedSeries = false;
+
+    if (is_array($product)) {
+        $productId = (int) ($product['id'] ?? 0);
+        $existingPrice = trim((string) ($product['price_text'] ?? ''));
+        $existingPackSize = price_import_db_pack_size($product);
+        $existingName = trim((string) ($product['name'] ?? ''));
+        $existingDescription = (string) ($product['description'] ?? '');
+        $existingStock = products_stock_qty($pdo, $productId);
+        $newDescription = price_import_description_with_warranty($existingDescription, $warrantyText);
+        $descriptionChanged = (string) ($newDescription ?? '') !== $existingDescription;
+        $nameChanged = $name !== '' && $name !== $existingName;
+        $stockChanged = $stockQty !== null && $stockQty !== $existingStock;
+        $priceChanged = $existingPrice !== $priceText || $existingPackSize !== $newPackSize;
+
+        if ($priceChanged || $nameChanged || $descriptionChanged || $stockChanged) {
+            $stmt = $pdo->prepare(
+                'UPDATE products
+                 SET price_text = ?, pack_size = ?, name = ?, description = ?, stock_qty = ?
+                 WHERE id = ?'
+            );
+            $stmt->execute([
+                $priceText,
+                $newPackSize,
+                $name !== '' ? $name : $existingName,
+                $newDescription,
+                $stockQty !== null ? $stockQty : $existingStock,
+                $productId,
+            ]);
+            $updatedProduct = true;
+        }
+    }
+
+    if (is_array($series)) {
+        $seriesId = (int) ($series['id'] ?? 0);
+        $existingPrice = trim((string) ($series['price_text'] ?? ''));
+        $existingPackSize = price_import_db_pack_size($series);
+        if ($existingPrice !== $priceText || $existingPackSize !== $newPackSize) {
+            $stmt = $pdo->prepare('UPDATE product_series SET price_text = ?, pack_size = ? WHERE id = ?');
+            $stmt->execute([$priceText, $newPackSize, $seriesId]);
+            $updatedSeries = true;
+        }
+    }
+
+    if (!$updatedProduct && !$updatedSeries) {
+        $entityHint = is_array($product) && is_array($series)
+            ? 'both'
+            : (is_array($series) ? 'series' : 'product');
+        $result['reason'] = 'تغییری برای انتشار یافت نشد';
+        $result['entity'] = $entityHint;
+        return $result;
+    }
+
+    $entityParts = [];
+    if ($updatedProduct) {
+        $entityParts[] = 'product';
+    }
+    if ($updatedSeries) {
+        $entityParts[] = 'series';
+    }
+
+    $result['updated'] = true;
+    $result['name'] = $name;
+    $result['entity'] = count($entityParts) === 2 ? 'both' : $entityParts[0];
+    $result['pack_size'] = $newPackSize;
+
+    return $result;
+}
+
+/**
+ * @param list<array<string,mixed>> $sheetRows
+ * @return array{
+ *   total_rows:int,
+ *   updated:int,
+ *   skipped:list<array<string,mixed>>,
+ *   updated_rows:list<array<string,mixed>>
+ * }
+ */
+function price_sheet_apply_catalog_from_rows(PDO $pdo, array $sheetRows): array
+{
+    $updated = 0;
+    $skipped = [];
+    $updatedRows = [];
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($sheetRows as $index => $row) {
+            $applyResult = price_sheet_apply_row_to_catalog($pdo, $row, $index + 1);
+            if (!empty($applyResult['updated'])) {
+                $updated++;
+                $updatedRows[] = [
+                    'visual_id' => (string) ($applyResult['visual_id'] ?? ''),
+                    'name' => (string) ($applyResult['name'] ?? ''),
+                    'excel_row' => (int) ($applyResult['excel_row'] ?? 0),
+                    'entity' => (string) ($applyResult['entity'] ?? ''),
+                    'pack_size' => $applyResult['pack_size'] ?? null,
+                ];
+                continue;
+            }
+
+            $skipped[] = [
+                'visual_id' => (string) ($applyResult['visual_id'] ?? ''),
+                'name' => (string) ($applyResult['name'] ?? ''),
+                'excel_row' => (int) ($applyResult['excel_row'] ?? 0),
+                'reason' => (string) ($applyResult['reason'] ?? 'نامشخص'),
+                'entity' => (string) ($applyResult['entity'] ?? ''),
+            ];
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+
+    return [
+        'total_rows' => count($sheetRows),
+        'updated' => $updated,
+        'skipped' => $skipped,
+        'updated_rows' => $updatedRows,
+    ];
+}
+
 function price_sheet_ensure_schema(PDO $pdo): void
 {
     $pdo->exec(
@@ -105,6 +380,35 @@ function price_sheet_ensure_schema(PDO $pdo): void
         $pdo->exec(
             'INSERT INTO price_sheet_meta (id, last_published_at, last_published_count, draft_updated_at)
              VALUES (1, NULL, 0, NULL)'
+        );
+    }
+
+    price_sheet_ensure_extended_columns($pdo);
+}
+
+function price_sheet_ensure_extended_columns(PDO $pdo): void
+{
+    $cols = [];
+    foreach ($pdo->query('SHOW COLUMNS FROM price_sheet_rows')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $cols[(string) ($row['Field'] ?? '')] = true;
+    }
+
+    if (!isset($cols['model_name'])) {
+        $pdo->exec(
+            "ALTER TABLE price_sheet_rows
+             ADD COLUMN model_name VARCHAR(512) NOT NULL DEFAULT '' AFTER name"
+        );
+    }
+    if (!isset($cols['warranty_text'])) {
+        $pdo->exec(
+            "ALTER TABLE price_sheet_rows
+             ADD COLUMN warranty_text VARCHAR(255) NOT NULL DEFAULT '' AFTER model_name"
+        );
+    }
+    if (!isset($cols['stock_qty'])) {
+        $pdo->exec(
+            'ALTER TABLE price_sheet_rows
+             ADD COLUMN stock_qty INT UNSIGNED NULL AFTER pack_size'
         );
     }
 }
@@ -244,14 +548,14 @@ function price_sheet_apply_posted_rows(
             continue;
         }
 
-        $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
-        $name = trim((string) ($input['name'] ?? ''));
-        $priceText = trim((string) ($input['price_text'] ?? ''));
-        $packRaw = trim((string) ($input['pack_size'] ?? ''));
-        $packSize = $packRaw === '' ? null : max(0, (int) $packRaw);
-        if ($packSize === 0) {
-            $packSize = null;
-        }
+        $fields = price_sheet_resolve_row_fields($input);
+        $visualId = $fields['visual_id'];
+        $name = $fields['name'];
+        $modelName = $fields['model_name'];
+        $warrantyText = $fields['warranty_text'];
+        $priceText = $fields['price_text'];
+        $packSize = $fields['pack_size'];
+        $stockQty = $fields['stock_qty'];
 
         if ($visualId === '' && $priceText === '' && $name === '') {
             continue;
@@ -267,8 +571,11 @@ function price_sheet_apply_posted_rows(
             $updateStmt->execute([
                 $visualId,
                 $name,
+                $modelName,
+                $warrantyText,
                 $priceText,
                 $packSize,
+                $stockQty,
                 $sortOrder,
                 $rowId,
                 $categoryId,
@@ -278,11 +585,20 @@ function price_sheet_apply_posted_rows(
                 $categoryId,
                 $visualId,
                 $name,
+                $modelName,
+                $warrantyText,
                 $priceText,
                 $packSize,
+                $stockQty,
                 $sortOrder,
             ]);
         }
+
+        price_sheet_sync_row_to_product($pdo, $visualId, [
+            'name' => $name,
+            'warranty_text' => $warrantyText,
+            'stock_qty' => $stockQty,
+        ]);
         $saved++;
         $sortOrder++;
     }
@@ -312,12 +628,12 @@ function price_sheet_save_rows(PDO $pdo, int $categoryId, array $postedRows): ar
         $deleteStmt = $pdo->prepare('DELETE FROM price_sheet_rows WHERE id = ? AND category_id = ?');
         $updateStmt = $pdo->prepare(
             'UPDATE price_sheet_rows
-             SET visual_id = ?, name = ?, price_text = ?, pack_size = ?, sort_order = ?
+             SET visual_id = ?, name = ?, model_name = ?, warranty_text = ?, price_text = ?, pack_size = ?, stock_qty = ?, sort_order = ?
              WHERE id = ? AND category_id = ?'
         );
         $insertStmt = $pdo->prepare(
-            'INSERT INTO price_sheet_rows (category_id, visual_id, name, price_text, pack_size, sort_order)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO price_sheet_rows (category_id, visual_id, name, model_name, warranty_text, price_text, pack_size, stock_qty, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $result = price_sheet_apply_posted_rows(
             $pdo,
@@ -361,12 +677,12 @@ function price_sheet_save_frames(PDO $pdo, array $postedFrames): array
         $deleteStmt = $pdo->prepare('DELETE FROM price_sheet_rows WHERE id = ? AND category_id = ?');
         $updateStmt = $pdo->prepare(
             'UPDATE price_sheet_rows
-             SET visual_id = ?, name = ?, price_text = ?, pack_size = ?, sort_order = ?
+             SET visual_id = ?, name = ?, model_name = ?, warranty_text = ?, price_text = ?, pack_size = ?, stock_qty = ?, sort_order = ?
              WHERE id = ? AND category_id = ?'
         );
         $insertStmt = $pdo->prepare(
-            'INSERT INTO price_sheet_rows (category_id, visual_id, name, price_text, pack_size, sort_order)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO price_sheet_rows (category_id, visual_id, name, model_name, warranty_text, price_text, pack_size, stock_qty, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $catStmt = $pdo->prepare('SELECT id FROM categories WHERE id = ? LIMIT 1');
 
@@ -427,7 +743,8 @@ function price_sheet_list_frames(PDO $pdo): array
     $categories = $categoryStmt ? $categoryStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
     $stmt = $pdo->query(
-        'SELECT r.id, r.category_id, r.visual_id, r.name, r.price_text, r.pack_size, r.sort_order
+        'SELECT r.id, r.category_id, r.visual_id, r.name, r.model_name, r.warranty_text,
+                r.price_text, r.pack_size, r.stock_qty, r.sort_order
          FROM price_sheet_rows r
          ORDER BY r.category_id ASC, r.sort_order ASC, r.id ASC'
     );
@@ -448,27 +765,30 @@ function price_sheet_list_frames(PDO $pdo): array
         }
 
         $packSize = $row['pack_size'];
+        $stockQty = $row['stock_qty'];
         $rowsByCategory[$categoryId][] = [
             'id' => (int) ($row['id'] ?? 0),
             'category_id' => $categoryId,
             'visual_id' => $visualId,
             'name' => (string) ($row['name'] ?? ''),
+            'model_name' => price_sheet_clean_cell_value((string) ($row['model_name'] ?? '')),
+            'warranty_text' => price_sheet_clean_cell_value((string) ($row['warranty_text'] ?? '')),
             'price_text' => (string) ($row['price_text'] ?? ''),
             'pack_size' => $packSize !== null ? (int) $packSize : null,
+            'stock_qty' => $stockQty !== null ? (int) $stockQty : null,
             'sort_order' => (int) ($row['sort_order'] ?? 0),
-            'model_name' => '—',
-            'warranty_text' => '—',
             'pack_price_text' => '—',
         ];
     }
 
-    /** @var array<string, array{model_name:string,warranty_text:string}> $productByVisual */
+    /** @var array<string, array{model_name:string,warranty_text:string,stock_qty:?int}> $productByVisual */
     $productByVisual = [];
     if ($visualIds !== []) {
+        products_ensure_stock_schema($pdo);
         $modelSql = cms_product_model_names_sql('p');
         $placeholders = implode(',', array_fill(0, count($visualIds), '?'));
         $productStmt = $pdo->prepare(
-            "SELECT p.visual_id, p.description, {$modelSql} AS model_name
+            "SELECT p.visual_id, p.description, p.stock_qty, {$modelSql} AS model_name
              FROM products p
              WHERE p.visual_id IN ({$placeholders})"
         );
@@ -478,9 +798,11 @@ function price_sheet_list_frames(PDO $pdo): array
             if ($visualId === '') {
                 continue;
             }
+            $productStock = $productRow['stock_qty'];
             $productByVisual[$visualId] = [
                 'model_name' => trim((string) ($productRow['model_name'] ?? '')),
                 'warranty_text' => price_sheet_warranty_text((string) ($productRow['description'] ?? '')),
+                'stock_qty' => $productStock !== null ? max(0, (int) $productStock) : null,
             ];
         }
     }
@@ -500,11 +822,17 @@ function price_sheet_list_frames(PDO $pdo): array
         foreach ($frameRows as &$sheetRow) {
             $visualId = (string) ($sheetRow['visual_id'] ?? '');
             $productMeta = $productByVisual[$visualId] ?? null;
-            if ($productMeta !== null) {
-                $modelName = trim($productMeta['model_name']);
-                $sheetRow['model_name'] = $modelName !== '' ? $modelName : '—';
-                $sheetRow['warranty_text'] = $productMeta['warranty_text'];
+
+            if (($sheetRow['model_name'] ?? '') === '' && $productMeta !== null) {
+                $sheetRow['model_name'] = price_sheet_clean_cell_value($productMeta['model_name']);
             }
+            if (($sheetRow['warranty_text'] ?? '') === '' && $productMeta !== null) {
+                $sheetRow['warranty_text'] = price_sheet_clean_cell_value($productMeta['warranty_text']);
+            }
+            if (($sheetRow['stock_qty'] ?? null) === null && $productMeta !== null && $productMeta['stock_qty'] !== null) {
+                $sheetRow['stock_qty'] = $productMeta['stock_qty'];
+            }
+
             $sheetRow['pack_price_text'] = price_sheet_pack_price_text(
                 (string) ($sheetRow['price_text'] ?? ''),
                 $sheetRow['pack_size'] ?? null
@@ -556,12 +884,15 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
     }
 
     $upsertStmt = $pdo->prepare(
-        'INSERT INTO price_sheet_rows (category_id, visual_id, name, price_text, pack_size, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?)
+        'INSERT INTO price_sheet_rows (category_id, visual_id, name, model_name, warranty_text, price_text, pack_size, stock_qty, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
             name = VALUES(name),
+            model_name = VALUES(model_name),
+            warranty_text = VALUES(warranty_text),
             price_text = VALUES(price_text),
             pack_size = VALUES(pack_size),
+            stock_qty = COALESCE(VALUES(stock_qty), stock_qty),
             sort_order = VALUES(sort_order)'
     );
 
@@ -574,14 +905,20 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
         }
 
         $name = trim((string) ($row['name'] ?? ''));
+        $modelName = price_sheet_clean_cell_value((string) ($row['cars_raw'] ?? ''));
+        $warrantyText = price_sheet_clean_cell_value((string) ($row['warranty'] ?? ''));
         $packSize = price_import_row_pack_size($row);
+        $stockQty = null;
 
         $upsertStmt->execute([
             $categoryId,
             $visualId,
             $name,
+            $modelName,
+            $warrantyText,
             $priceText,
             $packSize,
+            $stockQty,
             $sortOrder,
         ]);
         $imported++;
@@ -828,14 +1165,18 @@ function price_sheet_rows_for_publish(PDO $pdo, ?int $categoryId = null): array
     $rows = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $packSize = $row['pack_size'];
+        $stockQty = $row['stock_qty'];
         $rows[] = [
             'id' => (int) ($row['id'] ?? 0),
             'category_id' => (int) ($row['category_id'] ?? 0),
             'category_name' => (string) ($row['category_name'] ?? ''),
             'visual_id' => (string) ($row['visual_id'] ?? ''),
             'name' => (string) ($row['name'] ?? ''),
+            'model_name' => price_sheet_clean_cell_value((string) ($row['model_name'] ?? '')),
+            'warranty_text' => price_sheet_clean_cell_value((string) ($row['warranty_text'] ?? '')),
             'price_text' => (string) ($row['price_text'] ?? ''),
             'pack_size' => $packSize !== null ? (int) $packSize : null,
+            'stock_qty' => $stockQty !== null ? (int) $stockQty : null,
         ];
     }
 
@@ -984,18 +1325,7 @@ function price_sheet_publish(PDO $pdo, ?int $categoryId = null): array
 
     price_sheet_validate_publish_conflicts($pdo, $sheetRows, $categoryId);
 
-    $parsedRows = [];
-    foreach ($sheetRows as $index => $row) {
-        $parsedRows[] = [
-            'visual_id' => (string) ($row['visual_id'] ?? ''),
-            'name' => (string) ($row['name'] ?? ''),
-            'price_text' => (string) ($row['price_text'] ?? ''),
-            'pack_size' => $row['pack_size'] ?? null,
-            'excel_row' => $index + 1,
-        ];
-    }
-
-    $result = price_import_apply_prices_only($pdo, $parsedRows);
+    $result = price_sheet_apply_catalog_from_rows($pdo, $sheetRows);
     price_sheet_record_publish_meta($pdo, (int) $result['updated']);
 
     $meta = price_sheet_load_meta($pdo);
