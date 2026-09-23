@@ -360,6 +360,132 @@ function price_sheet_resolve_catalog_category_id(PDO $pdo, string $visualId): ?i
 }
 
 /**
+ * @return array{id:int,category_id:int,category_name:string,visual_id:string}|null
+ */
+function price_sheet_find_row_by_visual_id(PDO $pdo, string $visualId): ?array
+{
+    $visualId = price_import_normalize_visual_id($visualId);
+    if ($visualId === '') {
+        return null;
+    }
+
+    price_sheet_ensure_schema($pdo);
+    $stmt = $pdo->prepare(
+        'SELECT r.id, r.category_id, c.name AS category_name
+         FROM price_sheet_rows r
+         JOIN categories c ON c.id = r.category_id
+         WHERE r.visual_id = ?
+         ORDER BY r.id ASC
+         LIMIT 1'
+    );
+    $stmt->execute([$visualId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+
+    return [
+        'id' => (int) ($row['id'] ?? 0),
+        'category_id' => (int) ($row['category_id'] ?? 0),
+        'category_name' => (string) ($row['category_name'] ?? ''),
+        'visual_id' => $visualId,
+    ];
+}
+
+/**
+ * Find an existing draft row by کد کالا, or add one from the shop catalog.
+ *
+ * @return array{visual_id:string,category_id:int,category_name:string,added:bool}
+ */
+function price_sheet_find_or_add_by_visual_id(PDO $pdo, string $visualId): array
+{
+    $visualId = price_import_normalize_visual_id($visualId);
+    if ($visualId === '') {
+        throw new RuntimeException('کد کالا را وارد کنید');
+    }
+
+    $existing = price_sheet_find_row_by_visual_id($pdo, $visualId);
+    if ($existing !== null) {
+        return [
+            'visual_id' => $existing['visual_id'],
+            'category_id' => $existing['category_id'],
+            'category_name' => $existing['category_name'],
+            'added' => false,
+        ];
+    }
+
+    $resolved = price_import_resolve_by_visual_id($pdo, $visualId);
+    if ($resolved === null) {
+        throw new RuntimeException('کد «' . $visualId . '» در فروشگاه (محصول یا سری) یافت نشد');
+    }
+
+    $categoryId = price_sheet_resolve_catalog_category_id($pdo, $visualId);
+    if ($categoryId === null || $categoryId <= 0) {
+        throw new RuntimeException('برای کد «' . $visualId . '» دسته‌ای در فروشگاه تعریف نشده است');
+    }
+
+    $catStmt = $pdo->prepare('SELECT name FROM categories WHERE id = ? LIMIT 1');
+    $catStmt->execute([$categoryId]);
+    $categoryName = (string) ($catStmt->fetchColumn() ?: '');
+
+    $catalogMeta = price_sheet_load_catalog_meta_by_visual_ids($pdo, [$visualId])[$visualId] ?? null;
+    $modelName = price_sheet_clean_cell_value((string) ($catalogMeta['model_name'] ?? ''));
+    $warrantyText = price_sheet_clean_cell_value((string) ($catalogMeta['warranty_text'] ?? ''));
+    if ($warrantyText === '—') {
+        $warrantyText = '';
+    }
+
+    $priceText = trim((string) ($resolved['price_text'] ?? ''));
+    if ($priceText === '') {
+        throw new RuntimeException('قیمت کد «' . $visualId . '» در فروشگاه خالی است');
+    }
+
+    $packSize = $resolved['pack_size'] ?? null;
+    if ($packSize !== null) {
+        $packSize = max(0, (int) $packSize);
+        if ($packSize === 0) {
+            $packSize = null;
+        }
+    }
+
+    $stockQty = null;
+    if (is_array($catalogMeta) && array_key_exists('stock_qty', $catalogMeta)) {
+        $stockQty = $catalogMeta['stock_qty'];
+    }
+
+    $maxSortStmt = $pdo->prepare(
+        'SELECT COALESCE(MAX(sort_order), -1) FROM price_sheet_rows WHERE category_id = ?'
+    );
+    $maxSortStmt->execute([$categoryId]);
+    $sortOrder = (int) $maxSortStmt->fetchColumn() + 1;
+
+    price_sheet_persist_draft_row(
+        $pdo,
+        $categoryId,
+        0,
+        $categoryId,
+        [
+            'visual_id' => $visualId,
+            'name' => (string) ($resolved['name'] ?? ''),
+            'model_name' => $modelName,
+            'warranty_text' => $warrantyText,
+            'price_text' => $priceText,
+            'pack_size' => $packSize,
+            'stock_qty' => $stockQty,
+        ],
+        $sortOrder
+    );
+    price_sheet_touch_draft_updated($pdo);
+
+    return [
+        'visual_id' => $visualId,
+        'category_id' => $categoryId,
+        'category_name' => $categoryName,
+        'added' => true,
+    ];
+}
+
+/**
  * @param array{visual_id:string,name:string,model_name:string,warranty_text:string,price_text:string,pack_size:?int,stock_qty:?int} $fields
  */
 function price_sheet_persist_draft_row(

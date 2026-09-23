@@ -2,5 +2,5 @@
 2:I[619,["8500","static/chunks/8500-3953cc33eeceb44e.js","7914","static/chunks/7914-a8bfe07509c5b22c.js","5864","static/chunks/5864-2c8f252c01cc656e.js","6890","static/chunks/app/profile/orders/%5Bid%5D/page-f3e3301d4383bc95.js"],"OrderDetailView"]
 3:I[484,[],"OutletBoundary"]
 4:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"profile-page","children":["$","$L2",null,{"orderId":""}]}],null,["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"ajpL3O93kt721lnX0nbwj"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"profile-page","children":["$","$L2",null,{"orderId":""}]}],null,["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"7gRmp8RLuvSjvKlrOYawv"}
 5:null

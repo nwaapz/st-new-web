@@ -3016,3 +3016,18 @@ a.cms-kpi:hover {
 .cms-price-sheet__toolbar .cms-btn-row {
   align-items: center;
 }
+
+.cms-price-sheet__find-input {
+  width: 7.5rem;
+  min-width: 5.5rem;
+}
+
+.cms-price-sheet__row--highlight {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  background: rgba(37, 99, 235, 0.1) !important;
+}
+
+.cms-price-sheet__frame--focus {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28);
+}

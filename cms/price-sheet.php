@@ -16,6 +16,38 @@ $fromWarehouse = (string) ($_GET['from'] ?? '') === 'warehouse';
 $pageUrl = price_sheet_page_url($fromWarehouse);
 $exportIncludeStockDefault = price_sheet_export_include_stock_default($fromWarehouse);
 $layoutSection = $fromWarehouse ? 'customers' : 'shop';
+$highlightVisualId = price_import_normalize_visual_id((string) ($_GET['highlight'] ?? ''));
+
+if ($fromWarehouse && isset($_GET['find'])) {
+    $findCode = trim((string) $_GET['find']);
+    if ($findCode !== '') {
+        try {
+            $findResult = price_sheet_find_or_add_by_visual_id($pdo, $findCode);
+            $highlightVisualId = $findResult['visual_id'];
+            cms_flash($findResult['added']
+                ? sprintf(
+                    'کد %s به پیش‌نویس اضافه شد — دسته «%s»',
+                    cms_to_persian_digits($highlightVisualId),
+                    $findResult['category_name']
+                )
+                : sprintf(
+                    'کد %s در دسته «%s» یافت شد',
+                    cms_to_persian_digits($highlightVisualId),
+                    $findResult['category_name']
+                ));
+        } catch (Throwable $e) {
+            cms_flash($e->getMessage(), 'error');
+            $highlightVisualId = '';
+        }
+
+        $redirectParams = [];
+        if ($highlightVisualId !== '') {
+            $redirectParams['highlight'] = $highlightVisualId;
+        }
+        $redirectParams['from'] = 'warehouse';
+        cms_redirect('price-sheet.php?' . http_build_query($redirectParams));
+    }
+}
 
 $categories = price_sheet_list_categories($pdo);
 $publishResult = null;
@@ -200,6 +232,29 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           <button class="cms-btn cms-btn--secondary" type="submit">خروجی Excel</button>
         </form>
       <?php endif; ?>
+      <?php if ($fromWarehouse): ?>
+        <form
+          method="get"
+          action="price-sheet.php"
+          class="cms-price-sheet__find-form"
+          style="display:inline-flex;align-items:center;gap:.35rem;flex-wrap:wrap"
+        >
+          <input type="hidden" name="from" value="warehouse">
+          <label class="cms-muted" for="price-sheet-find" style="margin:0;font-size:.85rem">جستجو با کد:</label>
+          <input
+            id="price-sheet-find"
+            class="cms-input cms-price-sheet__find-input"
+            name="find"
+            value=""
+            placeholder="کد کالا"
+            dir="ltr"
+            inputmode="numeric"
+            autocomplete="off"
+            required
+          >
+          <button class="cms-btn cms-btn--secondary" type="submit">یافتن</button>
+        </form>
+      <?php endif; ?>
       <span class="cms-muted" style="margin-right:auto">
         <?= cms_to_persian_digits((string) $status['draft_rows']) ?> ردیف پیش‌نویس
         <?php if ($status['last_published_at_display'] !== ''): ?>
@@ -284,7 +339,10 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                         ? price_sheet_price_input_value($packPriceValue)
                         : '';
                   ?>
-                  <tr>
+                  <tr
+                    data-visual-id="<?= cms_h((string) $row['visual_id']) ?>"
+                    <?= $highlightVisualId !== '' && $highlightVisualId === (string) $row['visual_id'] ? 'class="cms-price-sheet__row--highlight"' : '' ?>
+                  >
                     <td class="cms-price-sheet__code">
                       <input type="hidden" name="frames[<?= $categoryId ?>][<?= $index ?>][id]" value="<?= (int) $row['id'] ?>">
                       <input class="cms-input cms-price-sheet__input" name="frames[<?= $categoryId ?>][<?= $index ?>][visual_id]" value="<?= cms_h((string) $row['visual_id']) ?>" dir="ltr">
@@ -470,6 +528,27 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     bindRow(row);
     updatePackPrice(row, true);
   });
+
+  var highlightId = <?= json_encode($highlightVisualId, JSON_UNESCAPED_UNICODE) ?>;
+  if (highlightId) {
+    var highlightRow = null;
+    document.querySelectorAll('.cms-price-sheet__rows tr[data-visual-id]').forEach(function (row) {
+      if (row.getAttribute('data-visual-id') === highlightId) {
+        highlightRow = row;
+      }
+    });
+    if (highlightRow) {
+      highlightRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      var highlightFrame = highlightRow.closest('.cms-price-sheet__frame');
+      if (highlightFrame) {
+        highlightFrame.classList.add('cms-price-sheet__frame--focus');
+      }
+      var codeInput = highlightRow.querySelector('input[name*="[visual_id]"]');
+      if (codeInput) {
+        window.setTimeout(function () { codeInput.focus({ preventScroll: true }); }, 400);
+      }
+    }
+  }
 
   document.querySelectorAll('[data-add-row]').forEach(function (btn) {
     btn.addEventListener('click', function () {
