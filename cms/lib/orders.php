@@ -247,6 +247,26 @@ function orders_ensure_schema(PDO $pdo): void
             /* ignore */
         }
     }
+    if (!isset($cols['items_adjustment_pending'])) {
+        try {
+            $pdo->exec(
+                'ALTER TABLE orders ADD COLUMN items_adjustment_pending TINYINT(1) NOT NULL DEFAULT 0'
+            );
+            $cols['items_adjustment_pending'] = true;
+        } catch (Throwable $e) {
+            /* ignore */
+        }
+    }
+    if (!isset($cols['items_adjustment_confirmed_at'])) {
+        try {
+            $pdo->exec(
+                'ALTER TABLE orders ADD COLUMN items_adjustment_confirmed_at TIMESTAMP NULL DEFAULT NULL'
+            );
+            $cols['items_adjustment_confirmed_at'] = true;
+        } catch (Throwable $e) {
+            /* ignore */
+        }
+    }
 
     // Backfill: existing warning text without state counts as open.
     try {
@@ -310,6 +330,28 @@ function orders_ensure_schema(PDO $pdo): void
         if (!isset($itemCols['visual_id'])) {
             $pdo->exec('ALTER TABLE order_items ADD COLUMN visual_id VARCHAR(64) NULL AFTER category_name');
         }
+        if (!isset($itemCols['original_quantity'])) {
+            $pdo->exec(
+                'ALTER TABLE order_items ADD COLUMN original_quantity INT UNSIGNED NULL AFTER pack_size'
+            );
+        }
+        if (!isset($itemCols['original_unit_type'])) {
+            $pdo->exec(
+                "ALTER TABLE order_items ADD COLUMN original_unit_type ENUM('piece','pack') NULL AFTER original_quantity"
+            );
+        }
+        if (!isset($itemCols['original_pack_size'])) {
+            $pdo->exec(
+                'ALTER TABLE order_items ADD COLUMN original_pack_size INT UNSIGNED NULL AFTER original_unit_type'
+            );
+        }
+        $pdo->exec(
+            'UPDATE order_items
+             SET original_quantity = quantity,
+                 original_unit_type = unit_type,
+                 original_pack_size = pack_size
+             WHERE original_quantity IS NULL'
+        );
     } catch (Throwable $e) {
         /* ignore */
     }
@@ -516,6 +558,16 @@ function orders_normalize_ongoing_mode(string $mode): string
     return isset($labels[$mode]) ? $mode : 'new_order';
 }
 
+function orders_normalize_created_since_days(mixed $raw): int
+{
+    $days = (int) $raw;
+    if ($days <= 0) {
+        return 0;
+    }
+
+    return min($days, 3650);
+}
+
 /**
  * Sub-filters within the ongoing work queue (admin mobile + CMS).
  *
@@ -666,7 +718,8 @@ function orders_admin_list_where(
     string $defaultStatus = 'all',
     string $ongoingMode = 'new_order',
     string $clientPhone = '',
-    int $branchId = 0
+    int $branchId = 0,
+    int $createdSinceDays = 0
 ): array {
     if ($scope !== 'branches' && $scope !== 'customers' && $scope !== 'all') {
         $scope = 'customers';
@@ -675,6 +728,7 @@ function orders_admin_list_where(
     $ongoingMode = orders_normalize_ongoing_mode($ongoingMode);
     $search = orders_list_search_clause($searchQ);
     $clientPhone = orders_normalize_search_query($clientPhone);
+    $createdSinceDays = orders_normalize_created_since_days($createdSinceDays);
     if ($scope === 'all') {
         $scopeSql = '1=1';
         $where = ['1=1'];
@@ -695,6 +749,10 @@ function orders_admin_list_where(
     if ($branchId > 0) {
         $where[] = 'o.branch_id = ?';
         $params[] = $branchId;
+    }
+    if ($createdSinceDays > 0) {
+        $where[] = 'o.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)';
+        $params[] = $createdSinceDays;
     }
 
     if (!$search['is_identifier']) {
@@ -738,6 +796,454 @@ function orders_generate_public_code(PDO $pdo): string
     return $prefix . strtoupper(substr(bin2hex(random_bytes(4)), 0, 6));
 }
 
+function orders_item_unit_type(array $item): string
+{
+    return isset($item['unit_type']) && (string) $item['unit_type'] === 'pack' ? 'pack' : 'piece';
+}
+
+/**
+ * @return array{quantity: int, unit_type: string, pack_size: ?int}
+ */
+function orders_item_effective_original(array $item): array
+{
+    $qty = max(1, (int) ($item['quantity'] ?? 1));
+    $unit = orders_item_unit_type($item);
+    $pack = isset($item['pack_size']) && $item['pack_size'] !== null && (int) $item['pack_size'] > 0
+        ? (int) $item['pack_size']
+        : null;
+
+    if (isset($item['original_quantity']) && $item['original_quantity'] !== null) {
+        $origQty = max(1, (int) $item['original_quantity']);
+        $origUnit = isset($item['original_unit_type']) && (string) $item['original_unit_type'] === 'pack'
+            ? 'pack'
+            : 'piece';
+        $origPack = isset($item['original_pack_size']) && $item['original_pack_size'] !== null
+            && (int) $item['original_pack_size'] > 0
+            ? (int) $item['original_pack_size']
+            : null;
+
+        return [
+            'quantity' => $origQty,
+            'unit_type' => $origUnit,
+            'pack_size' => $origPack,
+        ];
+    }
+
+    return [
+        'quantity' => $qty,
+        'unit_type' => $unit,
+        'pack_size' => $pack,
+    ];
+}
+
+function orders_item_is_adjusted(array $item): bool
+{
+    $orig = orders_item_effective_original($item);
+    $qty = max(0, (int) ($item['quantity'] ?? 1));
+    $unit = orders_item_unit_type($item);
+
+    return $qty !== $orig['quantity'] || $unit !== $orig['unit_type'];
+}
+
+function orders_format_item_quantity_summary(array $item): string
+{
+    if (!function_exists('cms_to_persian_digits')) {
+        require_once __DIR__ . '/jalali.php';
+    }
+
+    $qty = (int) ($item['quantity'] ?? 1);
+    if ($qty <= 0) {
+        return '۰ (ناموجود)';
+    }
+    $unit = orders_item_unit_type($item);
+    $pack = isset($item['pack_size']) && $item['pack_size'] !== null && (int) $item['pack_size'] > 0
+        ? (int) $item['pack_size']
+        : 0;
+    $qtyFa = cms_to_persian_digits((string) $qty);
+
+    if ($unit === 'pack') {
+        if ($pack > 0) {
+            $total = $qty * $pack;
+
+            return $qtyFa . ' بسته (' . cms_to_persian_digits((string) $total) . ' عدد)';
+        }
+
+        return $qtyFa . ' بسته';
+    }
+
+    return $qtyFa . ' عدد';
+}
+
+function orders_format_item_adjustment_line(array $item): string
+{
+    $orig = orders_item_effective_original($item);
+    $fromLabel = orders_format_item_quantity_summary(array_merge($item, [
+        'quantity' => $orig['quantity'],
+        'unit_type' => $orig['unit_type'],
+        'pack_size' => $orig['pack_size'],
+    ]));
+    $toLabel = orders_format_item_quantity_summary($item);
+    $name = trim((string) ($item['name'] ?? 'قلم'));
+
+    return '«' . $name . '»: از ' . $fromLabel . ' به ' . $toLabel;
+}
+
+/**
+ * @param list<array<string, mixed>> $items
+ */
+function orders_quantity_adjustment_notice(array $items): ?string
+{
+    $lines = [];
+    foreach ($items as $item) {
+        if (!is_array($item) || !orders_item_is_adjusted($item)) {
+            continue;
+        }
+        $lines[] = orders_format_item_adjustment_line($item);
+    }
+    if ($lines === []) {
+        return null;
+    }
+
+    return 'تعداد برخی اقلام به دلیل وضعیت انبار تغییر یافت:' . "\n• " . implode("\n• ", $lines);
+}
+
+/**
+ * @param list<array<string, mixed>> $items
+ */
+function orders_order_has_item_adjustments(array $items): bool
+{
+    foreach ($items as $item) {
+        if (is_array($item) && orders_item_is_adjusted($item)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @param list<array<string, mixed>> $items
+ * @return list<array<string, mixed>>
+ */
+function orders_active_order_items(array $items): array
+{
+    return array_values(array_filter(
+        $items,
+        static fn($item): bool => is_array($item) && (int) ($item['quantity'] ?? 0) > 0
+    ));
+}
+
+function orders_items_adjustment_pending_flag(array $order): bool
+{
+    return (int) ($order['items_adjustment_pending'] ?? 0) === 1;
+}
+
+function orders_items_adjustment_confirmed_at(array $order): ?string
+{
+    $at = isset($order['items_adjustment_confirmed_at']) && $order['items_adjustment_confirmed_at'] !== null
+        ? trim((string) $order['items_adjustment_confirmed_at'])
+        : '';
+
+    return $at !== '' ? $at : null;
+}
+
+/**
+ * @param array<string, mixed> $order
+ * @param list<array<string, mixed>> $items
+ */
+function orders_can_proceed_to_pre_invoice(array $order, array $items): bool
+{
+    if (!orders_order_has_item_adjustments($items)) {
+        return true;
+    }
+    if (!orders_items_adjustment_pending_flag($order)) {
+        return true;
+    }
+
+    return orders_items_adjustment_confirmed_at($order) !== null;
+}
+
+function orders_mark_items_adjustment_pending(PDO $pdo, int $orderId): void
+{
+    $upd = $pdo->prepare(
+        'UPDATE orders SET items_adjustment_pending = 1, items_adjustment_confirmed_at = NULL WHERE id = ?'
+    );
+    $upd->execute([$orderId]);
+}
+
+function orders_clear_items_adjustment_pending(PDO $pdo, int $orderId): void
+{
+    $upd = $pdo->prepare(
+        'UPDATE orders SET items_adjustment_pending = 0, items_adjustment_confirmed_at = NULL WHERE id = ?'
+    );
+    $upd->execute([$orderId]);
+}
+
+/**
+ * @param array<string, mixed> $order
+ */
+function orders_mark_items_adjustment_confirmed(PDO $pdo, array $order, string $actor = 'client'): void
+{
+    $orderId = (int) $order['id'];
+    $pdo->beginTransaction();
+    try {
+        $upd = $pdo->prepare(
+            'UPDATE orders SET items_adjustment_pending = 0, items_adjustment_confirmed_at = NOW() WHERE id = ?'
+        );
+        $upd->execute([$orderId]);
+        orders_add_event(
+            $pdo,
+            $orderId,
+            'submitted',
+            'submitted',
+            $actor,
+            'مشتری تعداد اقلام اعلام‌شده را تأیید کرد'
+        );
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    if (!function_exists('admin_push_notify_order_activity')) {
+        $pushLib = __DIR__ . '/admin-push.php';
+        if (is_readable($pushLib)) {
+            require_once $pushLib;
+        }
+    }
+    if (function_exists('admin_push_notify_order_activity')) {
+        try {
+            admin_push_notify_order_activity(
+                $pdo,
+                $orderId,
+                'items_adjustment_confirmed',
+                'مشتری تعداد اقلام را تأیید کرد'
+            );
+        } catch (Throwable $e) {
+            error_log('[orders] admin push on confirm failed: ' . $e->getMessage());
+        }
+    }
+}
+
+/**
+ * @param array<string, mixed> $order
+ * @param list<array<string, mixed>> $items
+ */
+function orders_require_items_adjustment_confirmed(array $order, array $items): void
+{
+    if (orders_can_proceed_to_pre_invoice($order, $items)) {
+        return;
+    }
+
+    throw new RuntimeException('در انتظار تأیید مشتری در وب');
+}
+
+/**
+ * @param list<array<string, mixed>> $items
+ */
+function orders_sync_items_adjustment_state(PDO $pdo, int $orderId, array $items, int $qtyChanged): void
+{
+    if (!orders_order_has_item_adjustments($items)) {
+        orders_clear_items_adjustment_pending($pdo, $orderId);
+
+        return;
+    }
+    if ($qtyChanged > 0) {
+        orders_mark_items_adjustment_pending($pdo, $orderId);
+    }
+}
+
+/**
+ * @param array{id: int, branch_id?: int|null} $user
+ * @param array<string, mixed> $order
+ */
+function orders_client_can_access_order(array $user, array $order): bool
+{
+    if ((int) ($order['user_id'] ?? 0) === (int) ($user['id'] ?? 0)) {
+        return true;
+    }
+    $userBranchId = isset($user['branch_id']) && $user['branch_id'] !== null
+        ? (int) $user['branch_id']
+        : 0;
+    $orderBranchId = isset($order['branch_id']) && $order['branch_id'] !== null
+        ? (int) $order['branch_id']
+        : 0;
+
+    return $userBranchId > 0 && $orderBranchId > 0 && $userBranchId === $orderBranchId;
+}
+
+/**
+ * @param array<string, mixed> $order
+ * @param list<array<string, mixed>> $items
+ * @return array<string, mixed>
+ */
+function orders_serialize_adjustment_gate_fields(array $order, array $items): array
+{
+    $pending = orders_items_adjustment_pending_flag($order);
+    $confirmedAt = orders_items_adjustment_confirmed_at($order);
+
+    return [
+        'items_adjustment_pending' => $pending,
+        'items_adjustment_confirmed_at' => $confirmedAt,
+        'can_proceed_to_pre_invoice' => orders_can_proceed_to_pre_invoice($order, $items),
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function orders_serialize_item_adjustment_fields(array $item): array
+{
+    $orig = orders_item_effective_original($item);
+    $adjusted = orders_item_is_adjusted($item);
+
+    return [
+        'original_quantity' => $orig['quantity'],
+        'original_unit_type' => $orig['unit_type'],
+        'original_pack_size' => $orig['pack_size'],
+        'quantity_adjusted' => $adjusted,
+    ];
+}
+
+function orders_parse_quantity_input(mixed $raw): int
+{
+    $s = trim((string) $raw);
+    $s = strtr($s, [
+        '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+        '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+        '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+    ]);
+    $s = preg_replace('/\D/u', '', $s) ?? '';
+    if ($s === '') {
+        throw new RuntimeException('تعداد نامعتبر است');
+    }
+
+    return (int) $s;
+}
+
+/**
+ * @param array<string, mixed> $item
+ */
+function orders_validate_item_adjustment(array $item, int $newQty, string $newUnit): void
+{
+    $orig = orders_item_effective_original($item);
+    $origQty = $orig['quantity'];
+    $origUnit = $orig['unit_type'];
+    $origPack = (int) ($orig['pack_size'] ?? 0);
+
+    if ($newQty < 0) {
+        throw new RuntimeException('تعداد نامعتبر است');
+    }
+
+    if ($newUnit === 'pack' && $origUnit === 'piece') {
+        throw new RuntimeException('تبدیل عدد به بسته مجاز نیست');
+    }
+
+    if ($newUnit === 'pack') {
+        if ($origPack <= 0) {
+            throw new RuntimeException('اندازه بسته برای این قلم مشخص نیست');
+        }
+        if ($newQty > $origQty) {
+            throw new RuntimeException('فقط کاهش تعداد مجاز است');
+        }
+
+        return;
+    }
+
+    if ($origUnit === 'pack') {
+        $origTotalPieces = $origQty * max(1, $origPack);
+        if ($newQty >= $origTotalPieces) {
+            throw new RuntimeException('فقط کاهش تعداد مجاز است');
+        }
+
+        return;
+    }
+
+    if ($newQty > $origQty) {
+        throw new RuntimeException('فقط کاهش تعداد مجاز است');
+    }
+}
+
+/**
+ * @param array<string, mixed> $adjustments item_id => {quantity, unit_type?, pack_size?}
+ */
+function orders_apply_item_adjustments(PDO $pdo, int $orderId, array $adjustments, string $currentStatus): int
+{
+    if ($adjustments === []) {
+        return 0;
+    }
+    if ($currentStatus !== 'submitted') {
+        throw new RuntimeException('تغییر تعداد فقط در مرحله بررسی انبار مجاز است');
+    }
+
+    $items = orders_fetch_items($pdo, $orderId);
+    $byId = [];
+    foreach ($items as $item) {
+        $byId[(int) $item['id']] = $item;
+    }
+
+    $ensureOrig = $pdo->prepare(
+        'UPDATE order_items SET
+            original_quantity = COALESCE(original_quantity, quantity),
+            original_unit_type = COALESCE(original_unit_type, unit_type),
+            original_pack_size = COALESCE(original_pack_size, pack_size)
+         WHERE id = ? AND order_id = ?'
+    );
+    $upd = $pdo->prepare(
+        'UPDATE order_items SET quantity = ?, unit_type = ?, pack_size = ? WHERE id = ? AND order_id = ?'
+    );
+
+    $changed = 0;
+    foreach ($adjustments as $itemIdRaw => $payload) {
+        if (!is_array($payload)) {
+            continue;
+        }
+        $itemId = (int) $itemIdRaw;
+        if ($itemId <= 0 || !isset($byId[$itemId])) {
+            throw new RuntimeException('قلم #' . $itemId . ' یافت نشد');
+        }
+
+        $item = $byId[$itemId];
+        $ensureOrig->execute([$itemId, $orderId]);
+
+        $newQty = orders_parse_quantity_input($payload['quantity'] ?? 0);
+        $newUnit = isset($payload['unit_type']) && (string) $payload['unit_type'] === 'pack'
+            ? 'pack'
+            : 'piece';
+        orders_validate_item_adjustment($item, $newQty, $newUnit);
+
+        $orig = orders_item_effective_original($item);
+        $currentQty = max(0, (int) ($item['quantity'] ?? 1));
+        $currentUnit = orders_item_unit_type($item);
+        if ($newQty === $currentQty && $newUnit === $currentUnit) {
+            continue;
+        }
+
+        $newPackSize = null;
+        if ($newUnit === 'pack') {
+            $newPackSize = $orig['pack_size'] ?? (
+                isset($item['pack_size']) && $item['pack_size'] !== null && (int) $item['pack_size'] > 0
+                    ? (int) $item['pack_size']
+                    : null
+            );
+        } elseif ($orig['unit_type'] === 'pack') {
+            $newPackSize = $orig['pack_size'] ?? (
+                isset($item['pack_size']) && $item['pack_size'] !== null && (int) $item['pack_size'] > 0
+                    ? (int) $item['pack_size']
+                    : null
+            );
+        }
+
+        $upd->execute([$newQty, $newUnit, $newPackSize, $itemId, $orderId]);
+        $changed += $upd->rowCount() > 0 ? 1 : 0;
+    }
+
+    return $changed;
+}
+
 /**
  * @param array<string, mixed> $order
  * @param list<array<string, mixed>> $items
@@ -748,7 +1254,7 @@ function orders_serialize(array $order, array $items, array $events): array
 {
     $serializedItems = [];
     foreach ($items as $item) {
-        $serializedItems[] = [
+        $serializedItems[] = array_merge([
             'id' => (int) $item['id'],
             'product_id' => isset($item['product_id']) && $item['product_id'] !== null
                 ? (int) $item['product_id']
@@ -760,9 +1266,7 @@ function orders_serialize(array $order, array $items, array $events): array
                 : ($item['price_text'] !== null ? (string) $item['price_text'] : null),
             'image' => $item['image'] !== null ? (string) $item['image'] : null,
             'quantity' => (int) $item['quantity'],
-            'unit_type' => isset($item['unit_type']) && (string) $item['unit_type'] === 'pack'
-                ? 'pack'
-                : 'piece',
+            'unit_type' => orders_item_unit_type($item),
             'pack_size' => isset($item['pack_size']) && $item['pack_size'] !== null && (int) $item['pack_size'] > 0
                 ? (int) $item['pack_size']
                 : null,
@@ -772,7 +1276,7 @@ function orders_serialize(array $order, array $items, array $events): array
             'visual_id' => isset($item['visual_id']) && $item['visual_id'] !== null && trim((string) $item['visual_id']) !== ''
                 ? (string) $item['visual_id']
                 : null,
-        ];
+        ], orders_serialize_item_adjustment_fields($item));
     }
 
     $serializedEvents = [];
@@ -890,7 +1394,8 @@ function orders_serialize(array $order, array $items, array $events): array
             : null,
         'cheques' => $cheques,
         'cheques_all_funded' => order_cheques_all_funded($cheques),
-    ];
+        'quantity_adjustment_notice' => orders_quantity_adjustment_notice($items),
+    ] + orders_serialize_adjustment_gate_fields($order, $items);
 }
 
 /**
@@ -1260,7 +1765,7 @@ function orders_admin_serialize(array $order, array $items, array $events): arra
             ? (string) $item['catalog_price_text']
             : null;
 
-        $serializedItems[] = [
+        $serializedItems[] = array_merge([
             'id' => (int) $item['id'],
             'product_id' => isset($item['product_id']) && $item['product_id'] !== null
                 ? (int) $item['product_id']
@@ -1271,9 +1776,7 @@ function orders_admin_serialize(array $order, array $items, array $events): arra
             'catalog_price_text' => $catalogPriceText,
             'image' => $item['image'] !== null ? (string) $item['image'] : null,
             'quantity' => (int) $item['quantity'],
-            'unit_type' => isset($item['unit_type']) && (string) $item['unit_type'] === 'pack'
-                ? 'pack'
-                : 'piece',
+            'unit_type' => orders_item_unit_type($item),
             'pack_size' => isset($item['pack_size']) && $item['pack_size'] !== null && (int) $item['pack_size'] > 0
                 ? (int) $item['pack_size']
                 : null,
@@ -1283,7 +1786,7 @@ function orders_admin_serialize(array $order, array $items, array $events): arra
             'visual_id' => isset($item['visual_id']) && $item['visual_id'] !== null && trim((string) $item['visual_id']) !== ''
                 ? (string) $item['visual_id']
                 : null,
-        ];
+        ], orders_serialize_item_adjustment_fields($item));
     }
 
     $payload = orders_serialize($order, $items, $events);
@@ -1888,8 +2391,9 @@ function orders_create_from_normalized(
         $itemIns = $pdo->prepare(
             'INSERT INTO order_items
               (order_id, product_id, name, slug, price_text, image, quantity,
-               unit_type, pack_size, factory_name, model_name, category_name, visual_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+               unit_type, pack_size, original_quantity, original_unit_type, original_pack_size,
+               factory_name, model_name, category_name, visual_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($normalized as $item) {
             $itemIns->execute([
@@ -1899,6 +2403,9 @@ function orders_create_from_normalized(
                 $item['slug'],
                 $item['price_text'],
                 $item['image'],
+                $item['quantity'],
+                $item['unit_type'],
+                $item['pack_size'],
                 $item['quantity'],
                 $item['unit_type'],
                 $item['pack_size'],
@@ -2117,9 +2624,19 @@ function orders_admin_list(
     int $pageSize = 20,
     string $ongoingMode = 'new_order',
     string $clientPhone = '',
-    int $branchId = 0
+    int $branchId = 0,
+    int $createdSinceDays = 0
 ): array {
-    $listWhere = orders_admin_list_where($scope, $statusFilter, $searchQ, 'all', $ongoingMode, $clientPhone, $branchId);
+    $listWhere = orders_admin_list_where(
+        $scope,
+        $statusFilter,
+        $searchQ,
+        'all',
+        $ongoingMode,
+        $clientPhone,
+        $branchId,
+        $createdSinceDays
+    );
     $scope = $listWhere['scope'];
     $scopeSql = $listWhere['scope_sql'];
     $whereSql = $listWhere['sql'];
@@ -2533,6 +3050,7 @@ function orders_cancel(PDO $pdo, array $order, string $actor, string $message = 
  * Apply a CMS admin order action (shared by CMS page and mobile API).
  *
  * @param array<string, string> $prices item_id => price_text
+ * @param array<string, mixed> $itemAdjustments item_id => {quantity, unit_type?, pack_size?}
  * @return array{message: string, invoice_warning: ?string}
  */
 function orders_admin_apply_action(
@@ -2543,7 +3061,9 @@ function orders_admin_apply_action(
     array $prices = [],
     string $preInvoiceDueAt = '',
     array $cheque = [],
-    string $paymentMethod = ''
+    string $paymentMethod = '',
+    array $itemAdjustments = [],
+    bool $advancePricingStep = false
 ): array {
     require_once __DIR__ . '/invoices.php';
     require_once __DIR__ . '/order-cheques.php';
@@ -2671,9 +3191,10 @@ function orders_admin_apply_action(
         if (!in_array($current, ['submitted', 'accepted', 'payment_proof_sent'], true)) {
             throw new RuntimeException('در این وضعیت امکان ویرایش قیمت نیست');
         }
-        if ($prices === []) {
+        if ($prices === [] && $itemAdjustments === []) {
             throw new RuntimeException('قیمت‌ها نامعتبر است');
         }
+        $qtyChanged = orders_apply_item_adjustments($pdo, $orderId, $itemAdjustments, $current);
         $upd = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
         $changed = 0;
         foreach ($prices as $itemId => $priceRaw) {
@@ -2689,10 +3210,28 @@ function orders_admin_apply_action(
             $upd->execute([$normalized, $itemId, $orderId]);
             $changed += $upd->rowCount() > 0 ? 1 : 0;
         }
-        orders_admin_audit($pdo, $order, 'save_prices', ['changed' => $changed]);
+        orders_admin_audit($pdo, $order, 'save_prices', ['changed' => $changed, 'qty_changed' => $qtyChanged]);
+
+        $savedItems = orders_fetch_items($pdo, $orderId);
+        orders_sync_items_adjustment_state($pdo, $orderId, $savedItems, $qtyChanged);
+        $order = orders_get_by_id($pdo, $orderId) ?? $order;
+        if ($advancePricingStep) {
+            orders_require_items_adjustment_confirmed($order, $savedItems);
+        }
+
+        $parts = [];
+        if ($changed > 0) {
+            $parts[] = 'قیمت‌های تومان ذخیره شد';
+        }
+        if ($qtyChanged > 0) {
+            $parts[] = 'تعداد اقلام به‌روزرسانی شد';
+        }
+        if ($parts === []) {
+            $parts[] = 'تغییری ثبت نشد';
+        }
 
         return [
-            'message' => $changed > 0 ? 'قیمت‌های تومان ذخیره شد' : 'تغییری در قیمت‌ها ثبت نشد',
+            'message' => implode(' — ', $parts),
             'invoice_warning' => null,
         ];
     }
@@ -2702,6 +3241,7 @@ function orders_admin_apply_action(
             throw new RuntimeException('تأیید انبار فقط برای سفارش تازه ثبت‌شده مجاز است');
         }
         $pdo->beginTransaction();
+        $qtyChanged = orders_apply_item_adjustments($pdo, $orderId, $itemAdjustments, $current);
         if ($prices !== []) {
             $updPrice = $pdo->prepare('UPDATE order_items SET price_text = ? WHERE id = ? AND order_id = ?');
             foreach ($prices as $itemId => $priceRaw) {
@@ -2724,7 +3264,14 @@ function orders_admin_apply_action(
         if ($pricedItems === []) {
             throw new RuntimeException('سفارش بدون قلم است');
         }
-        foreach ($pricedItems as $item) {
+        orders_sync_items_adjustment_state($pdo, $orderId, $pricedItems, $qtyChanged);
+        $order = orders_get_by_id($pdo, $orderId) ?? $order;
+        orders_require_items_adjustment_confirmed($order, $pricedItems);
+        $activeItems = orders_active_order_items($pricedItems);
+        if ($activeItems === []) {
+            throw new RuntimeException('همه اقلام حذف شده‌اند؛ سفارش را رد یا لغو کنید');
+        }
+        foreach ($activeItems as $item) {
             $parsed = invoices_parse_toman_amount(
                 isset($item['price_text']) ? (string) $item['price_text'] : null
             );

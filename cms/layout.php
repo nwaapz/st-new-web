@@ -54,6 +54,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'products.php' => 'محصولات',
             'media-upload.php' => 'آپلود تصاویر',
             'media-library.php' => 'کتابخانه تصاویر',
+            'price-sheet.php' => 'لیست قیمت',
             'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
         ];

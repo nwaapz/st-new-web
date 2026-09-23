@@ -1,6 +1,6 @@
 1:"$Sreact.fragment"
 2:"$Sreact.suspense"
-3:I[9894,["8500","static/chunks/8500-3953cc33eeceb44e.js","7914","static/chunks/7914-a8bfe07509c5b22c.js","5864","static/chunks/5864-55edb7f18e2c8089.js","4005","static/chunks/app/cart/page-ab97f9fdbfbc8e21.js"],"CartView"]
+3:I[9894,["8500","static/chunks/8500-3953cc33eeceb44e.js","7914","static/chunks/7914-a8bfe07509c5b22c.js","5864","static/chunks/5864-2c8f252c01cc656e.js","4005","static/chunks/app/cart/page-ab97f9fdbfbc8e21.js"],"CartView"]
 4:I[484,[],"OutletBoundary"]
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"cart-page","children":["$","$2",null,{"fallback":["$","section",null,{"className":"cart","aria-label":"سبد خرید","children":["$","div",null,{"className":"cart__panel","children":["$","div",null,{"className":"cart__status","children":"در حال آماده‌سازی سبد…"}]}]}],"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"iwj77jgVO1RihTNwzC1lZ"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"cart-page","children":["$","$2",null,{"fallback":["$","section",null,{"className":"cart","aria-label":"سبد خرید","children":["$","div",null,{"className":"cart__panel","children":["$","div",null,{"className":"cart__status","children":"در حال آماده‌سازی سبد…"}]}]}],"children":["$","$L3",null,{}]}]}],null,["$","$L4",null,{"children":["$","$2",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"UjfyVlyxLw724SVso2R-k"}
 5:null

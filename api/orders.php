@@ -33,12 +33,8 @@ try {
         $userId = (int) $user['id'];
 
         if ($orderId > 0) {
-            $stmt = $pdo->prepare(
-                'SELECT * FROM orders WHERE id = ? AND user_id = ? LIMIT 1'
-            );
-            $stmt->execute([$orderId, $userId]);
-            $order = $stmt->fetch();
-            if (!$order) {
+            $order = orders_get_by_id($pdo, $orderId);
+            if ($order === null || !orders_client_can_access_order($user, $order)) {
                 api_error('سفارش یافت نشد', 404);
             }
             $serialized = orders_serialize(

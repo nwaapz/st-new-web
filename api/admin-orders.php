@@ -81,8 +81,20 @@ try {
         $ongoingMode = isset($_GET['ongoing_mode']) ? trim((string) $_GET['ongoing_mode']) : 'new_order';
         $phone = isset($_GET['phone']) ? trim((string) $_GET['phone']) : '';
         $branchId = isset($_GET['branch_id']) ? (int) $_GET['branch_id'] : 0;
+        $createdSinceDays = orders_normalize_created_since_days($_GET['created_since_days'] ?? 0);
 
-        $list = orders_admin_list($pdo, $scope, $status, $q, $page, $perPage, $ongoingMode, $phone, $branchId);
+        $list = orders_admin_list(
+            $pdo,
+            $scope,
+            $status,
+            $q,
+            $page,
+            $perPage,
+            $ongoingMode,
+            $phone,
+            $branchId,
+            $createdSinceDays
+        );
         api_json([
             'ok' => true,
             'orders' => $list['items'],
@@ -139,11 +151,22 @@ try {
         }
     }
 
+    $itemAdjustments = [];
+    if (isset($body['item_adjustments']) && is_array($body['item_adjustments'])) {
+        foreach ($body['item_adjustments'] as $itemId => $payload) {
+            if (!is_array($payload)) {
+                continue;
+            }
+            $itemAdjustments[(string) $itemId] = $payload;
+        }
+    }
+
     if ($orderId <= 0 || $action === '') {
         api_error('سفارش و عملیات الزامی است', 400);
     }
 
     $paymentMethod = trim((string) ($body['payment_method'] ?? ''));
+    $advancePricingStep = !empty($body['advance_pricing_step']);
     $result = orders_admin_apply_action(
         $pdo,
         $orderId,
@@ -152,7 +175,9 @@ try {
         $prices,
         $preInvoiceDueAt,
         $cheque,
-        $paymentMethod
+        $paymentMethod,
+        $itemAdjustments,
+        $advancePricingStep
     );
 
     if ($action === 'delete' || $action === 'remove' || !empty($result['deleted'])) {

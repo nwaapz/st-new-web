@@ -94,7 +94,16 @@ function invoices_totals_from_items(array $items): array
     $total = 0;
     $lines = [];
     foreach ($items as $item) {
-        $qty = max(1, (int) ($item['quantity'] ?? 1));
+        $qty = (int) ($item['quantity'] ?? 1);
+        if ($qty <= 0) {
+            $lines[] = [
+                'unit' => null,
+                'line' => null,
+                'unit_label' => '—',
+                'line_label' => '—',
+            ];
+            continue;
+        }
         $unitType = isset($item['unit_type']) && (string) $item['unit_type'] === 'pack'
             ? 'pack'
             : 'piece';

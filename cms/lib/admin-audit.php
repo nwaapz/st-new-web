@@ -67,6 +67,10 @@ function admin_audit_action_labels(): array
         'product_series.delete' => 'حذف سری محصول',
         'price_import.apply' => 'اعمال ورود قیمت',
         'price_import.clear' => 'پاک کردن ورود قیمت',
+        'price_sheet.save' => 'ذخیره پیش‌نویس لیست قیمت',
+        'price_sheet.import' => 'ورود Excel لیست قیمت',
+        'price_sheet.google_import' => 'واردات یک‌باره Google Sheet به لیست قیمت',
+        'price_sheet.publish' => 'انتشار لیست قیمت',
         'media.upload' => 'آپلود رسانه',
         'media.delete' => 'حذف رسانه',
         'sales_user.save' => 'ذخیره کاربر فروش',
@@ -210,8 +214,8 @@ function admin_audit_list(PDO $pdo, array $filters = [], int $page = 1, int $pag
             $where[] = "action LIKE 'order.%'";
         } elseif ($category === 'catalog') {
             $where[] = "(action LIKE 'product.%' OR action LIKE 'category.%' OR action LIKE 'factory.%'
-                OR action LIKE 'car_model.%' OR action LIKE 'product_series.%' OR action LIKE 'price_import.%'
-                OR action LIKE 'product_review.%')";
+                OR action LIKE 'car_model.%'                 OR action LIKE 'product_series.%' OR action LIKE 'price_import.%'
+                OR action LIKE 'price_sheet.%' OR action LIKE 'product_review.%')";
         } elseif ($category === 'media') {
             $where[] = "action LIKE 'media.%'";
         } elseif ($category === 'comms') {

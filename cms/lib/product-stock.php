@@ -223,7 +223,10 @@ function products_stock_deductions_for_order_items(PDO $pdo, array $items): arra
         if (!is_array($item)) {
             continue;
         }
-        $quantity = max(1, (int) ($item['quantity'] ?? 1));
+        $quantity = (int) ($item['quantity'] ?? 1);
+        if ($quantity <= 0) {
+            continue;
+        }
         $productId = isset($item['product_id']) && $item['product_id'] !== null
             ? (int) $item['product_id']
             : 0;
