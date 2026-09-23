@@ -2562,6 +2562,10 @@ a.cms-kpi:hover {
   max-width: min(96vw, 1680px);
 }
 
+.cms-main:has(.cms-price-sheet) {
+  max-width: min(96vw, 1680px);
+}
+
 .cms-card.price-import-upload {
   width: min(100%, 720px);
 }
@@ -2961,6 +2965,20 @@ a.cms-kpi:hover {
 .cms-price-sheet__name {
   text-align: right;
   min-width: 10rem;
+}
+
+.cms-price-sheet__car {
+  min-width: 7rem;
+  max-width: 12rem;
+}
+
+.cms-price-sheet__readonly {
+  display: block;
+  padding: 0.35rem 0.5rem;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .cms-price-sheet__price,

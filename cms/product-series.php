@@ -34,6 +34,13 @@ function product_series_ensure_schema(PDO $pdo): void
     if (count($packCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
     }
+    $modelCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'model_name'")->fetchAll();
+    if (count($modelCol) === 0) {
+        $pdo->exec(
+            "ALTER TABLE product_series
+             ADD COLUMN model_name VARCHAR(512) NOT NULL DEFAULT '' AFTER name"
+        );
+    }
     $detailCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'detail_lead_image'")->fetchAll();
     if (count($detailCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN detail_lead_image VARCHAR(512) NULL AFTER image');
@@ -226,6 +233,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $packSize = null;
         }
         $description = trim((string) ($_POST['description'] ?? ''));
+        $modelName = trim((string) ($_POST['model_name'] ?? ''));
         $image = cms_handle_optional_upload('image', (string) ($_POST['image'] ?? ''));
         $detailLeadImage = trim((string) ($_POST['detail_lead_image'] ?? ''));
         $imageSetupOverride = trim((string) ($_POST['image_setup_override'] ?? ''));
@@ -274,11 +282,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, image=?,
+                'UPDATE product_series SET name=?, model_name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, image=?,
                  detail_lead_image=?, image_setup_override=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
                 $name,
+                $modelName,
                 $slug,
                 $visualId,
                 $description !== '' ? $description : null,
@@ -296,12 +305,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_flash('سری به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO product_series (name, slug, visual_id, description, price_text, pack_size, image,
+                'INSERT INTO product_series (name, model_name, slug, visual_id, description, price_text, pack_size, image,
                  detail_lead_image, image_setup_override, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name,
+                $modelName,
                 $slug,
                 $visualId,
                 $description !== '' ? $description : null,
@@ -448,6 +458,10 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
   <label class="cms-field"><span class="cms-label">شناسه نمایشی</span>
     <input class="cms-input" name="visual_id" dir="ltr" value="<?= cms_h($edit['visual_id'] ?? '') ?>" placeholder="KIT-1001">
     <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">همان «کد کالا» در Excel/Google Sheet (مثلاً 1484). بدون این کد، قیمت و تعداد بسته از شیت روی سری اعمال نمی‌شود.</span>
+  </label>
+  <label class="cms-field"><span class="cms-label">خودرو</span>
+    <input class="cms-input" name="model_name" value="<?= cms_h($edit['model_name'] ?? '') ?>" placeholder="مثلاً پژو ۲۰۶، سمند">
+    <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">در لیست قیمت انبار برای این کیت نمایش داده می‌شود. خودرو را اینجا ویرایش کنید، نه در شیت انبار.</span>
   </label>
   <div class="cms-grid-2">
     <label class="cms-field"><span class="cms-label">قیمت (متن نمایشی)</span>

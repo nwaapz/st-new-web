@@ -14,10 +14,21 @@ price_sheet_ensure_schema($pdo);
 
 $fromWarehouse = (string) ($_GET['from'] ?? '') === 'warehouse';
 $pageUrl = price_sheet_page_url($fromWarehouse);
+$exportIncludeStockDefault = price_sheet_export_include_stock_default($fromWarehouse);
 $layoutSection = $fromWarehouse ? 'customers' : 'shop';
 
 $categories = price_sheet_list_categories($pdo);
 $publishResult = null;
+
+if (isset($_GET['export']) && (string) $_GET['export'] === '1') {
+    try {
+        $includeStock = price_sheet_export_include_stock_from_query($_GET, $fromWarehouse);
+        price_sheet_send_xlsx_export($pdo, $fromWarehouse, $includeStock);
+    } catch (Throwable $e) {
+        cms_flash($e->getMessage(), 'error');
+        cms_redirect($pageUrl);
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
@@ -122,7 +133,8 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   <header class="cms-price-sheet__intro">
     <h1 style="margin:0">لیست قیمت<?= $fromWarehouse ? ' — انبار' : '' ?></h1>
     <p class="cms-muted">
-      همه ستون‌ها قابل ویرایش هستند. برای <strong>کیت‌ها</strong>، خودرو را دستی در ستون «خودرو» وارد کنید (مثلاً «پژو ۲۰۶ · ۴۰۵») — از قطعات کیت پر نمی‌شود. قیمت‌ها در پیش‌نویس ذخیره می‌شوند و با «انتشار» روی سایت و پورتال نمایندگان اعمال می‌شوند.
+      ستون «خودرو» فقط خواندنی است — برای کیت‌ها از <a href="product-series.php">سری محصولات</a> و برای محصولات از <a href="products.php">محصولات</a> تنظیم می‌شود.
+      قیمت‌ها در پیش‌نویس ذخیره می‌شوند و با «انتشار» روی سایت و پورتال نمایندگان اعمال می‌شوند.
       موجودی انبار با «ذخیره پیش‌نویس» روی محصول مرتبط (با همان کد کالا) به‌روز می‌شود.
       قیمت بسته از واحد × کارتن محاسبه می‌شود؛ در صورت ویرایش قیمت بسته، قیمت واحد تنظیم می‌شود.
       <?php if (!$fromWarehouse): ?>
@@ -142,6 +154,26 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           انتشار همه
         </button>
       </form>
+      <?php if ($status['draft_rows'] <= 0): ?>
+        <span class="cms-btn cms-btn--secondary" aria-disabled="true" style="opacity:.55;cursor:not-allowed">خروجی Excel</span>
+      <?php else: ?>
+        <form
+          method="get"
+          action="price-sheet.php"
+          class="cms-price-sheet__export-form"
+          style="display:inline-flex;align-items:center;gap:.45rem;flex-wrap:wrap"
+        >
+          <input type="hidden" name="export" value="1">
+          <?php if ($fromWarehouse): ?>
+            <input type="hidden" name="from" value="warehouse">
+          <?php endif; ?>
+          <label class="cms-check cms-price-sheet__export-toggle" style="margin:0;font-size:.85rem">
+            <input type="checkbox" name="include_stock" value="1" <?= $exportIncludeStockDefault ? 'checked' : '' ?>>
+            شامل موجودی انبار
+          </label>
+          <button class="cms-btn cms-btn--secondary" type="submit">خروجی Excel</button>
+        </form>
+      <?php endif; ?>
       <span class="cms-muted" style="margin-right:auto">
         <?= cms_to_persian_digits((string) $status['draft_rows']) ?> ردیف پیش‌نویس
         <?php if ($status['last_published_at_display'] !== ''): ?>
@@ -220,6 +252,11 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                         $packPriceValue = '';
                     }
                     $stockValue = $row['stock_qty'] !== null ? (string) $row['stock_qty'] : '';
+                    $carDisplay = trim((string) ($row['model_name'] ?? ''));
+                    $priceInputValue = price_sheet_price_input_value((string) ($row['price_text'] ?? ''));
+                    $packPriceInputValue = $packPriceValue !== ''
+                        ? price_sheet_price_input_value($packPriceValue)
+                        : '';
                   ?>
                   <tr>
                     <td class="cms-price-sheet__code">
@@ -229,8 +266,8 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                     <td class="cms-price-sheet__name">
                       <input class="cms-input cms-price-sheet__input" name="frames[<?= $categoryId ?>][<?= $index ?>][name]" value="<?= cms_h((string) $row['name']) ?>">
                     </td>
-                    <td>
-                      <input class="cms-input cms-price-sheet__input" name="frames[<?= $categoryId ?>][<?= $index ?>][model_name]" value="<?= cms_h((string) ($row['model_name'] ?? '')) ?>">
+                    <td class="cms-price-sheet__car">
+                      <span class="cms-price-sheet__readonly"><?= cms_h($carDisplay !== '' ? $carDisplay : '—') ?></span>
                     </td>
                     <td>
                       <input class="cms-input cms-price-sheet__input" name="frames[<?= $categoryId ?>][<?= $index ?>][warranty_text]" value="<?= cms_h((string) ($row['warranty_text'] ?? '')) ?>">
@@ -239,10 +276,10 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                       <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][pack_size]" value="<?= $row['pack_size'] !== null ? cms_h((string) $row['pack_size']) : '' ?>" dir="ltr" data-pack-input>
                     </td>
                     <td class="cms-price-sheet__price">
-                      <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][price_text]" value="<?= cms_h((string) $row['price_text']) ?>" dir="ltr" data-price-input>
+                      <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][price_text]" value="<?= cms_h($priceInputValue) ?>" dir="ltr" data-price-input>
                     </td>
                     <td class="cms-price-sheet__price">
-                      <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][pack_price_text]" value="<?= cms_h($packPriceValue) ?>" dir="ltr" data-pack-price-input>
+                      <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][pack_price_text]" value="<?= cms_h($packPriceInputValue) ?>" dir="ltr" data-pack-price-input>
                     </td>
                     <td>
                       <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][stock_qty]" value="<?= cms_h($stockValue) ?>" dir="ltr" inputmode="numeric">
@@ -361,9 +398,9 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     return Number.isFinite(amount) ? amount : null;
   }
 
-  function formatToman(amount) {
+  function formatAmount(amount) {
     var grouped = Math.max(0, Math.floor(amount)).toLocaleString('en-US').replace(/,/g, '٬');
-    return grouped.replace(/\d/g, function (d) { return persianDigits[d] || d; }) + ' تومان';
+    return grouped.replace(/\d/g, function (d) { return persianDigits[d] || d; });
   }
 
   function updatePackPrice(row, fromUnit) {
@@ -381,7 +418,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       if (packAmount !== null && packAmount > 0) {
         var unitAmount = Math.floor(packAmount / packSize);
         if (unitAmount > 0) {
-          priceInput.value = formatToman(unitAmount);
+          priceInput.value = formatAmount(unitAmount);
         }
       }
       return;
@@ -391,7 +428,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       packPriceInput.value = '';
       return;
     }
-    packPriceInput.value = formatToman(unit * packSize);
+    packPriceInput.value = formatAmount(unit * packSize);
   }
 
   function bindRow(row) {
@@ -423,7 +460,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         '<td class="cms-price-sheet__name">' +
           '<input class="cms-input cms-price-sheet__input" name="frames[' + categoryId + '][' + index + '][name]" value="">' +
         '</td>' +
-        '<td><input class="cms-input cms-price-sheet__input" name="frames[' + categoryId + '][' + index + '][model_name]" value=""></td>' +
+        '<td class="cms-price-sheet__car"><span class="cms-price-sheet__readonly">—</span></td>' +
         '<td><input class="cms-input cms-price-sheet__input" name="frames[' + categoryId + '][' + index + '][warranty_text]" value=""></td>' +
         '<td><input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][pack_size]" value="" dir="ltr" data-pack-input></td>' +
         '<td class="cms-price-sheet__price">' +

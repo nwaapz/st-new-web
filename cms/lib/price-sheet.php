@@ -83,6 +83,19 @@ function price_sheet_format_toman_amount(int $amount): string
     return cms_to_persian_digits($grouped) . ' تومان';
 }
 
+function price_sheet_price_input_value(string $priceText): string
+{
+    $amount = price_sheet_parse_toman_amount($priceText);
+    if ($amount === null) {
+        return preg_replace('/\s*تومان\s*$/u', '', trim($priceText));
+    }
+
+    $grouped = number_format(max(0, $amount), 0, '', ',');
+    $grouped = str_replace(',', '٬', $grouped);
+
+    return cms_to_persian_digits($grouped);
+}
+
 function price_sheet_clean_cell_value(?string $value): string
 {
     $value = trim((string) $value);
@@ -100,7 +113,6 @@ function price_sheet_resolve_row_fields(array $input): array
 {
     $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
     $name = trim((string) ($input['name'] ?? ''));
-    $modelName = price_sheet_clean_cell_value((string) ($input['model_name'] ?? ''));
     $warrantyText = price_sheet_clean_cell_value((string) ($input['warranty_text'] ?? ''));
     $priceText = trim((string) ($input['price_text'] ?? ''));
     $packPriceText = trim((string) ($input['pack_price_text'] ?? ''));
@@ -120,6 +132,11 @@ function price_sheet_resolve_row_fields(array $input): array
         }
     }
 
+    $unitAmount = price_sheet_parse_toman_amount($priceText);
+    if ($unitAmount !== null && $unitAmount > 0) {
+        $priceText = price_sheet_format_toman_amount($unitAmount);
+    }
+
     $stockRaw = trim((string) ($input['stock_qty'] ?? ''));
     $stockQty = null;
     if ($stockRaw !== '') {
@@ -129,7 +146,6 @@ function price_sheet_resolve_row_fields(array $input): array
     return [
         'visual_id' => $visualId,
         'name' => $name,
-        'model_name' => $modelName,
         'warranty_text' => $warrantyText,
         'price_text' => $priceText,
         'pack_size' => $packSize,
@@ -175,11 +191,10 @@ function price_sheet_sync_row_to_product(PDO $pdo, string $visualId, array $fiel
 }
 
 /**
- * @param array{name?:string,warranty_text?:string,model_name?:string} $fields
+ * @param array{name?:string,warranty_text?:string} $fields
  */
 function price_sheet_sync_row_to_series(PDO $pdo, string $visualId, array $fields): void
 {
-    price_sheet_ensure_series_model_column($pdo);
     $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
     $series = $entities['series'] ?? null;
     if (!is_array($series) || (int) ($series['id'] ?? 0) <= 0) {
@@ -187,7 +202,7 @@ function price_sheet_sync_row_to_series(PDO $pdo, string $visualId, array $field
     }
 
     $seriesId = (int) $series['id'];
-    $stmt = $pdo->prepare('SELECT name, description, model_name FROM product_series WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT name, description FROM product_series WHERE id = ? LIMIT 1');
     $stmt->execute([$seriesId]);
     $existing = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$existing) {
@@ -198,15 +213,13 @@ function price_sheet_sync_row_to_series(PDO $pdo, string $visualId, array $field
     $existingDescription = (string) ($existing['description'] ?? '');
     $name = trim((string) ($fields['name'] ?? ''));
     $warrantyText = price_sheet_clean_cell_value((string) ($fields['warranty_text'] ?? ''));
-    $modelName = price_sheet_clean_cell_value((string) ($fields['model_name'] ?? ''));
     $newDescription = price_import_description_with_warranty($existingDescription, $warrantyText);
 
     $update = $pdo->prepare(
-        'UPDATE product_series SET name = ?, model_name = ?, description = ? WHERE id = ?'
+        'UPDATE product_series SET name = ?, description = ? WHERE id = ?'
     );
     $update->execute([
         $name !== '' ? $name : $existingName,
-        $modelName,
         $newDescription,
         $seriesId,
     ]);
@@ -279,6 +292,9 @@ function price_sheet_load_catalog_meta_by_visual_ids(PDO $pdo, array $visualIds)
         }
 
         $existing['is_series'] = true;
+        if ($seriesModel !== '') {
+            $existing['model_name'] = $seriesModel;
+        }
         if (($existing['warranty_text'] === '' || $existing['warranty_text'] === '—') && $seriesWarranty !== '—') {
             $existing['warranty_text'] = $seriesWarranty;
         }
@@ -298,9 +314,7 @@ function price_sheet_apply_catalog_meta_to_row(array &$sheetRow, ?array $catalog
         return;
     }
 
-    if (($sheetRow['model_name'] ?? '') === '') {
-        $sheetRow['model_name'] = price_sheet_clean_cell_value((string) ($catalogMeta['model_name'] ?? ''));
-    }
+    $sheetRow['model_name'] = price_sheet_clean_cell_value((string) ($catalogMeta['model_name'] ?? ''));
     if (($sheetRow['warranty_text'] ?? '') === '') {
         $sheetRow['warranty_text'] = price_sheet_clean_cell_value((string) ($catalogMeta['warranty_text'] ?? ''));
     }
@@ -321,7 +335,6 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
         ? (int) $row['pack_size']
         : null;
     $warrantyText = price_sheet_clean_cell_value((string) ($row['warranty_text'] ?? ''));
-    $modelName = price_sheet_clean_cell_value((string) ($row['model_name'] ?? ''));
     $stockQty = array_key_exists('stock_qty', $row) && $row['stock_qty'] !== null
         ? (int) $row['stock_qty']
         : null;
@@ -405,22 +418,19 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
         $seriesExisting = $seriesRow->fetch(PDO::FETCH_ASSOC) ?: [];
         $existingSeriesName = trim((string) ($seriesExisting['name'] ?? ''));
         $existingSeriesDescription = (string) ($seriesExisting['description'] ?? '');
-        $existingSeriesModel = price_sheet_clean_cell_value((string) ($seriesExisting['model_name'] ?? ''));
         $newSeriesDescription = price_import_description_with_warranty($existingSeriesDescription, $warrantyText);
         $seriesNameChanged = $name !== '' && $name !== $existingSeriesName;
         $seriesDescriptionChanged = (string) ($newSeriesDescription ?? '') !== $existingSeriesDescription;
-        $seriesModelChanged = $modelName !== $existingSeriesModel;
         $seriesPriceChanged = $existingPrice !== $priceText || $existingPackSize !== $newPackSize;
 
-        if ($seriesPriceChanged || $seriesNameChanged || $seriesDescriptionChanged || $seriesModelChanged) {
+        if ($seriesPriceChanged || $seriesNameChanged || $seriesDescriptionChanged) {
             $stmt = $pdo->prepare(
-                'UPDATE product_series SET price_text = ?, pack_size = ?, name = ?, model_name = ?, description = ? WHERE id = ?'
+                'UPDATE product_series SET price_text = ?, pack_size = ?, name = ?, description = ? WHERE id = ?'
             );
             $stmt->execute([
                 $priceText,
                 $newPackSize,
                 $name !== '' ? $name : $existingSeriesName,
-                $modelName,
                 $newSeriesDescription,
                 $seriesId,
             ]);
@@ -705,6 +715,18 @@ function price_sheet_apply_posted_rows(
     $deleted = 0;
     $sortOrder = 0;
 
+    $visualIds = [];
+    foreach ($postedRows as $input) {
+        if (!is_array($input) || !empty($input['delete'])) {
+            continue;
+        }
+        $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
+        if ($visualId !== '') {
+            $visualIds[$visualId] = true;
+        }
+    }
+    $catalogByVisual = price_sheet_load_catalog_meta_by_visual_ids($pdo, array_keys($visualIds));
+
     foreach ($postedRows as $input) {
         if (!is_array($input)) {
             continue;
@@ -724,7 +746,8 @@ function price_sheet_apply_posted_rows(
         $fields = price_sheet_resolve_row_fields($input);
         $visualId = $fields['visual_id'];
         $name = $fields['name'];
-        $modelName = $fields['model_name'];
+        $catalogMeta = $catalogByVisual[$visualId] ?? null;
+        $modelName = price_sheet_clean_cell_value((string) ($catalogMeta['model_name'] ?? ''));
         $warrantyText = $fields['warranty_text'];
         $priceText = $fields['price_text'];
         $packSize = $fields['pack_size'];
@@ -775,7 +798,6 @@ function price_sheet_apply_posted_rows(
         price_sheet_sync_row_to_series($pdo, $visualId, [
             'name' => $name,
             'warranty_text' => $warrantyText,
-            'model_name' => $modelName,
         ]);
         $saved++;
         $sortOrder++;
@@ -1537,4 +1559,135 @@ function price_sheet_get_status(PDO $pdo): array
         'categories' => price_sheet_list_categories($pdo),
         'google_import' => price_sheet_get_google_import_info(),
     ];
+}
+
+function price_sheet_export_filename(bool $fromWarehouse = false): string
+{
+    require_once __DIR__ . '/jalali.php';
+    $jalaliDay = cms_jalali_format_from_timestamp(date('Y-m-d H:i:s'));
+    $jalaliDay = str_replace('/', '-', $jalaliDay);
+    $jalaliDay = cms_to_persian_digits($jalaliDay);
+    $suffix = $fromWarehouse ? 'لیست-قیمت-انبار' : 'لیست-قیمت';
+
+    return $jalaliDay . '-' . $suffix . '.xlsx';
+}
+
+function price_sheet_export_include_stock_default(bool $fromWarehouse = false): bool
+{
+    return $fromWarehouse;
+}
+
+/**
+ * @param array<string,mixed> $query
+ */
+function price_sheet_export_include_stock_from_query(array $query, bool $fromWarehouse = false): bool
+{
+    if ((string) ($query['export'] ?? '') === '1') {
+        return (string) ($query['include_stock'] ?? '') === '1';
+    }
+
+    return price_sheet_export_include_stock_default($fromWarehouse);
+}
+
+/**
+ * @return list<array{name:string,rows:list<list<string>>}>
+ */
+function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): array
+{
+    $frames = price_sheet_list_frames($pdo);
+    $header = [
+        'کد کالا',
+        'نام',
+        'خودرو',
+        'گارانتی',
+        'تعداد در کارتن',
+        'قیمت واحد',
+        'قیمت بسته',
+    ];
+    if ($includeStock) {
+        $header[] = 'موجودی انبار';
+    }
+
+    $sheets = [];
+    foreach ($frames as $frame) {
+        $frameRows = is_array($frame['rows'] ?? null) ? $frame['rows'] : [];
+        if ($frameRows === []) {
+            continue;
+        }
+
+        $rows = [$header];
+        foreach ($frameRows as $row) {
+            $packPrice = (string) ($row['pack_price_text'] ?? '');
+            if ($packPrice === '—') {
+                $packPrice = '';
+            }
+
+            $line = [
+                (string) ($row['visual_id'] ?? ''),
+                (string) ($row['name'] ?? ''),
+                (string) ($row['model_name'] ?? ''),
+                (string) ($row['warranty_text'] ?? ''),
+                $row['pack_size'] !== null ? (string) $row['pack_size'] : '',
+                (string) ($row['price_text'] ?? ''),
+                $packPrice,
+            ];
+            if ($includeStock) {
+                $line[] = $row['stock_qty'] !== null ? (string) $row['stock_qty'] : '';
+            }
+
+            $rows[] = $line;
+        }
+
+        $sheets[] = [
+            'name' => (string) ($frame['category_name'] ?? 'دسته'),
+            'rows' => $rows,
+        ];
+    }
+
+    return $sheets;
+}
+
+function price_sheet_export_page_url(bool $fromWarehouse = false, bool $includeStock = false): string
+{
+    $base = price_sheet_page_url($fromWarehouse);
+    $query = 'export=1';
+    if ($includeStock) {
+        $query .= '&include_stock=1';
+    }
+
+    return $base . (str_contains($base, '?') ? '&' : '?') . $query;
+}
+
+function price_sheet_send_xlsx_export(PDO $pdo, bool $fromWarehouse = false, bool $includeStock = false): never
+{
+    require_once __DIR__ . '/price-export-xlsx.php';
+
+    $sheets = price_sheet_build_export_sheets($pdo, $includeStock);
+    if ($sheets === []) {
+        throw new RuntimeException('پیش‌نویس خالی است — چیزی برای خروجی Excel نیست');
+    }
+
+    $filename = price_sheet_export_filename($fromWarehouse);
+    $tmp = price_import_temp_dir() . DIRECTORY_SEPARATOR . 'export-' . bin2hex(random_bytes(8)) . '.xlsx';
+
+    try {
+        price_export_xlsx_write($tmp, $sheets);
+        cms_admin_audit($pdo, 'price_sheet.export', [
+            'entity_type' => 'price_sheet',
+            'summary' => cms_current_username() . ' — خروجی Excel لیست قیمت',
+            'detail' => [
+                'filename' => $filename,
+                'sheet_count' => count($sheets),
+                'from_warehouse' => $fromWarehouse,
+                'include_stock' => $includeStock,
+            ],
+        ]);
+        price_export_xlsx_send_download($filename, $tmp);
+    } finally {
+        if (is_file($tmp)) {
+            @unlink($tmp);
+        }
+    }
+
+    exit;
 }
