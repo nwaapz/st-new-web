@@ -466,12 +466,44 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 <script>
 (function () {
   var persianDigits = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'};
+  var digitChar = /[0-9۰-۹٠-٩]/;
 
   function normalizeDigits(text) {
     return String(text || '').replace(/[۰-۹٠-٩]/g, function (ch) {
       var map = {'۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9','٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'};
       return map[ch] || ch;
     }).replace(/[٬،,\s\u00A0]/g, '').replace(/تومان$/u, '').trim();
+  }
+
+  function hasPersianDigits(text) {
+    return /[۰-۹]/.test(String(text || ''));
+  }
+
+  function hasLatinDigits(text) {
+    return /[0-9]/.test(String(text || ''));
+  }
+
+  function getDigitMode(input) {
+    if (input && (input.dataset.digitMode === 'fa' || input.dataset.digitMode === 'en')) {
+      return input.dataset.digitMode;
+    }
+    var value = input ? String(input.value || '') : '';
+    if (hasPersianDigits(value)) {
+      return 'fa';
+    }
+    if (hasLatinDigits(value)) {
+      return 'en';
+    }
+    return 'fa';
+  }
+
+  function setDigitMode(input, mode) {
+    if (!input) return;
+    input.dataset.digitMode = mode === 'en' ? 'en' : 'fa';
+  }
+
+  function initDigitMode(input) {
+    setDigitMode(input, getDigitMode(input));
   }
 
   function parseToman(raw) {
@@ -482,9 +514,49 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     return Number.isFinite(amount) ? amount : null;
   }
 
-  function formatAmount(amount) {
-    var grouped = Math.max(0, Math.floor(amount)).toLocaleString('en-US').replace(/,/g, '٬');
-    return grouped.replace(/\d/g, function (d) { return persianDigits[d] || d; });
+  function formatAmount(amount, mode) {
+    var grouped = Math.max(0, Math.floor(amount)).toLocaleString('en-US');
+    if (mode === 'fa') {
+      grouped = grouped.replace(/,/g, '٬');
+      return grouped.replace(/\d/g, function (d) { return persianDigits[d] || d; });
+    }
+    return grouped;
+  }
+
+  function countDigits(text) {
+    var count = 0;
+    String(text || '').split('').forEach(function (ch) {
+      if (digitChar.test(ch)) count++;
+    });
+    return count;
+  }
+
+  function cursorAfterDigits(formatted, digitCount) {
+    if (digitCount <= 0) return 0;
+    var seen = 0;
+    for (var i = 0; i < formatted.length; i++) {
+      if (digitChar.test(formatted.charAt(i))) {
+        seen++;
+        if (seen >= digitCount) {
+          return i + 1;
+        }
+      }
+    }
+    return formatted.length;
+  }
+
+  function normalizePriceInput(input) {
+    if (!input) return;
+    var mode = getDigitMode(input);
+    setDigitMode(input, mode);
+    var before = input.selectionStart;
+    var digitsBefore = before === null ? countDigits(input.value) : countDigits(String(input.value || '').slice(0, before));
+    var digits = normalizeDigits(input.value);
+    input.value = digits === '' ? '' : formatAmount(parseInt(digits, 10), mode);
+    if (before !== null && typeof input.setSelectionRange === 'function') {
+      var pos = cursorAfterDigits(input.value, digitsBefore);
+      try { input.setSelectionRange(pos, pos); } catch (e) {}
+    }
   }
 
   function updatePackPrice(row, fromUnit) {
@@ -502,7 +574,9 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       if (packAmount !== null && packAmount > 0) {
         var unitAmount = Math.floor(packAmount / packSize);
         if (unitAmount > 0) {
-          priceInput.value = formatAmount(unitAmount);
+          var packMode = getDigitMode(packPriceInput);
+          setDigitMode(priceInput, packMode);
+          priceInput.value = formatAmount(unitAmount, packMode);
         }
       }
       return;
@@ -512,16 +586,30 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       packPriceInput.value = '';
       return;
     }
-    packPriceInput.value = formatAmount(unit * packSize);
+    var priceMode = getDigitMode(priceInput);
+    setDigitMode(packPriceInput, priceMode);
+    packPriceInput.value = formatAmount(unit * packSize, priceMode);
   }
 
   function bindRow(row) {
     var priceInput = row.querySelector('[data-price-input]');
     var packInput = row.querySelector('[data-pack-input]');
     var packPriceInput = row.querySelector('[data-pack-price-input]');
-    if (priceInput) priceInput.addEventListener('input', function () { updatePackPrice(row, true); });
+    if (priceInput) {
+      initDigitMode(priceInput);
+      priceInput.addEventListener('input', function () {
+        normalizePriceInput(priceInput);
+        updatePackPrice(row, true);
+      });
+    }
+    if (packPriceInput) {
+      initDigitMode(packPriceInput);
+      packPriceInput.addEventListener('input', function () {
+        normalizePriceInput(packPriceInput);
+        updatePackPrice(row, false);
+      });
+    }
     if (packInput) packInput.addEventListener('input', function () { updatePackPrice(row, true); });
-    if (packPriceInput) packPriceInput.addEventListener('input', function () { updatePackPrice(row, false); });
   }
 
   document.querySelectorAll('.cms-price-sheet__rows tr').forEach(function (row) {

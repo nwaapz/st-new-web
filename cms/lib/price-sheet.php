@@ -2009,6 +2009,9 @@ function price_sheet_send_xlsx_export(PDO $pdo, bool $fromWarehouse = false, boo
 
     try {
         price_export_xlsx_write($tmp, $sheets);
+        if (!is_file($tmp) || filesize($tmp) <= 0) {
+            throw new RuntimeException('فایل Excel ساخته نشد');
+        }
         cms_admin_audit($pdo, 'price_sheet.export', [
             'entity_type' => 'price_sheet',
             'summary' => cms_current_username() . ' — خروجی Excel لیست قیمت',

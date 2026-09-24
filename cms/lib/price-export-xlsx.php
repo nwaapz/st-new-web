@@ -2,24 +2,14 @@
 declare(strict_types=1);
 
 /**
- * Minimal XLSX writer for CMS exports (ZipArchive required).
+ * Minimal XLSX writer for CMS exports (pure-PHP ZIP, no ZipArchive required).
  *
  * @param list<array{name:string,rows:list<list<string|int|null>>}> $sheets
  */
 function price_export_xlsx_write(string $path, array $sheets): void
 {
-    if (!class_exists('ZipArchive')) {
-        throw new RuntimeException(
-            'خروجی Excel روی این سرور ممکن نیست — در cPanel افزونه zip را فعال کنید.'
-        );
-    }
     if ($sheets === []) {
         throw new RuntimeException('داده‌ای برای خروجی Excel وجود ندارد');
-    }
-
-    $zip = new ZipArchive();
-    if ($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-        throw new RuntimeException('ایجاد فایل Excel ناموفق بود');
     }
 
     $sheetParts = [];
@@ -37,7 +27,7 @@ function price_export_xlsx_write(string $path, array $sheets): void
         $sheetName = price_export_xlsx_sanitize_sheet_name((string) ($sheet['name'] ?? ('Sheet' . $sheetNumber)));
         $rows = is_array($sheet['rows'] ?? null) ? $sheet['rows'] : [];
 
-        $sheetParts[$partName] = price_export_xlsx_build_sheet_xml($rows);
+        $sheetParts[ltrim($partName, '/')] = price_export_xlsx_build_sheet_xml($rows);
         $contentTypeOverrides[$partName] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
         $workbookSheetEntries[] = '<sheet name="' . price_export_xlsx_xml_attr($sheetName)
             . '" sheetId="' . $sheetNumber . '" r:id="' . $relId . '"/>';
@@ -50,22 +40,131 @@ function price_export_xlsx_write(string $path, array $sheets): void
     $workbookRels[] = '<Relationship Id="' . $stylesRelId
         . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>';
 
-    $zip->addFromString('[Content_Types].xml', price_export_xlsx_content_types_xml($contentTypeOverrides));
-    $zip->addFromString('_rels/.rels', price_export_xlsx_root_rels_xml());
-    $zip->addFromString('xl/workbook.xml', price_export_xlsx_workbook_xml($workbookSheetEntries));
-    $zip->addFromString(
-        'xl/_rels/workbook.xml.rels',
-        price_export_xlsx_workbook_rels_xml($workbookRels)
-    );
-    $zip->addFromString('xl/styles.xml', price_export_xlsx_styles_xml());
-
+    /** @var array<string, string> $entries */
+    $entries = [
+        '[Content_Types].xml' => price_export_xlsx_content_types_xml($contentTypeOverrides),
+        '_rels/.rels' => price_export_xlsx_root_rels_xml(),
+        'xl/workbook.xml' => price_export_xlsx_workbook_xml($workbookSheetEntries),
+        'xl/_rels/workbook.xml.rels' => price_export_xlsx_workbook_rels_xml($workbookRels),
+        'xl/styles.xml' => price_export_xlsx_styles_xml(),
+    ];
     foreach ($sheetParts as $partName => $xml) {
-        $zip->addFromString(ltrim($partName, '/'), $xml);
+        $entries[$partName] = $xml;
     }
 
-    $zip->close();
+    price_export_zip_write_stored($path, $entries);
 }
 
+/**
+ * @param array<string, string> $entries path inside archive => file contents
+ */
+function price_export_zip_write_stored(string $path, array $entries): void
+{
+    $dir = dirname($path);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        throw new RuntimeException('پوشه موقت برای Excel در دسترس نیست');
+    }
+
+    $handle = fopen($path, 'wb');
+    if ($handle === false) {
+        throw new RuntimeException('ایجاد فایل Excel ناموفق بود');
+    }
+
+    /** @var list<array{name:string,crc:int,size:int,offset:int}> $central */
+    $central = [];
+    $offset = 0;
+
+    foreach ($entries as $name => $data) {
+        $name = str_replace('\\', '/', ltrim((string) $name, '/'));
+        $data = (string) $data;
+        $crc = crc32($data) & 0xffffffff;
+        $size = strlen($data);
+        $nameLen = strlen($name);
+
+        $localHeader = pack(
+            'VvvvvvVVVvv',
+            0x04034b50,
+            20,
+            0,
+            0,
+            0,
+            0,
+            $crc,
+            $size,
+            $size,
+            $nameLen,
+            0
+        ) . $name;
+
+        if (fwrite($handle, $localHeader) === false || fwrite($handle, $data) === false) {
+            fclose($handle);
+            @unlink($path);
+            throw new RuntimeException('نوشتن فایل Excel ناموفق بود');
+        }
+
+        $central[] = [
+            'name' => $name,
+            'crc' => $crc,
+            'size' => $size,
+            'offset' => $offset,
+        ];
+        $offset += strlen($localHeader) + $size;
+    }
+
+    $centralOffset = $offset;
+    $centralSize = 0;
+    foreach ($central as $entry) {
+        $name = $entry['name'];
+        $nameLen = strlen($name);
+        $centralHeader = pack(
+            'VvvvvvvVVVvvvvVVV',
+            0x02014b50,
+            20,
+            20,
+            0,
+            0,
+            0,
+            0,
+            $entry['crc'],
+            $entry['size'],
+            $entry['size'],
+            $nameLen,
+            0,
+            0,
+            0,
+            0,
+            0,
+            $entry['offset']
+        ) . $name;
+
+        if (fwrite($handle, $centralHeader) === false) {
+            fclose($handle);
+            @unlink($path);
+            throw new RuntimeException('نوشتن فایل Excel ناموفق بود');
+        }
+        $centralSize += strlen($centralHeader);
+    }
+
+    $count = count($central);
+    $eocd = pack(
+        'VvvvvVVv',
+        0x06054b50,
+        0,
+        0,
+        $count,
+        $count,
+        $centralSize,
+        $centralOffset,
+        0
+    );
+    if (fwrite($handle, $eocd) === false) {
+        fclose($handle);
+        @unlink($path);
+        throw new RuntimeException('نوشتن فایل Excel ناموفق بود');
+    }
+
+    fclose($handle);
+}
 function price_export_xlsx_sanitize_sheet_name(string $name): string
 {
     $name = trim(str_replace(['\\', '/', '?', '*', '[', ']', ':'], ' ', $name));
@@ -219,6 +318,10 @@ function price_export_xlsx_send_download(string $filename, string $path): void
     $asciiFallback = trim((string) preg_replace('/-+/', '-', $asciiFallback), '-');
     if ($asciiFallback === '' || !str_ends_with(strtolower($asciiFallback), '.xlsx')) {
         $asciiFallback = 'price-sheet.xlsx';
+    }
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
     }
 
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
