@@ -558,7 +558,10 @@ function orders_normalize_ongoing_mode(string $mode): string
     return isset($labels[$mode]) ? $mode : 'new_order';
 }
 
-function orders_normalize_created_since_days(mixed $raw): int
+/**
+ * @param mixed $raw
+ */
+function orders_normalize_created_since_days($raw): int
 {
     $days = (int) $raw;
     if ($days <= 0) {
@@ -1107,7 +1110,10 @@ function orders_serialize_item_adjustment_fields(array $item): array
     ];
 }
 
-function orders_parse_quantity_input(mixed $raw): int
+/**
+ * @param mixed $raw
+ */
+function orders_parse_quantity_input($raw): int
 {
     $s = trim((string) $raw);
     $s = strtr($s, [

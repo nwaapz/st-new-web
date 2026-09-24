@@ -2,5 +2,5 @@
 2:I[2342,["8500","static/chunks/8500-3953cc33eeceb44e.js","7914","static/chunks/7914-a8bfe07509c5b22c.js","1720","static/chunks/1720-384f79a70ac7b0b3.js","3936","static/chunks/app/innovation/page-5a249a5b2d2dc061.js"],"ProductsCatalog"]
 3:I[484,[],"OutletBoundary"]
 4:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"shop-page","children":["$","$L2",null,{}]}],null,["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"ae3HuJOoCvKKNvv1ZJp6t"}
+0:{"rsc":["$","$1","c",{"children":[["$","main",null,{"className":"shop-page","children":["$","$L2",null,{}]}],null,["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"oieR4_Mz9jIUN60FoJBwo"}
 5:null

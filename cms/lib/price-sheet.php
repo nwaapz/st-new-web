@@ -1995,7 +1995,7 @@ function price_sheet_export_page_url(bool $fromWarehouse = false, bool $includeS
     return $base . (str_contains($base, '?') ? '&' : '?') . $query;
 }
 
-function price_sheet_send_xlsx_export(PDO $pdo, bool $fromWarehouse = false, bool $includeStock = false): never
+function price_sheet_send_xlsx_export(PDO $pdo, bool $fromWarehouse = false, bool $includeStock = false): void
 {
     require_once __DIR__ . '/price-export-xlsx.php';
 

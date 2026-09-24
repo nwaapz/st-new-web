@@ -220,7 +220,10 @@ function price_export_xlsx_col_letters(int $index): string
     return $letters;
 }
 
-function price_export_xlsx_inline_cell(string $ref, mixed $value): string
+/**
+ * @param string|int|float|null $value
+ */
+function price_export_xlsx_inline_cell(string $ref, $value): string
 {
     if ($value === null) {
         $value = '';
