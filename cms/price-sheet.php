@@ -177,7 +177,7 @@ $frames = price_sheet_list_frames($pdo);
 
 cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 ?>
-<div class="price-sheet-page cms-price-sheet">
+<div class="price-sheet-page cms-price-sheet<?= $fromWarehouse ? ' cms-price-sheet--warehouse' : '' ?>">
   <header class="cms-price-sheet__intro">
     <h1 style="margin:0">لیست قیمت<?= $fromWarehouse ? ' — انبار' : '' ?></h1>
     <p class="cms-muted">
@@ -365,8 +365,17 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                     <td class="cms-price-sheet__price">
                       <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][pack_price_text]" value="<?= cms_h($packPriceInputValue) ?>" dir="ltr" data-pack-price-input>
                     </td>
-                    <td>
-                      <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][stock_qty]" value="<?= cms_h($stockValue) ?>" dir="ltr" inputmode="numeric">
+                    <td class="cms-price-sheet__stock">
+                      <?php if ($fromWarehouse): ?>
+                        <div class="cms-price-sheet__stock-row">
+                          <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num cms-price-sheet__input--stock" name="frames[<?= $categoryId ?>][<?= $index ?>][stock_qty]" value="<?= cms_h($stockValue) ?>" dir="ltr" inputmode="numeric" data-stock-input>
+                          <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num cms-price-sheet__input--delta" type="text" inputmode="numeric" dir="ltr" data-stock-delta aria-label="تعداد تغییر" placeholder="تعداد">
+                          <button type="button" class="cms-btn cms-btn--ghost cms-price-sheet__stock-btn" data-stock-add aria-label="افزودن" title="افزودن">+</button>
+                          <button type="button" class="cms-btn cms-btn--ghost cms-price-sheet__stock-btn" data-stock-sub aria-label="کم کردن" title="کم کردن">−</button>
+                        </div>
+                      <?php else: ?>
+                        <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][stock_qty]" value="<?= cms_h($stockValue) ?>" dir="ltr" inputmode="numeric">
+                      <?php endif; ?>
                     </td>
                     <td class="cms-price-sheet__delete"><input type="checkbox" name="frames[<?= $categoryId ?>][<?= $index ?>][delete]" value="1"></td>
                   </tr>
@@ -465,6 +474,8 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 
 <script>
 (function () {
+  var warehouseSheet = <?= $fromWarehouse ? 'true' : 'false' ?>;
+  var stockMax = 999999;
   var persianDigits = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'};
   var digitChar = /[0-9۰-۹٠-٩]/;
 
@@ -591,6 +602,49 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     packPriceInput.value = formatAmount(unit * packSize, priceMode);
   }
 
+  function parseStockCount(raw) {
+    var digits = normalizeDigits(raw).replace(/\D/g, '');
+    if (digits === '') return null;
+    var amount = parseInt(digits, 10);
+    return Number.isFinite(amount) ? amount : null;
+  }
+
+  function applyStockDelta(row, sign) {
+    var stockInput = row.querySelector('[data-stock-input]');
+    var deltaInput = row.querySelector('[data-stock-delta]');
+    if (!stockInput || !deltaInput) return;
+    var delta = parseStockCount(deltaInput.value);
+    if (delta === null || delta <= 0) return;
+    var current = parseStockCount(stockInput.value);
+    if (current === null) current = 0;
+    var next = current + (sign * delta);
+    if (next < 0) next = 0;
+    if (next > stockMax) next = stockMax;
+    stockInput.value = String(next);
+  }
+
+  function bindStockAdjuster(row) {
+    var addBtn = row.querySelector('[data-stock-add]');
+    var subBtn = row.querySelector('[data-stock-sub]');
+    if (addBtn) addBtn.addEventListener('click', function () { applyStockDelta(row, 1); });
+    if (subBtn) subBtn.addEventListener('click', function () { applyStockDelta(row, -1); });
+  }
+
+  function stockCellHtml(categoryId, index) {
+    if (!warehouseSheet) {
+      return '<td class="cms-price-sheet__stock">' +
+        '<input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][stock_qty]" value="" dir="ltr" inputmode="numeric">' +
+        '</td>';
+    }
+    return '<td class="cms-price-sheet__stock">' +
+      '<div class="cms-price-sheet__stock-row">' +
+        '<input class="cms-input cms-price-sheet__input cms-price-sheet__input--num cms-price-sheet__input--stock" name="frames[' + categoryId + '][' + index + '][stock_qty]" value="" dir="ltr" inputmode="numeric" data-stock-input>' +
+        '<input class="cms-input cms-price-sheet__input cms-price-sheet__input--num cms-price-sheet__input--delta" type="text" inputmode="numeric" dir="ltr" data-stock-delta aria-label="تعداد تغییر" placeholder="تعداد">' +
+        '<button type="button" class="cms-btn cms-btn--ghost cms-price-sheet__stock-btn" data-stock-add aria-label="افزودن" title="افزودن">+</button>' +
+        '<button type="button" class="cms-btn cms-btn--ghost cms-price-sheet__stock-btn" data-stock-sub aria-label="کم کردن" title="کم کردن">−</button>' +
+      '</div></td>';
+  }
+
   function bindRow(row) {
     var priceInput = row.querySelector('[data-price-input]');
     var packInput = row.querySelector('[data-pack-input]');
@@ -610,6 +664,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       });
     }
     if (packInput) packInput.addEventListener('input', function () { updatePackPrice(row, true); });
+    bindStockAdjuster(row);
   }
 
   document.querySelectorAll('.cms-price-sheet__rows tr').forEach(function (row) {
@@ -662,7 +717,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         '<td class="cms-price-sheet__price">' +
           '<input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][pack_price_text]" value="" dir="ltr" data-pack-price-input>' +
         '</td>' +
-        '<td><input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][stock_qty]" value="" dir="ltr" inputmode="numeric"></td>' +
+        stockCellHtml(categoryId, index) +
         '<td class="cms-price-sheet__delete"><input type="checkbox" name="frames[' + categoryId + '][' + index + '][delete]" value="1"></td>';
       tbody.appendChild(tr);
       bindRow(tr);

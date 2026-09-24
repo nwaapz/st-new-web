@@ -2962,6 +2962,18 @@ a.cms-kpi:hover {
   min-width: 5.5rem;
 }
 
+.cms-price-sheet--warehouse .cms-price-sheet__code {
+  width: 1%;
+  min-width: 0;
+  max-width: 4.75rem;
+}
+
+.cms-price-sheet--warehouse .cms-price-sheet__code .cms-price-sheet__input {
+  width: 4.5rem;
+  max-width: 4.5rem;
+  padding-inline: 0.2rem;
+}
+
 .cms-price-sheet__name {
   text-align: right;
   min-width: 10rem;
@@ -3002,6 +3014,39 @@ a.cms-kpi:hover {
 .cms-price-sheet__input--num {
   min-width: 5rem;
   text-align: center;
+}
+
+.cms-price-sheet--warehouse .cms-price-sheet__stock {
+  min-width: 16rem;
+  white-space: nowrap;
+}
+
+.cms-price-sheet__stock-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+}
+
+.cms-price-sheet--warehouse .cms-price-sheet__input--stock {
+  width: 6.5rem;
+  min-width: 6.5rem;
+  flex: 0 0 6.5rem;
+}
+
+.cms-price-sheet--warehouse .cms-price-sheet__input--delta {
+  width: 3.5rem;
+  min-width: 3.5rem;
+  flex: 0 0 3.5rem;
+}
+
+.cms-price-sheet__stock-btn {
+  width: 1.75rem;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
 }
 
 .cms-price-sheet__frame-actions {

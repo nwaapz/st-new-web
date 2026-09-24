@@ -3,5 +3,5 @@
 3:I[1899,["8500","static/chunks/8500-3953cc33eeceb44e.js","5085","static/chunks/5085-0ea9413c179c0a1d.js","3436","static/chunks/3436-399c467b4221c19e.js","205","static/chunks/205-1669c602324a088f.js","3820","static/chunks/app/font-lab/page-77ca4981a0a7285b.js"],"FontLab"]
 4:I[484,[],"OutletBoundary"]
 5:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"children":["$","$L3",null,{}]}],null,["$","$L4",null,{"children":["$","$5",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"oieR4_Mz9jIUN60FoJBwo"}
+0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"children":["$","$L3",null,{}]}],null,["$","$L4",null,{"children":["$","$5",null,{"name":"Next.MetadataOutlet","children":"$@6"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"qePBDBd4g0-fdOYawFJhY"}
 6:null
