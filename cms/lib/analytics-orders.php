@@ -170,6 +170,24 @@ function analytics_orders_ensure_cheque_fact_columns(PDO $pdo): void
              ADD COLUMN sales_user_name VARCHAR(128) NULL AFTER sales_user_id'
         );
     }
+    if (!isset($cols['sayad_id'])) {
+        $pdo->exec(
+            'ALTER TABLE analytics_order_cheque_facts
+             ADD COLUMN sayad_id VARCHAR(64) NULL AFTER serial'
+        );
+    }
+    if (!isset($cols['bank_name'])) {
+        $pdo->exec(
+            'ALTER TABLE analytics_order_cheque_facts
+             ADD COLUMN bank_name VARCHAR(128) NULL AFTER sayad_id'
+        );
+    }
+    if (!isset($cols['workflow_status'])) {
+        $pdo->exec(
+            'ALTER TABLE analytics_order_cheque_facts
+             ADD COLUMN workflow_status VARCHAR(32) NOT NULL DEFAULT \'registered\' AFTER bank_name'
+        );
+    }
 
     $checked = true;
 }
@@ -513,6 +531,13 @@ function analytics_orders_cheque_fact_values(array $row): array
     $customerName = isset($row['customer_name']) ? trim((string) $row['customer_name']) : '';
     $phone = isset($row['phone']) ? trim((string) $row['phone']) : '';
     $salesUserName = isset($row['sales_user_name']) ? trim((string) $row['sales_user_name']) : '';
+    $sayadId = isset($row['sayad_id']) ? trim((string) $row['sayad_id']) : '';
+    $bankName = isset($row['bank_name']) ? trim((string) $row['bank_name']) : '';
+    $workflowStatus = isset($row['workflow_status']) ? trim((string) $row['workflow_status']) : 'registered';
+    if ($workflowStatus === '' && function_exists('cheque_workflow_resolve_status')) {
+        require_once __DIR__ . '/cheque-workflow.php';
+        $workflowStatus = cheque_workflow_resolve_status($row);
+    }
 
     return [
         (int) ($row['id'] ?? 0),
@@ -523,6 +548,9 @@ function analytics_orders_cheque_fact_values(array $row): array
         (string) ($row['received_on'] ?? date('Y-m-d')),
         $dueOn,
         isset($row['serial']) ? (string) $row['serial'] : null,
+        $sayadId !== '' ? $sayadId : null,
+        $bankName !== '' ? $bankName : null,
+        $workflowStatus !== '' ? $workflowStatus : 'registered',
         isset($row['amount_text']) ? (string) $row['amount_text'] : null,
         $amountToman,
         $bankResult !== '' ? $bankResult : null,
@@ -548,9 +576,10 @@ function analytics_orders_insert_cheque_fact_rows(PDO $pdo, array $rows): void
     $insert = $pdo->prepare(
         'INSERT INTO analytics_order_cheque_facts
          (cheque_id, order_id, order_public_code, order_status, order_channel, received_on, due_on,
-          serial, amount_text, amount_toman, bank_result, days_to_due, due_within_2_days,
-          is_pending, order_created_at, customer_name, phone, sales_user_id, sales_user_name)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+          serial, sayad_id, bank_name, workflow_status, amount_text, amount_toman, bank_result,
+          days_to_due, due_within_2_days, is_pending, order_created_at, customer_name, phone,
+          sales_user_id, sales_user_name)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     );
 
     foreach ($rows as $row) {

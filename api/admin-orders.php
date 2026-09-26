@@ -140,6 +140,11 @@ try {
         'received_on' => trim((string) ($body['received_on'] ?? '')),
         'due_on' => trim((string) ($body['due_on'] ?? '')),
         'serial' => trim((string) ($body['serial'] ?? '')),
+        'sayad_id' => trim((string) ($body['sayad_id'] ?? '')),
+        'bank_name' => trim((string) ($body['bank_name'] ?? '')),
+        'issue_date' => trim((string) ($body['issue_date'] ?? '')),
+        'image_path' => trim((string) ($body['image_path'] ?? '')),
+        'notes' => trim((string) ($body['notes'] ?? '')),
         'amount_text' => trim((string) ($body['amount_text'] ?? '')),
         'bank_result' => trim((string) ($body['bank_result'] ?? '')),
     ];

@@ -141,6 +141,11 @@ function sales_push_message_for_status(string $publicCode, string $notifyType, s
                 'title' => 'یادآوری سررسید چک',
                 'body' => $message !== '' ? $message : ('سررسید چک سفارش ' . $code . ' نزدیک است.'),
             ];
+        case 'cheque_overdue':
+            return [
+                'title' => 'چک سررسید گذشته',
+                'body' => $message !== '' ? $message : ('چک سفارش ' . $code . ' سررسید گذشته است.'),
+            ];
         case 'cheque_received':
             return [
                 'title' => 'دریافت چک',
@@ -168,7 +173,8 @@ function sales_push_notify_status_change(
     PDO $pdo,
     int $orderId,
     string $notifyType,
-    string $message = ''
+    string $message = '',
+    ?int $chequeId = null
 ): void {
     if ($orderId <= 0) {
         return;
@@ -186,16 +192,33 @@ function sales_push_notify_status_change(
 
     $publicCode = (string) ($order['public_code'] ?? '');
     $copy = sales_push_message_for_status($publicCode, $notifyType, $message);
+    $chequeTypes = [
+        'cheque_received',
+        'cheque_due_soon',
+        'cheque_overdue',
+        'cheque_funded',
+        'cheque_bounced',
+    ];
     $data = [
         'order_id' => (string) $orderId,
-        'type' => 'order_status',
+        'type' => in_array($notifyType, $chequeTypes, true) ? $notifyType : 'order_status',
         'to_status' => $notifyType,
         'public_code' => $publicCode,
     ];
+    if ($chequeId !== null && $chequeId > 0) {
+        $data['cheque_id'] = (string) $chequeId;
+    }
 
     $tokens = sales_push_tokens_for_user($pdo, $salesUserId);
     foreach ($tokens as $token) {
         admin_push_send_to_token($token, $copy['title'], $copy['body'], $data);
+    }
+
+    if (in_array($notifyType, $chequeTypes, true) && function_exists('admin_push_all_tokens')) {
+        require_once __DIR__ . '/admin-push.php';
+        foreach (admin_push_all_tokens($pdo) as $adminToken) {
+            admin_push_send_to_token($adminToken, $copy['title'], $copy['body'], $data);
+        }
     }
 }
 
@@ -204,7 +227,7 @@ function admin_push_notify_payment_proof(PDO $pdo, int $orderId, string $activit
     admin_push_notify_order_activity($pdo, $orderId, $activityType);
 }
 
-function orders_admin_notify_sales_client(PDO $pdo, int $orderId, string $notifyType, string $message = ''): void
+function orders_admin_notify_sales_client(PDO $pdo, int $orderId, string $notifyType, string $message = '', ?int $chequeId = null): void
 {
     if (!function_exists('sales_push_notify_status_change')) {
         $lib = __DIR__ . '/sales-push.php';
@@ -216,7 +239,7 @@ function orders_admin_notify_sales_client(PDO $pdo, int $orderId, string $notify
         return;
     }
     try {
-        sales_push_notify_status_change($pdo, $orderId, $notifyType, $message);
+        sales_push_notify_status_change($pdo, $orderId, $notifyType, $message, $chequeId);
     } catch (Throwable $e) {
         error_log('[orders_admin_notify_sales_client] ' . $e->getMessage());
     }
