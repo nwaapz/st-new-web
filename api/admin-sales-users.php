@@ -76,6 +76,7 @@ try {
         'id' => (int) ($body['id'] ?? 0),
         'username' => (string) ($body['username'] ?? ''),
         'display_name' => (string) ($body['display_name'] ?? ''),
+        'sms_phone' => (string) ($body['sms_phone'] ?? ''),
         'password' => (string) ($body['password'] ?? ''),
         'branch_id' => $branchId,
         'published' => !isset($body['published']) || (bool) $body['published'],

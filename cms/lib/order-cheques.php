@@ -8,6 +8,19 @@ declare(strict_types=1);
 require_once __DIR__ . '/jalali.php';
 require_once __DIR__ . '/schema-guard.php';
 
+function order_cheques_sync_analytics(PDO $pdo, ?int $chequeId = null): void
+{
+    if (!function_exists('analytics_orders_sync_cheque_facts')) {
+        require_once __DIR__ . '/analytics-orders.php';
+    }
+    analytics_orders_ensure_schema($pdo);
+    if ($chequeId !== null && $chequeId > 0) {
+        analytics_orders_upsert_cheque_fact($pdo, $chequeId);
+        return;
+    }
+    analytics_orders_sync_cheque_facts($pdo);
+}
+
 function order_cheques_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
@@ -333,6 +346,8 @@ function order_cheques_add(PDO $pdo, array $order, array $input): array
         $serial !== '' ? $serial : null,
         $amount !== '' ? $amount : null,
     ]);
+    $chequeId = (int) $pdo->lastInsertId();
+    order_cheques_sync_analytics($pdo, $chequeId > 0 ? $chequeId : null);
 
     $publicCode = (string) ($order['public_code'] ?? '');
     $sms = order_cheques_sms_body('cheque_received', $publicCode, $dueOn, $serial);
@@ -388,6 +403,7 @@ function order_cheques_update(PDO $pdo, array $order, array $input): array
     $params[] = $orderId;
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
+    order_cheques_sync_analytics($pdo, $chequeId);
 
     return ['message' => 'چک به‌روز شد'];
 }
@@ -406,6 +422,7 @@ function order_cheques_set_result(PDO $pdo, array $order, int $chequeId, string 
 
     $stmt = $pdo->prepare('UPDATE order_cheques SET bank_result = ? WHERE id = ? AND order_id = ?');
     $stmt->execute([$result, $chequeId, $orderId]);
+    order_cheques_sync_analytics($pdo, $chequeId);
 
     $notifyType = $result === 'funded' ? 'cheque_funded' : 'cheque_bounced';
     $serial = trim((string) ($row['serial'] ?? ''));
@@ -433,6 +450,8 @@ function order_cheques_delete(PDO $pdo, array $order, int $chequeId): array
     }
     $stmt = $pdo->prepare('DELETE FROM order_cheques WHERE id = ? AND order_id = ?');
     $stmt->execute([$chequeId, $orderId]);
+    $pdo->prepare('DELETE FROM analytics_order_cheque_facts WHERE cheque_id = ?')
+        ->execute([$chequeId]);
 
     return ['message' => 'چک حذف شد'];
 }

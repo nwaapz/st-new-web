@@ -37,6 +37,17 @@ function sales_users_ensure_schema(PDO $pdo): void
         /* ignore */
     }
 
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM sales_users LIKE 'sms_phone'")->fetchAll();
+        if (count($col) === 0) {
+            $pdo->exec(
+                "ALTER TABLE sales_users ADD COLUMN sms_phone VARCHAR(20) NOT NULL DEFAULT '' AFTER display_name"
+            );
+        }
+    } catch (Throwable $e) {
+        /* ignore */
+    }
+
     $ready = true;
 }
 
@@ -59,6 +70,7 @@ function sales_users_public_row(array $row): array
         'id' => (int) $row['id'],
         'username' => (string) $row['username'],
         'display_name' => (string) ($row['display_name'] ?? ''),
+        'sms_phone' => (string) ($row['sms_phone'] ?? ''),
         'branch_id' => isset($row['branch_id']) && $row['branch_id'] !== null
             ? (int) $row['branch_id']
             : null,
@@ -75,6 +87,7 @@ function sales_users_admin_row(array $row): array
         'id' => (int) $row['id'],
         'username' => (string) $row['username'],
         'display_name' => (string) ($row['display_name'] ?? ''),
+        'sms_phone' => (string) ($row['sms_phone'] ?? ''),
         'password' => (string) ($row['password_plain'] ?? ''),
         'branch_id' => isset($row['branch_id']) && $row['branch_id'] !== null
             ? (int) $row['branch_id']
@@ -140,17 +153,19 @@ function sales_users_branch_options(PDO $pdo): array
 }
 
 /**
- * @param array{id?:int,username:string,display_name:string,password?:string,branch_id?:?int,published?:bool} $data
+ * @param array{id?:int,username:string,display_name:string,sms_phone?:string,password?:string,branch_id?:?int,published?:bool} $data
  */
 function sales_users_save(PDO $pdo, array $data): int
 {
     sales_users_ensure_schema($pdo);
     require_once __DIR__ . '/branches.php';
+    require_once __DIR__ . '/melipayamak.php';
     branches_ensure_schema($pdo);
 
     $id = isset($data['id']) ? (int) $data['id'] : 0;
     $username = sales_users_normalize_username((string) ($data['username'] ?? ''));
     $displayName = trim((string) ($data['display_name'] ?? ''));
+    $smsPhone = cms_sms_normalize_phone((string) ($data['sms_phone'] ?? ''));
     $password = (string) ($data['password'] ?? '');
     $branchId = isset($data['branch_id']) && $data['branch_id'] !== null
         ? (int) $data['branch_id']
@@ -162,6 +177,9 @@ function sales_users_save(PDO $pdo, array $data): int
     }
     if ($displayName === '') {
         throw new RuntimeException('نام نمایشی الزامی است');
+    }
+    if ($smsPhone !== '' && !preg_match('/^09\d{9}$/', $smsPhone)) {
+        throw new RuntimeException('شماره پیامک باید مانند 09121234567 باشد');
     }
 
     $dup = $pdo->prepare('SELECT id FROM sales_users WHERE username = ? AND id <> ? LIMIT 1');
@@ -188,12 +206,13 @@ function sales_users_save(PDO $pdo, array $data): int
             $hash = password_hash($password, PASSWORD_DEFAULT);
             $stmt = $pdo->prepare(
                 'UPDATE sales_users
-                 SET username = ?, display_name = ?, password_hash = ?, password_plain = ?, branch_id = ?, published = ?
+                 SET username = ?, display_name = ?, sms_phone = ?, password_hash = ?, password_plain = ?, branch_id = ?, published = ?
                  WHERE id = ?'
             );
             $stmt->execute([
                 $username,
                 $displayName,
+                $smsPhone,
                 $hash,
                 $password,
                 $branchId > 0 ? $branchId : null,
@@ -203,12 +222,13 @@ function sales_users_save(PDO $pdo, array $data): int
         } else {
             $stmt = $pdo->prepare(
                 'UPDATE sales_users
-                 SET username = ?, display_name = ?, branch_id = ?, published = ?
+                 SET username = ?, display_name = ?, sms_phone = ?, branch_id = ?, published = ?
                  WHERE id = ?'
             );
             $stmt->execute([
                 $username,
                 $displayName,
+                $smsPhone,
                 $branchId > 0 ? $branchId : null,
                 $published ? 1 : 0,
                 $id,
@@ -222,14 +242,15 @@ function sales_users_save(PDO $pdo, array $data): int
     }
     $hash = password_hash($password, PASSWORD_DEFAULT);
     $stmt = $pdo->prepare(
-        'INSERT INTO sales_users (username, password_hash, password_plain, display_name, branch_id, published)
-         VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO sales_users (username, password_hash, password_plain, display_name, sms_phone, branch_id, published)
+         VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
         $username,
         $hash,
         $password,
         $displayName,
+        $smsPhone,
         $branchId > 0 ? $branchId : null,
         $published ? 1 : 0,
     ]);

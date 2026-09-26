@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/lib/melipayamak.php';
+require_once __DIR__ . '/lib/gsm-sms.php';
 require_once __DIR__ . '/lib/admin-audit.php';
 
 cms_require_login();
@@ -26,6 +27,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_sms_settings']))
         }
         cms_flash('تنظیمات پیامک ذخیره شد');
         cms_audit_settings($pdo, 'پیامک');
+    } catch (Throwable $e) {
+        cms_flash($e->getMessage(), 'error');
+    }
+    cms_redirect('sms-settings.php');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_gsm_gateway'])) {
+    try {
+        gsm_sms_save_gateway_phones((string) ($_POST['gsm_sms_gateway_phones'] ?? ''));
+        cms_flash('شماره‌های گیت‌وی پیامک GSM ذخیره شد');
+        cms_audit_settings($pdo, 'گیت‌وی پیامک GSM');
     } catch (Throwable $e) {
         cms_flash($e->getMessage(), 'error');
     }
@@ -75,6 +87,7 @@ $formFrom = $storedFrom !== '' ? $storedFrom : CMS_SMS_DEFAULT_FROM;
 
 $tomanPerScore = (int) cms_setting_get('seller_credit_toman_per_score', '0');
 $smsCostToman = (int) cms_setting_get('seller_credit_sms_cost_toman', '0');
+$gsmGatewayPhones = implode("\n", gsm_sms_gateway_phones());
 
 cms_layout_start('پیامک', cms_current_username(), 'advanced');
 ?>
@@ -129,6 +142,22 @@ cms_layout_start('پیامک', cms_current_username(), 'advanced');
   <div class="cms-btn-row" style="margin-top:0">
     <button class="cms-btn" type="submit">ذخیره تنظیمات</button>
     <span class="cms-muted">وضعیت: <?= $cfg['enabled'] ? 'فعال' : 'غیرفعال' ?></span>
+  </div>
+</form>
+
+<form class="cms-panel" method="post" style="margin-bottom:1.25rem" autocomplete="off">
+  <h2 style="margin-top:0">گیت‌وی پیامک GSM اپ‌ها</h2>
+  <p class="cms-muted" style="margin:.25rem 0 1rem">
+    وقتی اینترنت کشور قطع است، اپ فروش و اپ ادمین سفارش و پاسخ را مستقیم با سیم‌کارت رد و بدل می‌کنند.
+    شماره‌های زیر باید همان سیم‌کارت‌های گوشی ادمین باشند. اپ فروش در راه‌اندازی اولیه این فهرست را ذخیره می‌کند.
+  </p>
+  <input type="hidden" name="save_gsm_gateway" value="1">
+  <label class="cms-field">
+    <span class="cms-label">شماره موبایل گیت‌وی ادمین (هر خط یک شماره)</span>
+    <textarea class="cms-textarea" name="gsm_sms_gateway_phones" rows="4" dir="ltr" placeholder="09121234567"><?= cms_h($gsmGatewayPhones) ?></textarea>
+  </label>
+  <div class="cms-btn-row" style="margin-top:0">
+    <button class="cms-btn" type="submit">ذخیره شماره‌های GSM</button>
   </div>
 </form>
 

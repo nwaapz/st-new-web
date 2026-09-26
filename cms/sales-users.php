@@ -53,6 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'id' => $id,
             'username' => (string) ($_POST['username'] ?? ''),
             'display_name' => (string) ($_POST['display_name'] ?? ''),
+            'sms_phone' => (string) ($_POST['sms_phone'] ?? ''),
             'password' => (string) ($_POST['password'] ?? ''),
             'branch_id' => $branchId > 0 ? $branchId : null,
             'published' => isset($_POST['published']),
@@ -106,6 +107,13 @@ cms_layout_start('کاربران اپ فروش', cms_current_username(), 'custom
              value="<?= cms_h((string) ($edit['display_name'] ?? '')) ?>">
     </label>
     <label class="cms-field">
+      <span class="cms-label">شماره پیامک GSM سیم‌کارت اپ فروش</span>
+      <input class="cms-input" name="sms_phone" dir="ltr"
+             value="<?= cms_h((string) ($edit['sms_phone'] ?? '')) ?>"
+             placeholder="09121234567" autocomplete="off">
+      <span class="cms-muted" style="font-size:.82rem">وقتی اینترنت قطع است، سفارش‌ها به این شماره و از این شماره پیامک می‌شوند.</span>
+    </label>
+    <label class="cms-field">
       <span class="cms-label"><?= $edit ? 'رمز عبور (خالی = بدون تغییر)' : 'رمز عبور' ?></span>
       <input class="cms-input" type="text" name="password" dir="ltr"
              value="<?= cms_h((string) ($edit['password'] ?? '')) ?>"
@@ -146,6 +154,7 @@ cms_layout_start('کاربران اپ فروش', cms_current_username(), 'custom
         <tr>
           <th>نام نمایشی</th>
           <th>نام کاربری</th>
+          <th>پیامک GSM</th>
           <th>رمز عبور</th>
           <th>نماینده</th>
           <th>وضعیت</th>
@@ -157,6 +166,7 @@ cms_layout_start('کاربران اپ فروش', cms_current_username(), 'custom
           <tr>
             <td><?= cms_h((string) $user['display_name']) ?></td>
             <td dir="ltr"><?= cms_h((string) $user['username']) ?></td>
+            <td dir="ltr"><?= cms_h((string) ($user['sms_phone'] ?: '—')) ?></td>
             <td dir="ltr"><?= cms_h((string) ($user['password'] ?: '—')) ?></td>
             <td><?= cms_h((string) ($user['branch_name'] ?? '—')) ?></td>
             <td><?= ($user['published'] ?? true) ? 'فعال' : 'غیرفعال' ?></td>

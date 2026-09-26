@@ -1329,6 +1329,10 @@ function orders_serialize(array $order, array $items, array $events): array
     return [
         'id' => (int) $order['id'],
         'public_code' => (string) $order['public_code'],
+        'sms_ref' => isset($order['sms_ref']) && trim((string) $order['sms_ref']) !== ''
+            ? strtoupper(trim((string) $order['sms_ref']))
+            : null,
+        'sms_channel' => !empty($order['sms_channel']),
         'user_id' => (int) $order['user_id'],
         'phone' => (string) $order['phone'],
         'customer_name' => isset($order['customer_name']) && $order['customer_name'] !== null
@@ -2370,17 +2374,31 @@ function orders_create_from_normalized(
         $salesUserName = sales_users_display_name_for_id($pdo, $salesUserId);
     }
 
+    $smsRef = strtoupper(preg_replace('/[^A-Z0-9]/', '', (string) ($createOptions['sms_ref'] ?? '')) ?? '');
+    if (strlen($smsRef) < 2 || strlen($smsRef) > 16) {
+        $smsRef = '';
+    }
+    $smsChannel = !empty($createOptions['sms_channel']) ? 1 : 0;
+    if (is_file(__DIR__ . '/gsm-sms.php')) {
+        require_once __DIR__ . '/gsm-sms.php';
+        if (function_exists('gsm_sms_ensure_schema')) {
+            gsm_sms_ensure_schema($pdo);
+        }
+    }
+
     $pdo->beginTransaction();
     try {
         $publicCode = orders_generate_public_code($pdo);
         $ins = $pdo->prepare(
             'INSERT INTO orders (
-               public_code, user_id, sales_user_id, sales_user_name, phone, customer_name, status,
+               public_code, sms_ref, sms_channel, user_id, sales_user_id, sales_user_name, phone, customer_name, status,
                branch_id, branch_name, branch_city, branch_province_name, branch_phone
-             ) VALUES (?, ?, ?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
         );
         $ins->execute([
             $publicCode,
+            $smsRef !== '' ? $smsRef : null,
+            $smsChannel,
             $userId,
             $salesUserId,
             $salesUserName,

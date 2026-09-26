@@ -112,17 +112,66 @@ function analytics_orders_ensure_schema(PDO $pdo): void
           due_within_2_days TINYINT(1) NOT NULL DEFAULT 0,
           is_pending TINYINT(1) NOT NULL DEFAULT 1,
           order_created_at DATETIME NOT NULL,
+          customer_name VARCHAR(191) NULL,
+          phone VARCHAR(20) NULL,
+          sales_user_id INT UNSIGNED NULL,
+          sales_user_name VARCHAR(128) NULL,
           refreshed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (cheque_id),
           KEY idx_aocf_order (order_id),
           KEY idx_aocf_due (due_on),
-          KEY idx_aocf_result (bank_result)
+          KEY idx_aocf_result (bank_result),
+          KEY idx_aocf_phone (phone),
+          KEY idx_aocf_pending_due (is_pending, days_to_due)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
+
+    analytics_orders_ensure_cheque_fact_columns($pdo);
 
     analytics_orders_create_views($pdo);
 
     $ready = true;
+}
+
+function analytics_orders_ensure_cheque_fact_columns(PDO $pdo): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+
+    $cols = [];
+    $stmt = $pdo->query('SHOW COLUMNS FROM analytics_order_cheque_facts');
+    foreach ($stmt ? ($stmt->fetchAll() ?: []) : [] as $col) {
+        $cols[(string) ($col['Field'] ?? '')] = true;
+    }
+
+    if (!isset($cols['customer_name'])) {
+        $pdo->exec(
+            'ALTER TABLE analytics_order_cheque_facts
+             ADD COLUMN customer_name VARCHAR(191) NULL AFTER order_created_at'
+        );
+    }
+    if (!isset($cols['phone'])) {
+        $pdo->exec(
+            'ALTER TABLE analytics_order_cheque_facts
+             ADD COLUMN phone VARCHAR(20) NULL AFTER customer_name'
+        );
+    }
+    if (!isset($cols['sales_user_id'])) {
+        $pdo->exec(
+            'ALTER TABLE analytics_order_cheque_facts
+             ADD COLUMN sales_user_id INT UNSIGNED NULL AFTER phone'
+        );
+    }
+    if (!isset($cols['sales_user_name'])) {
+        $pdo->exec(
+            'ALTER TABLE analytics_order_cheque_facts
+             ADD COLUMN sales_user_name VARCHAR(128) NULL AFTER sales_user_id'
+        );
+    }
+
+    $checked = true;
 }
 
 function analytics_orders_create_views(PDO $pdo): void
@@ -404,16 +453,94 @@ function analytics_orders_hours_between(?string $from, ?string $to): ?int
     return (int) round(($end - $start) / 3600);
 }
 
-function analytics_orders_refresh_cheque_facts(PDO $pdo): void
+/**
+ * @return list<array<string, mixed>>
+ */
+function analytics_orders_fetch_cheque_fact_rows(PDO $pdo, int $chequeId = 0): array
 {
+    if ($chequeId > 0) {
+        $stmt = $pdo->prepare(
+            'SELECT c.*, o.public_code, o.status, o.created_at AS order_created_at,
+                    o.sales_user_id, o.sales_user_name, o.branch_id, o.phone, o.customer_name
+             FROM order_cheques c
+             INNER JOIN orders o ON o.id = c.order_id
+             WHERE c.id = ?
+             LIMIT 1'
+        );
+        $stmt->execute([$chequeId]);
+        $row = $stmt->fetch();
+
+        return $row ? [$row] : [];
+    }
+
     $stmt = $pdo->query(
         'SELECT c.*, o.public_code, o.status, o.created_at AS order_created_at,
-                o.sales_user_id, o.branch_id
+                o.sales_user_id, o.sales_user_name, o.branch_id, o.phone, o.customer_name
          FROM order_cheques c
          INNER JOIN orders o ON o.id = c.order_id
          ORDER BY c.id ASC'
     );
-    $rows = $stmt ? ($stmt->fetchAll() ?: []) : [];
+
+    return $stmt ? ($stmt->fetchAll() ?: []) : [];
+}
+
+/**
+ * @param array<string, mixed> $row
+ * @return list<int|string|null>
+ */
+function analytics_orders_cheque_fact_values(array $row): array
+{
+    $order = [
+        'sales_user_id' => $row['sales_user_id'] ?? null,
+        'branch_id' => $row['branch_id'] ?? null,
+    ];
+    $orderId = (int) ($row['order_id'] ?? 0);
+
+    $amountToman = null;
+    try {
+        $amountToman = invoices_parse_toman_amount(
+            isset($row['amount_text']) ? (string) $row['amount_text'] : null
+        );
+    } catch (Throwable $e) {
+        $amountToman = null;
+    }
+
+    $dueOn = (string) ($row['due_on'] ?? date('Y-m-d'));
+    $daysToDue = (int) ((strtotime($dueOn . ' 00:00:00') - strtotime(date('Y-m-d') . ' 00:00:00')) / 86400);
+    $bankResult = isset($row['bank_result']) ? trim((string) $row['bank_result']) : '';
+    $isPending = $bankResult === '' ? 1 : 0;
+
+    $customerName = isset($row['customer_name']) ? trim((string) $row['customer_name']) : '';
+    $phone = isset($row['phone']) ? trim((string) $row['phone']) : '';
+    $salesUserName = isset($row['sales_user_name']) ? trim((string) $row['sales_user_name']) : '';
+
+    return [
+        (int) ($row['id'] ?? 0),
+        $orderId,
+        (string) ($row['public_code'] ?? ''),
+        (string) ($row['status'] ?? 'submitted'),
+        analytics_orders_channel($order),
+        (string) ($row['received_on'] ?? date('Y-m-d')),
+        $dueOn,
+        isset($row['serial']) ? (string) $row['serial'] : null,
+        isset($row['amount_text']) ? (string) $row['amount_text'] : null,
+        $amountToman,
+        $bankResult !== '' ? $bankResult : null,
+        $daysToDue,
+        ($isPending === 1 && $daysToDue <= 2) ? 1 : 0,
+        $isPending,
+        (string) ($row['order_created_at'] ?? date('Y-m-d H:i:s')),
+        $customerName !== '' ? $customerName : null,
+        $phone !== '' ? $phone : null,
+        isset($row['sales_user_id']) && $row['sales_user_id'] !== null
+            ? (int) $row['sales_user_id']
+            : null,
+        $salesUserName !== '' ? $salesUserName : null,
+    ];
+}
+
+function analytics_orders_insert_cheque_fact_rows(PDO $pdo, array $rows): void
+{
     if ($rows === []) {
         return;
     }
@@ -422,49 +549,45 @@ function analytics_orders_refresh_cheque_facts(PDO $pdo): void
         'INSERT INTO analytics_order_cheque_facts
          (cheque_id, order_id, order_public_code, order_status, order_channel, received_on, due_on,
           serial, amount_text, amount_toman, bank_result, days_to_due, due_within_2_days,
-          is_pending, order_created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+          is_pending, order_created_at, customer_name, phone, sales_user_id, sales_user_name)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     );
 
     foreach ($rows as $row) {
-        $order = [
-            'sales_user_id' => $row['sales_user_id'] ?? null,
-            'branch_id' => $row['branch_id'] ?? null,
-        ];
-        $orderId = (int) ($row['order_id'] ?? 0);
-
-        $amountToman = null;
-        try {
-            $amountToman = invoices_parse_toman_amount(
-                isset($row['amount_text']) ? (string) $row['amount_text'] : null
-            );
-        } catch (Throwable $e) {
-            $amountToman = null;
-        }
-
-        $dueOn = (string) ($row['due_on'] ?? date('Y-m-d'));
-        $daysToDue = (int) ((strtotime($dueOn . ' 00:00:00') - strtotime(date('Y-m-d') . ' 00:00:00')) / 86400);
-        $bankResult = isset($row['bank_result']) ? (string) $row['bank_result'] : null;
-        $isPending = ($bankResult === null || $bankResult === '') ? 1 : 0;
-
-        $insert->execute([
-            (int) ($row['id'] ?? 0),
-            $orderId,
-            (string) ($row['public_code'] ?? ''),
-            (string) ($row['status'] ?? 'submitted'),
-            analytics_orders_channel($order),
-            (string) ($row['received_on'] ?? date('Y-m-d')),
-            $dueOn,
-            isset($row['serial']) ? (string) $row['serial'] : null,
-            isset($row['amount_text']) ? (string) $row['amount_text'] : null,
-            $amountToman,
-            $bankResult,
-            $daysToDue,
-            ($isPending === 1 && $daysToDue <= 2) ? 1 : 0,
-            $isPending,
-            (string) ($row['order_created_at'] ?? date('Y-m-d H:i:s')),
-        ]);
+        $insert->execute(analytics_orders_cheque_fact_values($row));
     }
+}
+
+function analytics_orders_sync_cheque_facts(PDO $pdo): void
+{
+    analytics_orders_ensure_schema($pdo);
+    $pdo->exec('DELETE FROM analytics_order_cheque_facts');
+    analytics_orders_insert_cheque_fact_rows(
+        $pdo,
+        analytics_orders_fetch_cheque_fact_rows($pdo)
+    );
+}
+
+function analytics_orders_upsert_cheque_fact(PDO $pdo, int $chequeId): void
+{
+    analytics_orders_ensure_schema($pdo);
+    if ($chequeId <= 0) {
+        return;
+    }
+
+    $pdo->prepare('DELETE FROM analytics_order_cheque_facts WHERE cheque_id = ?')
+        ->execute([$chequeId]);
+
+    $rows = analytics_orders_fetch_cheque_fact_rows($pdo, $chequeId);
+    analytics_orders_insert_cheque_fact_rows($pdo, $rows);
+}
+
+function analytics_orders_refresh_cheque_facts(PDO $pdo): void
+{
+    analytics_orders_insert_cheque_fact_rows(
+        $pdo,
+        analytics_orders_fetch_cheque_fact_rows($pdo)
+    );
 }
 
 /**

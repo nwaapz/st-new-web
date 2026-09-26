@@ -101,7 +101,7 @@ function sales_auth_current_user(PDO $pdo): ?array
 
     sales_users_ensure_schema($pdo);
     $stmt = $pdo->prepare(
-        'SELECT id, username, display_name, branch_id, published
+        'SELECT id, username, display_name, sms_phone, branch_id, published
          FROM sales_users
          WHERE id = ? AND published = 1
          LIMIT 1'
@@ -119,6 +119,7 @@ function sales_auth_current_user(PDO $pdo): ?array
         'id' => (int) $row['id'],
         'username' => (string) $row['username'],
         'display_name' => (string) ($row['display_name'] ?? ''),
+        'sms_phone' => (string) ($row['sms_phone'] ?? ''),
         'branch_id' => $row['branch_id'] !== null ? (int) $row['branch_id'] : null,
         'published' => (int) $row['published'],
     ];
@@ -136,7 +137,7 @@ function sales_auth_attempt_login(PDO $pdo, string $username, string $password):
     }
 
     $stmt = $pdo->prepare(
-        'SELECT id, username, password_hash, display_name, branch_id
+        'SELECT id, username, password_hash, display_name, sms_phone, branch_id
          FROM sales_users
          WHERE username = ? AND published = 1
          LIMIT 1'
