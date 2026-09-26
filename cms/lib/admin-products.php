@@ -8,6 +8,7 @@ require_once __DIR__ . '/product-categories.php';
 require_once __DIR__ . '/product-car-models.php';
 require_once __DIR__ . '/product-series-categories.php';
 require_once __DIR__ . '/product-stock.php';
+require_once __DIR__ . '/product-price-sync.php';
 
 const ADMIN_PRODUCT_GALLERY_MAX = 12;
 const ADMIN_PRODUCTS_PAGE_SIZE = 20;
@@ -507,6 +508,10 @@ function admin_products_save(PDO $pdo, array $data): int
         admin_products_replace_gallery($pdo, $productId, $gallery);
     } catch (PDOException $e) {
         throw new RuntimeException(admin_products_public_db_error($e, 'ذخیره گالری محصول'));
+    }
+
+    if ($priceText !== '') {
+        product_price_sync_mark_product($pdo, $productId);
     }
 
     return $productId;

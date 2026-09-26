@@ -735,6 +735,8 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
                 $stockQty !== null ? $stockQty : $existingStock,
                 $productId,
             ]);
+            require_once __DIR__ . '/product-price-sync.php';
+            product_price_sync_mark_product($pdo, $productId);
             $updatedProduct = true;
         }
     }
@@ -764,6 +766,8 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
                 $newSeriesDescription,
                 $seriesId,
             ]);
+            require_once __DIR__ . '/product-price-sync.php';
+            product_price_sync_mark_series($pdo, $seriesId);
             $updatedSeries = true;
         }
     }

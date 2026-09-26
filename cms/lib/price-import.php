@@ -1459,6 +1459,8 @@ function price_import_apply_existing_fields(PDO $pdo, array $row, ?array $existi
         'UPDATE products SET price_text = ?, pack_size = ?, description = ?, published = 1 WHERE id = ?'
     );
     $stmt->execute([$priceText, $packSize, $description, $productId]);
+    require_once __DIR__ . '/product-price-sync.php';
+    product_price_sync_mark_product($pdo, $productId);
 
     return true;
 }
@@ -1967,6 +1969,8 @@ function price_import_apply_prices_only(PDO $pdo, array $parsedRows): array
                     if ($existingPrice !== $priceText || $existingPackSize !== $newPackSize) {
                         $stmt = $pdo->prepare('UPDATE products SET price_text = ?, pack_size = ? WHERE id = ?');
                         $stmt->execute([$priceText, $newPackSize, (int) $product['id']]);
+                        require_once __DIR__ . '/product-price-sync.php';
+                        product_price_sync_mark_product($pdo, (int) $product['id']);
                         $updatedProduct = true;
                     }
                 }
@@ -1977,6 +1981,8 @@ function price_import_apply_prices_only(PDO $pdo, array $parsedRows): array
                     if ($existingPrice !== $priceText || $existingPackSize !== $newPackSize) {
                         $stmt = $pdo->prepare('UPDATE product_series SET price_text = ?, pack_size = ? WHERE id = ?');
                         $stmt->execute([$priceText, $newPackSize, (int) $series['id']]);
+                        require_once __DIR__ . '/product-price-sync.php';
+                        product_price_sync_mark_series($pdo, (int) $series['id']);
                         $updatedSeries = true;
                     }
                 }
