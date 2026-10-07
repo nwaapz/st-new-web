@@ -282,3 +282,24 @@ function sales_push_notify_order_message(PDO $pdo, int $orderId, string $senderN
         );
     }
 }
+
+function sales_push_notify_direct_message(PDO $pdo, int $salesUserId, string $senderName, string $body): void
+{
+    if ($salesUserId <= 0) {
+        return;
+    }
+    $preview = mb_strlen($body) > 120 ? mb_substr($body, 0, 117) . '…' : $body;
+    $data = [
+        'type' => 'direct_chat',
+        'sales_user_id' => (string) $salesUserId,
+    ];
+    $tokens = sales_push_tokens_for_user($pdo, $salesUserId);
+    foreach ($tokens as $token) {
+        admin_push_send_to_token(
+            $token,
+            'پیام جدید',
+            $senderName . ': ' . $preview,
+            $data
+        );
+    }
+}

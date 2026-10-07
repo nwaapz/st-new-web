@@ -8,3 +8,7 @@ desktop.ini
 *.log
 .env
 .env.*
+
+# Firebase admin SDK — never commit (keep the file only on the server)
+**/firebase-service-account.json
+**/*firebase-adminsdk*.json
