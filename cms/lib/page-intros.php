@@ -24,7 +24,7 @@ function cms_page_intro_defaults(): array
         ],
         'shop' => [
             'title' => 'فروشگاه',
-            'explanation' => 'فیلتر بر اساس کارخانه، خودرو و دسته‌بندی',
+            'explanation' => 'فیلتر بر اساس سازنده خودرو، مدل خودرو و دسته‌بندی',
         ],
         'tech_header' => [
             'title' => 'تکنولوژی',
