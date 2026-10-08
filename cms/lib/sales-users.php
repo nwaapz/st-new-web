@@ -48,7 +48,52 @@ function sales_users_ensure_schema(PDO $pdo): void
         /* ignore */
     }
 
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM sales_users LIKE 'last_seen_at'")->fetchAll();
+        if (count($col) === 0) {
+            $pdo->exec(
+                'ALTER TABLE sales_users ADD COLUMN last_seen_at TIMESTAMP NULL DEFAULT NULL AFTER published'
+            );
+        }
+    } catch (Throwable $e) {
+        /* ignore */
+    }
+
     $ready = true;
+}
+
+function sales_users_presence_online_seconds(): int
+{
+    return 90;
+}
+
+function sales_users_touch_last_seen(PDO $pdo, int $salesUserId): void
+{
+    sales_users_ensure_schema($pdo);
+    if ($salesUserId <= 0) {
+        return;
+    }
+    $pdo->prepare('UPDATE sales_users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')
+        ->execute([$salesUserId]);
+}
+
+/**
+ * @return array{is_online: bool, last_seen_at: ?string}
+ */
+function sales_users_presence_status(?string $lastSeenAt): array
+{
+    $lastSeenAt = $lastSeenAt !== null ? trim($lastSeenAt) : '';
+    if ($lastSeenAt === '') {
+        return ['is_online' => false, 'last_seen_at' => null];
+    }
+    $seen = strtotime($lastSeenAt);
+    if ($seen === false) {
+        return ['is_online' => false, 'last_seen_at' => $lastSeenAt];
+    }
+    return [
+        'is_online' => (time() - $seen) <= sales_users_presence_online_seconds(),
+        'last_seen_at' => $lastSeenAt,
+    ];
 }
 
 function sales_users_normalize_username(string $raw): string

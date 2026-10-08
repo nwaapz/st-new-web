@@ -171,7 +171,7 @@ function sales_direct_messages_threads_for_admin(PDO $pdo): array
 {
     sales_direct_messages_ensure_schema($pdo);
     $rows = $pdo->query(
-        "SELECT u.id, u.username, u.display_name, u.published,
+        "SELECT u.id, u.username, u.display_name, u.published, u.last_seen_at,
                 last_msg.body AS last_body,
                 last_msg.image AS last_image,
                 last_msg.created_at AS last_at,
@@ -208,6 +208,11 @@ function sales_direct_messages_threads_for_admin(PDO $pdo): array
         if ($display === '') {
             $display = (string) ($row['username'] ?? '');
         }
+        $presence = sales_users_presence_status(
+            isset($row['last_seen_at']) && $row['last_seen_at'] !== null
+                ? (string) $row['last_seen_at']
+                : null
+        );
         $threads[] = [
             'sales_user_id' => (int) $row['id'],
             'display_name' => $display,
@@ -221,6 +226,8 @@ function sales_direct_messages_threads_for_admin(PDO $pdo): array
                 ? (string) $row['last_actor']
                 : null,
             'unread_count' => (int) ($row['unread_count'] ?? 0),
+            'is_online' => $presence['is_online'],
+            'last_seen_at' => $presence['last_seen_at'],
         ];
     }
     return $threads;
