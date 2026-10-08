@@ -412,6 +412,35 @@ function sales_direct_messages_timeline_for_admin(PDO $pdo, int $salesUserId): a
     return $items;
 }
 
+/**
+ * Same merged thread the sales user should see: direct chat plus their order chats.
+ *
+ * @return list<array<string, mixed>>
+ */
+function sales_direct_messages_timeline_for_sales(PDO $pdo, int $salesUserId): array
+{
+    return sales_direct_messages_timeline_for_admin($pdo, $salesUserId);
+}
+
+function sales_direct_messages_mark_order_chats_read_for_sales(PDO $pdo, int $salesUserId): void
+{
+    if ($salesUserId <= 0) {
+        return;
+    }
+    if (!function_exists('order_messages_ensure_schema')) {
+        require_once __DIR__ . '/order-messages.php';
+    }
+    order_messages_ensure_schema($pdo);
+    $pdo->prepare(
+        "UPDATE order_messages m
+         INNER JOIN orders o ON o.id = m.order_id
+         SET m.sales_read_at = CURRENT_TIMESTAMP
+         WHERE o.sales_user_id = ?
+           AND m.actor = 'admin'
+           AND m.sales_read_at IS NULL"
+    )->execute([$salesUserId]);
+}
+
 function sales_direct_messages_mark_order_chats_read_for_admin(PDO $pdo, int $salesUserId): void
 {
     if ($salesUserId <= 0) {
