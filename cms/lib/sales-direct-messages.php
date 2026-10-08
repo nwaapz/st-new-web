@@ -406,11 +406,7 @@ function sales_direct_messages_timeline_for_admin(PDO $pdo, int $salesUserId): a
     }
 
     usort($items, function (array $a, array $b): int {
-        $cmp = strcmp((string) $a['created_at'], (string) $b['created_at']);
-        if ($cmp !== 0) {
-            return $cmp;
-        }
-        return ((int) $a['id']) <=> ((int) $b['id']);
+        return strcmp((string) $a['created_at'], (string) $b['created_at']);
     });
 
     return $items;
