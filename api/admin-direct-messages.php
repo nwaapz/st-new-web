@@ -41,6 +41,16 @@ try {
         api_error('شناسه کاربر فروش نامعتبر است', 400);
     }
 
+    if ($method === 'GET' && isset($_GET['timeline']) && (string) $_GET['timeline'] === '1') {
+        sales_direct_messages_mark_read_for_admin($pdo, $salesUserId);
+        sales_direct_messages_mark_order_chats_read_for_admin($pdo, $salesUserId);
+        api_json([
+            'ok' => true,
+            'sales_user_id' => $salesUserId,
+            'messages' => sales_direct_messages_timeline_for_admin($pdo, $salesUserId),
+        ]);
+    }
+
     if ($method === 'GET') {
         $sinceId = isset($_GET['since_id']) ? (int) $_GET['since_id'] : 0;
         $wait = isset($_GET['wait']) && (string) $_GET['wait'] === '1';

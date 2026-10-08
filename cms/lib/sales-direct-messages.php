@@ -346,6 +346,95 @@ function sales_direct_messages_insert(
     return $message;
 }
 
+/**
+ * Direct messages plus order chats for orders owned by this sales user.
+ *
+ * @return list<array<string, mixed>>
+ */
+function sales_direct_messages_timeline_for_admin(PDO $pdo, int $salesUserId): array
+{
+    sales_direct_messages_ensure_schema($pdo);
+    if ($salesUserId <= 0) {
+        return [];
+    }
+    if (!function_exists('order_messages_serialize')) {
+        require_once __DIR__ . '/order-messages.php';
+    }
+    order_messages_ensure_schema($pdo);
+
+    $items = [];
+    foreach (sales_direct_messages_fetch($pdo, $salesUserId, 0) as $row) {
+        $items[] = [
+            'kind' => 'direct',
+            'id' => (int) ($row['id'] ?? 0),
+            'sales_user_id' => (int) ($row['sales_user_id'] ?? 0),
+            'actor' => (string) ($row['actor'] ?? ''),
+            'sender_name' => (string) ($row['sender_name'] ?? ''),
+            'body' => (string) ($row['body'] ?? ''),
+            'image' => $row['image'] ?? null,
+            'via_sms' => !empty($row['via_sms']),
+            'created_at' => (string) ($row['created_at'] ?? ''),
+            'order_id' => null,
+            'public_code' => null,
+        ];
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT m.*, o.public_code
+         FROM order_messages m
+         INNER JOIN orders o ON o.id = m.order_id
+         WHERE o.sales_user_id = ?
+         ORDER BY m.created_at ASC, m.id ASC'
+    );
+    $stmt->execute([$salesUserId]);
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $serialized = order_messages_serialize($row);
+        $code = trim((string) ($row['public_code'] ?? ''));
+        $items[] = [
+            'kind' => 'order',
+            'id' => (int) ($serialized['id'] ?? 0),
+            'sales_user_id' => $salesUserId,
+            'actor' => (string) ($serialized['actor'] ?? ''),
+            'sender_name' => (string) ($serialized['sender_name'] ?? ''),
+            'body' => (string) ($serialized['body'] ?? ''),
+            'image' => null,
+            'via_sms' => false,
+            'created_at' => (string) ($serialized['created_at'] ?? ''),
+            'order_id' => (int) ($serialized['order_id'] ?? 0),
+            'public_code' => $code !== '' ? $code : null,
+        ];
+    }
+
+    usort($items, function (array $a, array $b): int {
+        $cmp = strcmp((string) $a['created_at'], (string) $b['created_at']);
+        if ($cmp !== 0) {
+            return $cmp;
+        }
+        return ((int) $a['id']) <=> ((int) $b['id']);
+    });
+
+    return $items;
+}
+
+function sales_direct_messages_mark_order_chats_read_for_admin(PDO $pdo, int $salesUserId): void
+{
+    if ($salesUserId <= 0) {
+        return;
+    }
+    if (!function_exists('order_messages_ensure_schema')) {
+        require_once __DIR__ . '/order-messages.php';
+    }
+    order_messages_ensure_schema($pdo);
+    $pdo->prepare(
+        "UPDATE order_messages m
+         INNER JOIN orders o ON o.id = m.order_id
+         SET m.admin_read_at = CURRENT_TIMESTAMP
+         WHERE o.sales_user_id = ?
+           AND m.actor IN ('sales', 'client')
+           AND m.admin_read_at IS NULL"
+    )->execute([$salesUserId]);
+}
+
 function sales_direct_messages_notify_sales(PDO $pdo, int $salesUserId, string $senderName, string $body): void
 {
     if (!function_exists('sales_push_notify_direct_message')) {
