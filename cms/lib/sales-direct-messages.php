@@ -289,7 +289,7 @@ function sales_direct_messages_insert(
     string $senderName,
     string $body,
     ?string $image,
-    ?int $adminUserId,
+    ?int $adminUserId
 ): array {
     sales_direct_messages_ensure_schema($pdo);
     $user = sales_users_get($pdo, $salesUserId);
