@@ -35,12 +35,15 @@ try {
     }
     $showPrices = admin_shop_price_mode_bool($body['show_prices']);
     cms_setting_set('call_for_price', $showPrices ? '0' : '1');
-    cms_audit_settings($pdo, 'اپ ادمین — نمایش قیمت مشتری');
+    try {
+        cms_audit_settings($pdo, 'اپ ادمین — نمایش قیمت مشتری');
+    } catch (Throwable $auditError) {
+        error_log('[admin-shop-price-mode] audit ' . $auditError->getMessage());
+    }
 
     api_json([
         'ok' => true,
         'show_prices' => $showPrices,
-        'admin' => $admin['username'] ?? '',
     ]);
 } catch (RuntimeException $e) {
     api_error($e->getMessage(), 400);
@@ -58,11 +61,14 @@ function admin_shop_price_mode_bool(mixed $value): bool
         return (int) $value === 1;
     }
     if (is_string($value)) {
-        $parsed = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-        if ($parsed === null) {
-            api_error('show_prices نامعتبر است', 400);
+        $normalized = strtolower(trim($value));
+        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
         }
-        return $parsed;
+        if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
     }
     api_error('show_prices نامعتبر است', 400);
+    return false;
 }

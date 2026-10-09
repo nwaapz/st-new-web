@@ -249,9 +249,9 @@ function cms_setting_set(string $key, string $value): void
     cms_ensure_settings_table($pdo);
     $stmt = $pdo->prepare(
         'INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)'
+         ON DUPLICATE KEY UPDATE setting_value = ?'
     );
-    $stmt->execute([$key, $value]);
+    $stmt->execute([$key, $value, $value]);
     cms_settings_forget();
 }
 

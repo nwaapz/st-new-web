@@ -178,17 +178,19 @@ function cms_admin_audit(PDO $pdo, string $action, array $ctx = []): void
          (admin_user_id, admin_username, action, entity_type, entity_id, entity_label, summary, detail_json, source)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $stmt->execute([
-        $admin['id'],
-        $admin['username'],
-        $action,
-        isset($ctx['entity_type']) ? (string) $ctx['entity_type'] : null,
-        isset($ctx['entity_id']) ? (int) $ctx['entity_id'] : null,
-        isset($ctx['entity_label']) ? (string) $ctx['entity_label'] : null,
-        $summary,
-        $detailJson,
-        'cms',
-    ]);
+    $entityType = isset($ctx['entity_type']) ? (string) $ctx['entity_type'] : null;
+    $entityId = isset($ctx['entity_id']) ? (int) $ctx['entity_id'] : null;
+    $entityLabel = isset($ctx['entity_label']) ? (string) $ctx['entity_label'] : null;
+    $stmt->bindValue(1, $admin['id'], PDO::PARAM_INT);
+    $stmt->bindValue(2, $admin['username'], PDO::PARAM_STR);
+    $stmt->bindValue(3, $action, PDO::PARAM_STR);
+    $stmt->bindValue(4, $entityType, $entityType === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $stmt->bindValue(5, $entityId, $entityId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+    $stmt->bindValue(6, $entityLabel, $entityLabel === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $stmt->bindValue(7, $summary, PDO::PARAM_STR);
+    $stmt->bindValue(8, $detailJson, $detailJson === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $stmt->bindValue(9, 'cms', PDO::PARAM_STR);
+    $stmt->execute();
 }
 
 /**
