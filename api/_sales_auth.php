@@ -93,6 +93,11 @@ function sales_auth_logout(): void
  */
 function sales_auth_current_user(PDO $pdo): ?array
 {
+    $sessionCookie = trim((string) ($_COOKIE[SALES_AUTH_SESSION_NAME] ?? ''));
+    if ($sessionCookie === '') {
+        return null;
+    }
+
     sales_auth_session_start();
     $id = isset($_SESSION['sales_user_id']) ? (int) $_SESSION['sales_user_id'] : 0;
     if ($id <= 0) {
