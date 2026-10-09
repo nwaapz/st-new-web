@@ -48,8 +48,14 @@ try {
 } catch (RuntimeException $e) {
     api_error($e->getMessage(), 400);
 } catch (Throwable $e) {
-    error_log('[admin-shop-price-mode] ' . $e->getMessage());
-    api_error('خطای سرور', 500);
+    error_log('[admin-shop-price-mode] ' . $e::class . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    api_json([
+        'ok' => false,
+        'error' => $e->getMessage() !== '' ? $e->getMessage() : 'خطای سرور',
+        'exception' => $e::class,
+        'file' => basename($e->getFile()),
+        'line' => $e->getLine(),
+    ], 500);
 }
 
 function admin_shop_price_mode_bool(mixed $value): bool
