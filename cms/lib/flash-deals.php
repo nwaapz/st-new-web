@@ -1081,7 +1081,8 @@ function flash_deals_duplicate(PDO $pdo, int $id): array
 }
 
 /**
- * Active offers for the sales app. Expired, paused, archived, and draft deals are omitted.
+ * Offers for the sales app. Draft, paused, archived, and ended deals are omitted.
+ * Scheduled deals that have not started yet are included and marked not purchasable.
  *
  * @return array{server_time:string,offers:list<array<string,mixed>>}
  */
@@ -1098,32 +1099,42 @@ function flash_deals_sales_offers(PDO $pdo): array
     $offers = [];
     foreach ($stmt->fetchAll() ?: [] as $deal) {
         $deal = flash_deals_sync_row($pdo, $deal, $now);
-        if (!flash_deals_is_purchasable($deal, $now)) {
+        $status = (string) ($deal['status'] ?? '');
+        if (!in_array($status, ['active', 'scheduled'], true)) {
             continue;
         }
+        $start = new DateTimeImmutable((string) $deal['starts_at'], new DateTimeZone('UTC'));
+        $end = new DateTimeImmutable((string) $deal['ends_at'], new DateTimeZone('UTC'));
+        if ($now >= $end) {
+            continue;
+        }
+        $inWindow = $now >= $start && $now < $end;
         $campaign = flash_deals_serialize($deal);
         foreach (flash_deals_fetch_products($pdo, (int) $deal['id']) as $product) {
-            if ($product['published'] !== true || ($product['eligibility_status'] ?? '') === 'ineligible') {
-                continue;
-            }
-            if ($product['stock_qty'] !== null && (int) $product['stock_qty'] <= 0) {
+            $promo = (int) ($product['promo_unit_price'] ?? 0);
+            $regular = (int) ($product['regular_unit_price'] ?? 0);
+            if ($promo <= 0 || $regular <= 0 || $promo >= $regular) {
                 continue;
             }
             $remaining = null;
+            $remainingOk = true;
             if ($product['campaign_qty_limit'] !== null) {
                 $remaining = max(0, (int) $product['campaign_qty_limit'] - (int) $product['campaign_qty_sold']);
-                if ($remaining <= 0) {
-                    continue;
-                }
+                $remainingOk = $remaining > 0;
             }
+            $inStock = $product['stock_qty'] === null || (int) $product['stock_qty'] > 0;
+            $published = $product['published'] === true;
             $offers[] = [
                 'flash_deal_id' => $campaign['id'],
                 'flash_deal_version' => $campaign['version'],
                 'campaign_title' => $campaign['title'],
                 'campaign_description' => $campaign['description'],
                 'banner_image' => $campaign['banner_image'],
+                'starts_at' => $campaign['starts_at'],
+                'starts_at_jalali' => cms_jalali_format_datetime((string) $deal['starts_at']),
                 'ends_at' => $campaign['ends_at'],
                 'ends_at_jalali' => cms_jalali_format_datetime((string) $deal['ends_at']),
+                'purchasable' => $inWindow && $published && $inStock && $remainingOk,
                 'product_id' => $product['product_id'],
                 'name' => $product['name'],
                 'slug' => $product['slug'],
@@ -1138,7 +1149,6 @@ function flash_deals_sales_offers(PDO $pdo): array
                 'per_order_qty_limit' => $product['per_order_qty_limit'],
                 'per_customer_qty_limit' => $product['per_customer_qty_limit'],
                 'campaign_qty_remaining' => $remaining,
-                'purchasable' => true,
             ];
         }
     }
