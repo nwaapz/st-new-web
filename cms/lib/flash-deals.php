@@ -576,19 +576,24 @@ function flash_deals_search_products(PDO $pdo, string $q, int $limit = 20): arra
 {
     $q = trim($q);
     $limit = min(30, max(1, $limit));
-    if ($q === '') {
-        return [];
-    }
-    $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
-    $stmt = $pdo->prepare(
-        "SELECT id, name, slug, visual_id, price_text, stock_qty, published,
+    $select = "SELECT id, name, slug, visual_id, price_text, stock_qty, published,
                 COALESCE(NULLIF(shop_display_image, ''), NULLIF(image, '')) AS image
-         FROM products
-         WHERE name LIKE ? ESCAPE '\\\\' OR slug LIKE ? ESCAPE '\\\\' OR visual_id LIKE ? ESCAPE '\\\\'
-         ORDER BY published DESC, name ASC
-         LIMIT {$limit}"
-    );
-    $stmt->execute([$like, $like, $like]);
+         FROM products";
+    if ($q === '') {
+        $browseLimit = min(20, $limit);
+        $stmt = $pdo->prepare(
+            $select . " WHERE published = 1 ORDER BY name ASC LIMIT {$browseLimit}"
+        );
+        $stmt->execute();
+    } else {
+        $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
+        $stmt = $pdo->prepare(
+            $select . " WHERE name LIKE ? ESCAPE '\\\\' OR slug LIKE ? ESCAPE '\\\\' OR visual_id LIKE ? ESCAPE '\\\\'
+             ORDER BY published DESC, name ASC
+             LIMIT {$limit}"
+        );
+        $stmt->execute([$like, $like, $like]);
+    }
     $out = [];
     foreach ($stmt->fetchAll() ?: [] as $row) {
         $regular = null;
@@ -677,8 +682,24 @@ function flash_deals_save(PDO $pdo, array $body): array
         if ($regular === null || $regular <= 0) {
             throw new InvalidArgumentException('قیمت عادی «' . $catalog['name'] . '» قابل محاسبه نیست');
         }
-        $promo = flash_deals_parse_toman($raw['promo_unit_price'] ?? null);
-        $discount = flash_deals_discount($regular, $promo);
+        if ($intent === 'draft') {
+            $promo = 0;
+            try {
+                if (($raw['promo_unit_price'] ?? '') !== '' && ($raw['promo_unit_price'] ?? null) !== null) {
+                    $promo = flash_deals_parse_toman($raw['promo_unit_price']);
+                }
+            } catch (InvalidArgumentException $e) {
+                $promo = 0;
+            }
+            if ($promo > 0 && $promo < $regular) {
+                $discount = flash_deals_discount($regular, $promo);
+            } else {
+                $discount = ['amount' => 0, 'percent' => '0.00'];
+            }
+        } else {
+            $promo = flash_deals_parse_toman($raw['promo_unit_price'] ?? null);
+            $discount = flash_deals_discount($regular, $promo);
+        }
         $eligible = (int) $catalog['published'] === 1 && (int) $catalog['stock_qty'] > 0;
         $prepared[] = [
             'product_id' => $productId,
