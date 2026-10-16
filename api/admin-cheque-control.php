@@ -383,9 +383,13 @@ try {
     api_error('نمای نامعتبر', 400);
 
 } catch (Throwable $e) {
-
+    require_once dirname(__DIR__) . '/cms/lib/application-logs.php';
+    cms_app_log_exception($e, [
+        'category' => 'cheque',
+        'event_code' => 'cheque_api_error',
+        'summary' => 'خطای API کنترل چک',
+    ]);
     api_error($e->getMessage(), 500);
-
 }
 
 

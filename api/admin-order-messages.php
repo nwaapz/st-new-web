@@ -73,5 +73,11 @@ try {
 } catch (InvalidArgumentException $e) {
     api_error($e->getMessage(), 400);
 } catch (Throwable $e) {
+    require_once dirname(__DIR__) . '/cms/lib/application-logs.php';
+    cms_app_log_exception($e, [
+        'category' => 'chat',
+        'event_code' => 'chat_send_failed',
+        'summary' => 'ارسال پیام سفارش ناموفق بود',
+    ]);
     api_error($e->getMessage(), 500);
 }

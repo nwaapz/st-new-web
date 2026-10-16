@@ -31,6 +31,17 @@ try {
     product_price_sync_ensure_schema($pdo);
 
     if (!product_price_sync_within_window()) {
+        require_once dirname(__DIR__) . '/cms/lib/application-logs.php';
+        cms_app_log([
+            'source_app' => 'sync_worker',
+            'severity' => 'NOTICE',
+            'category' => 'synchronization',
+            'event_code' => 'price_sync_outside_window',
+            'summary' => 'همگام‌سازی قیمت خارج از بازه زمانی رد شد',
+            'user_type' => 'sales',
+            'user_id' => (int) $user['id'],
+            'user_label' => (string) ($user['username'] ?? ''),
+        ]);
         api_error('بروزرسانی قیمت فقط بین ۸ صبح تا ۸ شب امکان‌پذیر است', 403);
     }
 
@@ -57,5 +68,12 @@ try {
     ]);
 } catch (Throwable $e) {
     error_log('[client-price-sync] ' . $e->getMessage());
+    require_once dirname(__DIR__) . '/cms/lib/application-logs.php';
+    cms_app_log_exception($e, [
+        'source_app' => 'sync_worker',
+        'category' => 'synchronization',
+        'event_code' => 'price_sync_failed',
+        'summary' => 'همگام‌سازی قیمت ناموفق بود',
+    ]);
     api_error('بروزرسانی قیمت ناموفق بود', 500);
 }

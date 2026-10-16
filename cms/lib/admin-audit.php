@@ -85,6 +85,17 @@ function admin_audit_action_labels(): array
         'settings.save' => 'ذخیره تنظیمات',
         'content.save' => 'ذخیره محتوا',
         'product_review.moderate' => 'بررسی نظر محصول',
+        'flash_deal.create' => 'ایجاد پیشنهاد ویژه',
+        'flash_deal.edit' => 'ویرایش پیشنهاد ویژه',
+        'flash_deal.schedule' => 'زمان‌بندی پیشنهاد ویژه',
+        'flash_deal.activate' => 'فعال‌سازی پیشنهاد ویژه',
+        'flash_deal.pause' => 'توقف پیشنهاد ویژه',
+        'flash_deal.resume' => 'ادامه پیشنهاد ویژه',
+        'flash_deal.end' => 'پایان پیشنهاد ویژه',
+        'flash_deal.archive' => 'بایگانی پیشنهاد ویژه',
+        'flash_deal.duplicate' => 'کپی پیشنهاد ویژه',
+        'flash_deal.delete' => 'حذف پیشنهاد ویژه',
+        'flash_deal.failed' => 'عملیات ناموفق پیشنهاد ویژه',
     ];
 }
 
@@ -109,7 +120,7 @@ function admin_audit_category_for_action(string $action): string
     if (str_starts_with($action, 'product.') || str_starts_with($action, 'category.')
         || str_starts_with($action, 'factory.') || str_starts_with($action, 'car_model.')
         || str_starts_with($action, 'product_series.') || str_starts_with($action, 'price_import.')
-        || str_starts_with($action, 'product_review.')) {
+        || str_starts_with($action, 'product_review.') || str_starts_with($action, 'flash_deal.')) {
         return 'catalog';
     }
     if (str_starts_with($action, 'media.')) {
@@ -217,7 +228,7 @@ function admin_audit_list(PDO $pdo, array $filters = [], int $page = 1, int $pag
         } elseif ($category === 'catalog') {
             $where[] = "(action LIKE 'product.%' OR action LIKE 'category.%' OR action LIKE 'factory.%'
                 OR action LIKE 'car_model.%'                 OR action LIKE 'product_series.%' OR action LIKE 'price_import.%'
-                OR action LIKE 'price_sheet.%' OR action LIKE 'product_review.%')";
+                OR action LIKE 'price_sheet.%' OR action LIKE 'product_review.%' OR action LIKE 'flash_deal.%')";
         } elseif ($category === 'media') {
             $where[] = "action LIKE 'media.%'";
         } elseif ($category === 'comms') {
@@ -306,6 +317,8 @@ function admin_audit_entity_href(?string $entityType, ?int $entityId): ?string
             return 'product-series.php?edit=' . $entityId;
         case 'sales_user':
             return 'sales-users.php?edit=' . $entityId;
+        case 'flash_deal':
+            return 'flash-deals.php?edit=' . $entityId;
         case 'admin_user':
             return 'admin-users.php?edit=' . $entityId;
         default:

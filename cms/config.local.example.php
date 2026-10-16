@@ -40,4 +40,13 @@ return [
     'powerbi_client_secret' => '',
     'powerbi_workspace_id' => '',
     'powerbi_report_id' => '',
+
+    // Operational application logs (UTC storage, Jalali display in Asia/Tehran).
+    'app_log_environment' => 'production',
+    'app_log_retention_days' => 90,
+    'app_log_debug' => false,
+    // Empty = every logged-in CMS admin may view system logs.
+    'app_logs_viewers' => [],
+    // Optional secret for GET /api/app-logs-cleanup.php?key=...
+    'app_logs_cleanup_key' => '',
 ];

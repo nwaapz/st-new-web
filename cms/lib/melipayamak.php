@@ -109,9 +109,34 @@ function cms_sms_send(string $phone, string $message): array
             $resultText = $encoded !== false ? $encoded : 'sent';
         }
 
+        if (is_file(__DIR__ . '/application-logs.php')) {
+            require_once __DIR__ . '/application-logs.php';
+            cms_app_log([
+                'source_app' => 'backend',
+                'severity' => 'INFO',
+                'category' => 'sms',
+                'event_code' => 'sms_send_ok',
+                'summary' => 'ارسال پیامک ملی‌پیامک انجام شد',
+                'metadata' => ['result' => $resultText, 'device_send' => false],
+            ]);
+        }
+
         return ['ok' => true, 'result' => $resultText];
     } catch (Throwable $e) {
         error_log('[cms_sms_send] ' . $e->getMessage());
+        if (is_file(__DIR__ . '/application-logs.php')) {
+            require_once __DIR__ . '/application-logs.php';
+            cms_app_log([
+                'source_app' => 'backend',
+                'severity' => 'ERROR',
+                'category' => 'sms',
+                'event_code' => 'sms_send_failed',
+                'summary' => 'ارسال پیامک ملی‌پیامک ناموفق بود',
+                'exception_class' => get_class($e),
+                'exception_detail' => $e->getMessage(),
+                'metadata' => ['device_send' => false],
+            ]);
+        }
         return ['ok' => false, 'error' => $e->getMessage()];
     }
 }

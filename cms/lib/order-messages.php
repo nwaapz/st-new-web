@@ -384,7 +384,20 @@ function order_messages_notify_sales(PDO $pdo, int $orderId, string $senderName,
         require_once __DIR__ . '/sales-push.php';
     }
     if (function_exists('sales_push_notify_order_message')) {
-        sales_push_notify_order_message($pdo, $orderId, $senderName, $body);
+        try {
+            sales_push_notify_order_message($pdo, $orderId, $senderName, $body);
+        } catch (Throwable $e) {
+            error_log('[order-messages] sales notify failed: ' . $e->getMessage());
+            if (is_file(__DIR__ . '/application-logs.php')) {
+                require_once __DIR__ . '/application-logs.php';
+                cms_app_log_exception($e, [
+                    'category' => 'chat',
+                    'event_code' => 'chat_notify_sales_failed',
+                    'related_order_id' => $orderId,
+                    'summary' => 'اعلان گفتگوی سفارش برای فروشنده ناموفق بود',
+                ]);
+            }
+        }
     }
 }
 
@@ -394,6 +407,19 @@ function order_messages_notify_admins(PDO $pdo, int $orderId, string $senderName
         require_once __DIR__ . '/admin-push.php';
     }
     if (function_exists('admin_push_notify_order_message')) {
-        admin_push_notify_order_message($pdo, $orderId, $senderName, $body);
+        try {
+            admin_push_notify_order_message($pdo, $orderId, $senderName, $body);
+        } catch (Throwable $e) {
+            error_log('[order-messages] admin notify failed: ' . $e->getMessage());
+            if (is_file(__DIR__ . '/application-logs.php')) {
+                require_once __DIR__ . '/application-logs.php';
+                cms_app_log_exception($e, [
+                    'category' => 'chat',
+                    'event_code' => 'chat_notify_admin_failed',
+                    'related_order_id' => $orderId,
+                    'summary' => 'اعلان گفتگوی سفارش برای ادمین ناموفق بود',
+                ]);
+            }
+        }
     }
 }

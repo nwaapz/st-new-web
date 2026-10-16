@@ -329,6 +329,17 @@ function cheque_workflow_apply_transition(PDO $pdo, int $chequeId, array $body, 
     $allowed = cheque_workflow_allowed_transitions();
     $canGo = $allowed[$fromStatus] ?? [];
     if (!in_array($toStatus, $canGo, true) && $fromStatus !== $toStatus) {
+        if (is_file(__DIR__ . '/application-logs.php')) {
+            require_once __DIR__ . '/application-logs.php';
+            cms_app_log([
+                'source_app' => 'backend',
+                'severity' => 'WARNING',
+                'category' => 'cheque',
+                'event_code' => 'cheque_invalid_transition',
+                'summary' => 'انتقال وضعیت چک رد شد',
+                'metadata' => ['cheque_id' => $chequeId, 'from' => $fromStatus, 'to' => $toStatus, 'action' => $action],
+            ]);
+        }
         throw new RuntimeException('انتقال وضعیت مجاز نیست');
     }
 
@@ -410,6 +421,20 @@ function cheque_workflow_bulk_transition(PDO $pdo, array $chequeIds, string $act
         } catch (Throwable $e) {
             $failed++;
             $errors[] = ['cheque_id' => $chequeId, 'error' => $e->getMessage()];
+            if (is_file(__DIR__ . '/application-logs.php')) {
+                require_once __DIR__ . '/application-logs.php';
+                cms_app_log([
+                    'source_app' => 'backend',
+                    'severity' => 'WARNING',
+                    'category' => 'cheque',
+                    'event_code' => 'cheque_transition_failed',
+                    'summary' => 'تغییر وضعیت چک ناموفق بود',
+                    'metadata' => ['cheque_id' => $chequeId, 'action' => $action, 'error' => $e->getMessage()],
+                    'user_type' => 'admin',
+                    'user_id' => is_array($adminUser) ? (int) ($adminUser['id'] ?? 0) : null,
+                    'user_label' => is_array($adminUser) ? (string) ($adminUser['username'] ?? '') : null,
+                ]);
+            }
         }
     }
 

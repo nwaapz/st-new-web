@@ -61,6 +61,7 @@ cms_layout_start('تنظیمات پیشرفته', cms_current_username(), 'advan
   <div class="cms-btn-row">
     <a class="cms-btn" href="admin-users.php">مدیران CMS</a>
     <a class="cms-btn cms-btn--secondary" href="admin-activity.php">فعالیت مدیران</a>
+    <a class="cms-btn cms-btn--ghost" href="system-logs.php">گزارش رویدادهای سیستم</a>
   </div>
 </div>
 

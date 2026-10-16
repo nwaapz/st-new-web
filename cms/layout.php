@@ -86,6 +86,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'price-sheet.php' => 'لیست قیمت',
             'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
+            'flash-deals.php' => 'پیشنهاد ویژه',
         ];
     } elseif ($section === 'customers') {
         $subNav = [
@@ -103,6 +104,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'advanced.php' => 'خلاصه',
             'admin-users.php' => 'مدیران CMS',
             'admin-activity.php' => 'فعالیت مدیران',
+            'system-logs.php' => 'گزارش رویدادهای سیستم',
             'sms-settings.php' => 'پیامک',
             'mechanic-services.php' => 'دوره سرویس‌ها',
             $fontLabHref => 'Font Lab',
@@ -113,7 +115,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=29">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=30">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';

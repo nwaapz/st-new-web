@@ -43,6 +43,17 @@ function analytics_orders_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
 
+    $lineCols = [];
+    foreach ($pdo->query('SHOW COLUMNS FROM analytics_order_line_facts')->fetchAll() ?: [] as $col) {
+        $lineCols[(string) ($col['Field'] ?? '')] = true;
+    }
+    if (!isset($lineCols['flash_deal_id'])) {
+        $pdo->exec('ALTER TABLE analytics_order_line_facts ADD COLUMN flash_deal_id INT UNSIGNED NULL');
+    }
+    if (!isset($lineCols['flash_deal_title'])) {
+        $pdo->exec('ALTER TABLE analytics_order_line_facts ADD COLUMN flash_deal_title VARCHAR(191) NULL');
+    }
+
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS analytics_order_facts (
           order_id INT UNSIGNED NOT NULL,
@@ -298,8 +309,9 @@ function analytics_orders_refresh(PDO $pdo): array
             'INSERT INTO analytics_order_line_facts
              (line_id, order_id, order_public_code, order_status, order_channel, order_created_at,
               product_id, product_name, factory_name, model_name, category_name, visual_id,
-              quantity, unit_type, pack_size, unit_price_toman, line_revenue_toman)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+              quantity, unit_type, pack_size, unit_price_toman, line_revenue_toman,
+              flash_deal_id, flash_deal_title)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $factStmt = $pdo->prepare(
             'INSERT INTO analytics_order_facts
@@ -349,6 +361,12 @@ function analytics_orders_refresh(PDO $pdo): array
                     isset($item['pack_size']) && $item['pack_size'] !== null ? (int) $item['pack_size'] : null,
                     $amounts['unit_price_toman'],
                     $amounts['line_revenue_toman'],
+                    isset($item['flash_deal_id']) && $item['flash_deal_id'] !== null
+                        ? (int) $item['flash_deal_id']
+                        : null,
+                    isset($item['flash_deal_title']) && trim((string) $item['flash_deal_title']) !== ''
+                        ? (string) $item['flash_deal_title']
+                        : null,
                 ]);
             }
 

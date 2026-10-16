@@ -129,7 +129,7 @@ try {
     if ($action === 'create') {
         $adminUser = admin_auth_current_user($pdo);
         $result = orders_admin_create_manual($pdo, $body, $adminUser);
-        api_json($result, 201);
+        api_json($result, !empty($result['duplicate']) ? 200 : 201);
     }
 
     $orderId = (int) ($body['order_id'] ?? $body['id'] ?? 0);
@@ -218,6 +218,12 @@ try {
     }
 
     api_json($response);
+} catch (FlashDealException $e) {
+    flash_deals_emit_api_error($e);
+} catch (OrdersConflictException | OrdersIdempotencyForbiddenException $e) {
+    orders_api_emit_idempotency_error($e);
+} catch (InvalidArgumentException $e) {
+    api_error($e->getMessage(), 400);
 } catch (RuntimeException $e) {
     api_error($e->getMessage(), 400);
 } catch (Throwable $e) {
@@ -225,6 +231,12 @@ try {
         $pdo->rollBack();
     }
     error_log('[admin-orders] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    require_once dirname(__DIR__) . '/cms/lib/application-logs.php';
+    cms_app_log_exception($e, [
+        'category' => 'order',
+        'event_code' => 'admin_order_api_error',
+        'summary' => 'خطای API سفارش ادمین',
+    ]);
     $message = trim($e->getMessage());
     api_error($message !== '' ? $message : 'خطای سرور', 500);
 }

@@ -322,6 +322,13 @@ try {
     ]);
 } catch (Throwable $e) {
     error_log('[order-payment] ' . $e->getMessage());
+    require_once dirname(__DIR__) . '/cms/lib/application-logs.php';
+    cms_app_log_exception($e, [
+        'category' => 'payment',
+        'event_code' => 'payment_proof_failed',
+        'summary' => 'آپلود یا پردازش مدرک پرداخت ناموفق بود',
+        'related_order_id' => $orderId ?? 0,
+    ]);
     $msg = $e->getMessage();
     if (
         strpos($msg, 'فقط') === 0

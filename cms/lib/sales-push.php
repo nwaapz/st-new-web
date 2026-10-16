@@ -242,6 +242,15 @@ function orders_admin_notify_sales_client(PDO $pdo, int $orderId, string $notify
         sales_push_notify_status_change($pdo, $orderId, $notifyType, $message, $chequeId);
     } catch (Throwable $e) {
         error_log('[orders_admin_notify_sales_client] ' . $e->getMessage());
+        if (is_file(__DIR__ . '/application-logs.php')) {
+            require_once __DIR__ . '/application-logs.php';
+            cms_app_log_exception($e, [
+                'category' => 'push',
+                'event_code' => 'sales_push_notify_failed',
+                'related_order_id' => $orderId,
+                'summary' => 'ارسال پوش تغییر وضعیت به فروشنده ناموفق بود',
+            ]);
+        }
     }
 }
 

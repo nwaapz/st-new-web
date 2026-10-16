@@ -3076,3 +3076,122 @@ a.cms-kpi:hover {
 .cms-price-sheet__frame--focus {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28);
 }
+
+.cms-log-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.cms-log-stat {
+  background: var(--cms-bg-panel);
+  border: 1px solid var(--cms-line);
+  border-radius: var(--cms-radius);
+  padding: 0.7rem 0.85rem;
+}
+
+.cms-log-stat__label {
+  display: block;
+  color: var(--cms-text-muted);
+  font-size: 0.78rem;
+  margin-bottom: 0.25rem;
+}
+
+.cms-log-stat__value {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.cms-severity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cms-severity::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cms-severity--DEBUG { color: #9aa3b2; background: rgba(154, 163, 178, 0.12); }
+.cms-severity--INFO { color: #8fd9a8; background: rgba(143, 217, 168, 0.12); }
+.cms-severity--NOTICE { color: #c9d98f; background: rgba(201, 217, 143, 0.12); }
+.cms-severity--WARNING { color: #f0c674; background: rgba(240, 198, 116, 0.14); }
+.cms-severity--ERROR { color: #ff9b8f; background: rgba(255, 155, 143, 0.14); }
+.cms-severity--CRITICAL { color: #ff6b6b; background: rgba(227, 6, 19, 0.22); }
+
+.cms-log-filters {
+  flex-wrap: wrap;
+}
+
+.cms-log-filters .cms-field {
+  min-width: 8.5rem;
+  flex: 1 1 8.5rem;
+}
+
+.cms-log-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.cms-log-table-wrap .cms-table {
+  min-width: 52rem;
+}
+
+.cms-log-summary-cell {
+  max-width: 22rem;
+  overflow-wrap: anywhere;
+}
+
+.cms-log-id {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.82rem;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.cms-log-detail {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.cms-log-detail pre {
+  margin: 0;
+  padding: 0.75rem;
+  background: var(--cms-bg-input);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 18rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  direction: ltr;
+  text-align: left;
+  font-size: 0.8rem;
+}
+
+.cms-log-mini-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cms-log-mini-list li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--cms-line);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .cms-log-table-wrap .cms-table {
+    min-width: 0;
+  }
+}

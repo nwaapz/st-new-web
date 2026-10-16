@@ -245,6 +245,20 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
     }
 
     error_log('[admin-push] FCM send failed HTTP ' . $status . ': ' . (is_string($response) ? $response : ''));
+    if (is_file(__DIR__ . '/application-logs.php')) {
+        require_once __DIR__ . '/application-logs.php';
+        cms_app_log([
+            'source_app' => 'backend',
+            'severity' => 'WARNING',
+            'category' => 'push',
+            'event_code' => 'push_send_failed',
+            'summary' => 'ارسال پوش FCM ناموفق بود',
+            'metadata' => [
+                'http_status' => $status,
+                'provider' => 'fcm',
+            ],
+        ]);
+    }
     return false;
 }
 

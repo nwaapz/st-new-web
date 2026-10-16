@@ -101,6 +101,13 @@ try {
     if (!is_array($rawItems) || $rawItems === []) {
         api_error('سبد خرید خالی است', 400);
     }
+    if (flash_deals_raw_has_promo($rawItems)) {
+        throw new FlashDealException(
+            'FLASH_DEAL_ONLINE_REQUIRED',
+            'این پیشنهاد فقط به‌صورت آنلاین قابل خرید است. برای ثبت سفارش با قیمت ویژه، به اینترنت متصل شوید.',
+            409
+        );
+    }
 
     $normalized = [];
     foreach ($rawItems as $raw) {
@@ -298,17 +305,48 @@ try {
         }
     }
 
+    $clientUuid = orders_client_order_uuid_from_request($body);
+    $shopOwner = [
+        'role' => 'shop',
+        'user_id' => (int) $user['id'],
+        'sales_user_id' => null,
+    ];
+    $existingShop = orders_try_existing_identity(
+        $pdo,
+        $clientUuid,
+        null,
+        $normalized,
+        $shopOwner
+    );
+    if ($existingShop !== null) {
+        $orderId = $existingShop['order_id'];
+        $order = orders_get_by_id($pdo, $orderId);
+        if ($order === null) {
+            api_error('خطا در ایجاد سفارش', 500);
+        }
+        api_json([
+            'ok' => true,
+            'duplicate' => true,
+            'order' => orders_serialize(
+                $order,
+                orders_fetch_items($pdo, $orderId),
+                orders_fetch_events($pdo, $orderId)
+            ),
+        ], 200);
+    }
+
     $pdo->beginTransaction();
     try {
         $publicCode = orders_generate_public_code($pdo);
         $ins = $pdo->prepare(
             'INSERT INTO orders (
-               public_code, user_id, phone, status,
+               public_code, client_order_uuid, user_id, phone, status,
                branch_id, branch_name, branch_city, branch_province_name, branch_phone
-             ) VALUES (?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
+             ) VALUES (?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
         );
         $ins->execute([
             $publicCode,
+            $clientUuid,
             $user['id'],
             $user['phone'],
             $branchSnap['branch_id'],
@@ -353,6 +391,31 @@ try {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
+        if (orders_is_identity_duplicate_key($e)) {
+            $recovered = orders_try_existing_identity(
+                $pdo,
+                $clientUuid,
+                null,
+                $normalized,
+                $shopOwner
+            );
+            if ($recovered !== null) {
+                $orderId = $recovered['order_id'];
+                $order = orders_get_by_id($pdo, $orderId);
+                if ($order === null) {
+                    api_error('خطا در ایجاد سفارش', 500);
+                }
+                api_json([
+                    'ok' => true,
+                    'duplicate' => true,
+                    'order' => orders_serialize(
+                        $order,
+                        orders_fetch_items($pdo, $orderId),
+                        orders_fetch_events($pdo, $orderId)
+                    ),
+                ], 200);
+            }
+        }
         throw $e;
     }
 
@@ -381,13 +444,26 @@ try {
 
     api_json([
         'ok' => true,
+        'duplicate' => false,
         'order' => orders_serialize(
             $order,
             orders_fetch_items($pdo, $orderId),
             orders_fetch_events($pdo, $orderId)
         ),
     ], 201);
+} catch (FlashDealException $e) {
+    flash_deals_emit_api_error($e);
+} catch (OrdersConflictException | OrdersIdempotencyForbiddenException $e) {
+    orders_api_emit_idempotency_error($e);
+} catch (InvalidArgumentException $e) {
+    api_error($e->getMessage(), 400);
 } catch (Throwable $e) {
     error_log('[orders] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    require_once dirname(__DIR__) . '/cms/lib/application-logs.php';
+    cms_app_log_exception($e, [
+        'category' => 'order',
+        'event_code' => 'shop_order_api_error',
+        'summary' => 'خطای API سفارش فروشگاه',
+    ]);
     api_error('خطای سرور', 500);
 }

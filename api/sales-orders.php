@@ -91,15 +91,32 @@ try {
         ? 'سفارش از اپ فروش ثبت شد'
         : 'سفارش از اپ فروش ثبت شد';
 
-    $orderId = orders_create_from_normalized(
+    $clientUuid = orders_client_order_uuid_from_request($body);
+    $smsRef = '';
+    if (isset($body['sms_ref'])) {
+        $smsRef = strtoupper(preg_replace('/[^A-Z0-9]/', '', (string) $body['sms_ref']) ?? '');
+        if (strlen($smsRef) < 2 || strlen($smsRef) > 16) {
+            $smsRef = '';
+        }
+    }
+    $created = orders_create_from_normalized(
         $pdo,
         (int) $siteUser['id'],
         (string) $siteUser['phone'],
         $normalized,
         $branchSnap,
         $salesUserId,
-        $submitNote
+        $submitNote,
+        [
+            'client_order_uuid' => $clientUuid,
+            'sms_ref' => $smsRef,
+            'owner_role' => 'sales',
+            'owner_user_id' => (int) $siteUser['id'],
+            'owner_sales_user_id' => $salesUserId,
+        ]
     );
+    $orderId = $created['order_id'];
+    $duplicate = !empty($created['duplicate']);
 
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
@@ -108,13 +125,28 @@ try {
 
     api_json([
         'ok' => true,
+        'duplicate' => $duplicate,
         'order' => orders_serialize(
             $order,
             orders_fetch_items($pdo, $orderId),
             orders_fetch_events($pdo, $orderId)
         ),
-    ], 201);
+    ], $duplicate ? 200 : 201);
+} catch (FlashDealException $e) {
+    flash_deals_emit_api_error($e);
+} catch (OrdersConflictException | OrdersIdempotencyForbiddenException $e) {
+    orders_api_emit_idempotency_error($e);
+} catch (InvalidArgumentException $e) {
+    api_error($e->getMessage(), 400);
+} catch (RuntimeException $e) {
+    api_error($e->getMessage(), 400);
 } catch (Throwable $e) {
     error_log('[sales-orders] ' . $e->getMessage());
+    require_once dirname(__DIR__) . '/cms/lib/application-logs.php';
+    cms_app_log_exception($e, [
+        'category' => 'order',
+        'event_code' => 'sales_order_api_error',
+        'summary' => 'خطای API سفارش فروش',
+    ]);
     api_error('خطای سرور', 500);
 }

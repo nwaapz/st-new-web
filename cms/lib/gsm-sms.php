@@ -251,25 +251,13 @@ function gsm_sms_ingest_order(PDO $pdo, array $body, ?int $forcedSalesUserId = n
     orders_ensure_schema($pdo);
     gsm_sms_ensure_schema($pdo);
 
+    $clientUuid = orders_client_order_uuid_from_request($body);
     $smsRef = gsm_sms_normalize_ref((string) ($body['sms_ref'] ?? ''));
-    if ($smsRef === '') {
-        throw new RuntimeException('شناسه پیامک نامعتبر است');
+    if ($smsRef === '' && $clientUuid !== null) {
+        $smsRef = orders_compact_sms_ref_from_uuid($clientUuid);
     }
-
-    $existing = $pdo->prepare('SELECT * FROM orders WHERE sms_ref = ? LIMIT 1');
-    $existing->execute([$smsRef]);
-    $row = $existing->fetch();
-    if ($row) {
-        $orderId = (int) $row['id'];
-        return [
-            'ok' => true,
-            'deduped' => true,
-            'order' => orders_serialize(
-                $row,
-                orders_fetch_items($pdo, $orderId),
-                orders_fetch_events($pdo, $orderId)
-            ),
-        ];
+    if ($smsRef === '' && $clientUuid === null) {
+        throw new RuntimeException('شناسه پیامک نامعتبر است');
     }
 
     $salesUserId = $forcedSalesUserId !== null && $forcedSalesUserId > 0
@@ -299,6 +287,14 @@ function gsm_sms_ingest_order(PDO $pdo, array $body, ?int $forcedSalesUserId = n
     $rawItems = $body['items'] ?? null;
     if (!is_array($rawItems) || $rawItems === []) {
         throw new RuntimeException('اقلام سفارش خالی است');
+    }
+    require_once __DIR__ . '/flash-deals.php';
+    if (flash_deals_raw_has_promo($rawItems) || (int) ($body['flash_deal_id'] ?? 0) > 0) {
+        throw new FlashDealException(
+            'FLASH_DEAL_ONLINE_REQUIRED',
+            'این پیشنهاد فقط به‌صورت آنلاین قابل خرید است. برای ثبت سفارش با قیمت ویژه، به اینترنت متصل شوید.',
+            409
+        );
     }
     $expanded = [];
     foreach ($rawItems as $raw) {
@@ -333,6 +329,8 @@ function gsm_sms_ingest_order(PDO $pdo, array $body, ?int $forcedSalesUserId = n
             'model_name' => $raw['model_name'] ?? null,
             'category_name' => $raw['category_name'] ?? null,
             'visual_id' => $visualId !== '' ? $visualId : ($raw['visual_id'] ?? null),
+            'flash_deal_id' => isset($raw['flash_deal_id']) ? (int) $raw['flash_deal_id'] : 0,
+            'expected_promo_toman' => $raw['expected_promo_toman'] ?? ($raw['confirm_promo_toman'] ?? null),
         ];
     }
     $normalized = orders_normalize_cart_items($pdo, $expanded);
@@ -347,7 +345,12 @@ function gsm_sms_ingest_order(PDO $pdo, array $body, ?int $forcedSalesUserId = n
         : 0;
     $branchSnap = orders_branch_snapshot_for_branch_id($pdo, $branchId, $phone);
 
-    $orderId = orders_create_from_normalized(
+    $ingestOwner = [
+        'role' => $forcedSalesUserId !== null && $forcedSalesUserId > 0 ? 'sms' : 'admin',
+        'user_id' => (int) $siteUser['id'],
+        'sales_user_id' => (int) $salesUser['id'],
+    ];
+    $created = orders_create_from_normalized(
         $pdo,
         (int) $siteUser['id'],
         $phone,
@@ -359,8 +362,37 @@ function gsm_sms_ingest_order(PDO $pdo, array $body, ?int $forcedSalesUserId = n
             'sms_ref' => $smsRef,
             'sms_channel' => true,
             'event_actor' => 'client',
+            'client_order_uuid' => $clientUuid,
+            'owner_role' => $ingestOwner['role'],
+            'owner_user_id' => $ingestOwner['user_id'],
+            'owner_sales_user_id' => $ingestOwner['sales_user_id'],
         ]
     );
+    $orderId = $created['order_id'];
+    $duplicate = !empty($created['duplicate']);
+
+    if (is_file(__DIR__ . '/application-logs.php')) {
+        require_once __DIR__ . '/application-logs.php';
+        cms_app_log([
+            'source_app' => 'sms_processor',
+            'severity' => $duplicate ? 'NOTICE' : 'INFO',
+            'category' => 'sms',
+            'event_code' => $duplicate ? 'sms_order_duplicate' : 'sms_order_ingested',
+            'summary' => $duplicate
+                ? 'سفارش پیامکی تکراری همگام شد'
+                : 'سفارش پیامکی در سرور پردازش شد',
+            'related_order_id' => $orderId,
+            'user_type' => 'sales',
+            'user_id' => (int) $salesUser['id'],
+            'user_label' => (string) ($salesUser['username'] ?? ''),
+            'metadata' => [
+                'sms_ref' => $smsRef,
+                'device_send' => false,
+                'server_processed' => true,
+                'duplicate' => $duplicate,
+            ],
+        ]);
+    }
 
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
@@ -369,7 +401,8 @@ function gsm_sms_ingest_order(PDO $pdo, array $body, ?int $forcedSalesUserId = n
 
     return [
         'ok' => true,
-        'deduped' => false,
+        'deduped' => $duplicate,
+        'duplicate' => $duplicate,
         'order' => orders_serialize(
             $order,
             orders_fetch_items($pdo, $orderId),

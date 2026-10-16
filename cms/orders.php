@@ -669,6 +669,9 @@ if ($viewOrder) {
                       <tr>
                         <td>
                           <?= cms_h((string) $line['name']) ?>
+                          <?php if (!empty($line['flash_deal_id'])): ?>
+                            <div class="cms-muted">پیشنهاد ویژه<?= isset($line['flash_deal_title']) && trim((string) $line['flash_deal_title']) !== '' ? ' — ' . cms_h((string) $line['flash_deal_title']) : '' ?></div>
+                          <?php endif; ?>
                           <?php
                             $bits = array_filter([
                                 $line['factory_name'] ?? null,

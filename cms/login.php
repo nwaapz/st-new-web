@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/lib/application-logs.php';
 
 cms_session_start();
 if (!empty($_SESSION['cms_user_id'])) {
@@ -16,11 +17,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($username === '' || $password === '') {
             $error = 'نام کاربری و رمز عبور الزامی است';
         } elseif (cms_attempt_login($username, $password)) {
+            cms_app_log([
+                'source_app' => 'web_crm',
+                'severity' => 'INFO',
+                'category' => 'authentication',
+                'event_code' => 'cms_login_success',
+                'summary' => 'ورود موفق به CRM',
+                'user_type' => 'cms',
+                'user_id' => cms_current_admin_id(),
+                'user_label' => cms_current_username(),
+            ]);
             cms_redirect('index.php');
         } else {
+            cms_app_log([
+                'source_app' => 'web_crm',
+                'severity' => 'WARNING',
+                'category' => 'authentication',
+                'event_code' => 'cms_login_failed',
+                'summary' => 'ورود ناموفق به CRM',
+                'user_label' => $username,
+                'metadata' => ['username' => $username],
+            ]);
             $error = 'نام کاربری یا رمز عبور اشتباه است';
         }
     } catch (Throwable $e) {
+        cms_app_log_exception($e, [
+            'source_app' => 'web_crm',
+            'category' => 'authentication',
+            'event_code' => 'cms_login_error',
+            'summary' => 'خطای ورود به CRM',
+        ]);
         $error = 'خطای دیتابیس — config.local.php و schema را بررسی کنید';
     }
 }

@@ -38,6 +38,49 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
   KEY idx_admin_audit_entity (entity_type, entity_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Operational application logs (UTC DATETIME). Distinct from admin_audit_log.
+CREATE TABLE IF NOT EXISTS application_logs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  event_id CHAR(36) NOT NULL,
+  source_app VARCHAR(32) NOT NULL,
+  environment VARCHAR(16) NOT NULL DEFAULT 'production',
+  severity ENUM('DEBUG','INFO','NOTICE','WARNING','ERROR','CRITICAL') NOT NULL,
+  category VARCHAR(32) NOT NULL DEFAULT 'system',
+  event_code VARCHAR(64) NOT NULL,
+  summary VARCHAR(512) NOT NULL,
+  metadata_json TEXT NULL,
+  exception_class VARCHAR(191) NULL,
+  exception_detail TEXT NULL,
+  user_type VARCHAR(16) NULL,
+  user_id INT UNSIGNED NULL,
+  user_label VARCHAR(64) NULL,
+  related_order_id INT UNSIGNED NULL,
+  related_customer_id INT UNSIGNED NULL,
+  correlation_id VARCHAR(64) NULL,
+  client_occurred_at DATETIME NULL,
+  client_timezone VARCHAR(64) NULL,
+  occurred_at DATETIME NOT NULL,
+  ingested_at DATETIME NOT NULL,
+  app_version VARCHAR(32) NULL,
+  os_version VARCHAR(64) NULL,
+  device_id_hash VARCHAR(64) NULL,
+  was_offline TINYINT(1) NOT NULL DEFAULT 0,
+  is_sensitive TINYINT(1) NOT NULL DEFAULT 0,
+  fingerprint CHAR(40) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_app_log_event (source_app, event_id),
+  KEY idx_app_logs_ingested (ingested_at),
+  KEY idx_app_logs_occurred (occurred_at),
+  KEY idx_app_logs_severity (severity, occurred_at),
+  KEY idx_app_logs_source (source_app, occurred_at),
+  KEY idx_app_logs_category (category, occurred_at),
+  KEY idx_app_logs_code (event_code),
+  KEY idx_app_logs_user (user_id),
+  KEY idx_app_logs_order (related_order_id),
+  KEY idx_app_logs_corr (correlation_id),
+  KEY idx_app_logs_fp (fingerprint, ingested_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS factories (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   name VARCHAR(191) NOT NULL,
@@ -350,6 +393,7 @@ CREATE TABLE IF NOT EXISTS site_device_tokens (
 CREATE TABLE IF NOT EXISTS orders (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   public_code VARCHAR(32) NOT NULL,
+  client_order_uuid CHAR(36) NULL,
   user_id INT UNSIGNED NOT NULL,
   phone VARCHAR(20) NOT NULL,
   branch_id INT UNSIGNED NULL,
@@ -373,6 +417,7 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_orders_public_code (public_code),
+  UNIQUE KEY uq_orders_client_order_uuid (client_order_uuid),
   KEY idx_orders_user (user_id),
   KEY idx_orders_status (status),
   KEY idx_orders_created (created_at),
@@ -397,7 +442,15 @@ CREATE TABLE IF NOT EXISTS order_items (
   model_name VARCHAR(191) NULL,
   category_name VARCHAR(191) NULL,
   visual_id VARCHAR(64) NULL,
+  flash_deal_id INT UNSIGNED NULL,
+  flash_deal_title VARCHAR(191) NULL,
+  flash_deal_version INT UNSIGNED NULL,
+  regular_unit_price BIGINT NULL,
+  promo_unit_price BIGINT NULL,
+  discount_amount BIGINT NULL,
+  line_total BIGINT NULL,
   PRIMARY KEY (id),
+  KEY idx_order_items_flash_deal (flash_deal_id),
   KEY idx_order_items_order (order_id),
   CONSTRAINT fk_order_items_order
     FOREIGN KEY (order_id) REFERENCES orders (id)
@@ -551,4 +604,45 @@ CREATE TABLE IF NOT EXISTS about_exhibition_slides (
   CONSTRAINT fk_about_slide_exhibition
     FOREIGN KEY (exhibition_id) REFERENCES about_exhibitions(id)
     ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Flash deals / special offers. Prices are integer toman. Window timestamps are UTC.
+CREATE TABLE IF NOT EXISTS flash_deals (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  title VARCHAR(191) NOT NULL,
+  description TEXT NULL,
+  banner_image VARCHAR(512) NULL,
+  starts_at DATETIME NOT NULL,
+  ends_at DATETIME NOT NULL,
+  status ENUM('draft','scheduled','active','paused','ended','archived') NOT NULL DEFAULT 'draft',
+  display_priority INT NOT NULL DEFAULT 0,
+  version INT UNSIGNED NOT NULL DEFAULT 1,
+  created_by INT UNSIGNED NULL,
+  updated_by INT UNSIGNED NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_flash_deals_status_window (status, starts_at, ends_at),
+  KEY idx_flash_deals_priority (display_priority, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS flash_deal_products (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  flash_deal_id INT UNSIGNED NOT NULL,
+  product_id INT UNSIGNED NOT NULL,
+  regular_unit_price BIGINT NOT NULL,
+  promo_unit_price BIGINT NOT NULL,
+  discount_amount BIGINT NOT NULL,
+  discount_percent DECIMAL(5,2) NOT NULL,
+  per_order_qty_limit INT UNSIGNED NULL,
+  per_customer_qty_limit INT UNSIGNED NULL,
+  campaign_qty_limit INT UNSIGNED NULL,
+  campaign_qty_sold INT UNSIGNED NOT NULL DEFAULT 0,
+  eligibility_status ENUM('eligible','ineligible') NOT NULL DEFAULT 'eligible',
+  display_priority INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_flash_deal_product (flash_deal_id, product_id),
+  KEY idx_fdp_product (product_id),
+  CONSTRAINT fk_fdp_deal FOREIGN KEY (flash_deal_id) REFERENCES flash_deals (id) ON DELETE CASCADE,
+  CONSTRAINT fk_fdp_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

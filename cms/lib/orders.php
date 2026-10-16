@@ -6,7 +6,9 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/order-cheques.php';
+require_once __DIR__ . '/order-idempotency.php';
 require_once __DIR__ . '/schema-guard.php';
+require_once __DIR__ . '/flash-deals.php';
 
 function orders_notify_sales_client(PDO $pdo, int $orderId, string $notifyType, string $message = ''): void
 {
@@ -388,8 +390,53 @@ function orders_ensure_schema(PDO $pdo): void
         /* ignore */
     }
 
+    try {
+        $uuidCols = [];
+        foreach ($pdo->query('SHOW COLUMNS FROM orders')->fetchAll() ?: [] as $row) {
+            $uuidCols[(string) ($row['Field'] ?? '')] = true;
+        }
+        if (!isset($uuidCols['client_order_uuid'])) {
+            $after = isset($uuidCols['sms_channel'])
+                ? ' AFTER sms_channel'
+                : (isset($uuidCols['public_code']) ? ' AFTER public_code' : '');
+            $pdo->exec(
+                "ALTER TABLE orders ADD COLUMN client_order_uuid CHAR(36) NULL{$after}"
+            );
+        }
+    } catch (Throwable $e) {
+        error_log('[orders_ensure_schema] client_order_uuid column: ' . $e->getMessage());
+    }
+
+    try {
+        $idx = $pdo->query("SHOW INDEX FROM orders WHERE Key_name = 'uq_orders_client_order_uuid'")->fetchAll();
+        if (count($idx) === 0) {
+            $dupes = $pdo->query(
+                "SELECT client_order_uuid AS k, COUNT(*) AS c
+                 FROM orders
+                 WHERE client_order_uuid IS NOT NULL AND TRIM(client_order_uuid) <> ''
+                 GROUP BY client_order_uuid
+                 HAVING c > 1
+                 LIMIT 1"
+            )->fetch();
+            if ($dupes) {
+                error_log(
+                    '[orders_ensure_schema] skip unique uq_orders_client_order_uuid; duplicate values exist'
+                );
+            } else {
+                $pdo->exec(
+                    'ALTER TABLE orders ADD UNIQUE KEY uq_orders_client_order_uuid (client_order_uuid)'
+                );
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('[orders_ensure_schema] client_order_uuid unique: ' . $e->getMessage());
+    }
+
     require_once __DIR__ . '/order-cheques.php';
     order_cheques_ensure_schema($pdo);
+
+    require_once __DIR__ . '/flash-deals.php';
+    flash_deals_ensure_schema($pdo);
 
     cms_schema_guard_mark('orders', [__FILE__]);
     $ready = true;
@@ -1267,7 +1314,7 @@ function orders_serialize(array $order, array $items, array $events): array
                 : null,
             'name' => (string) $item['name'],
             'slug' => (string) ($item['slug'] ?? ''),
-            'price_text' => cms_call_for_price_enabled()
+            'price_text' => cms_call_for_price_enabled() && (int) ($item['flash_deal_id'] ?? 0) <= 0
                 ? null
                 : ($item['price_text'] !== null ? (string) $item['price_text'] : null),
             'image' => $item['image'] !== null ? (string) $item['image'] : null,
@@ -1282,7 +1329,7 @@ function orders_serialize(array $order, array $items, array $events): array
             'visual_id' => isset($item['visual_id']) && $item['visual_id'] !== null && trim((string) $item['visual_id']) !== ''
                 ? (string) $item['visual_id']
                 : null,
-        ], orders_serialize_item_adjustment_fields($item));
+        ], orders_serialize_item_adjustment_fields($item), flash_deals_order_item_payload($item));
     }
 
     $serializedEvents = [];
@@ -1333,6 +1380,7 @@ function orders_serialize(array $order, array $items, array $events): array
             ? strtoupper(trim((string) $order['sms_ref']))
             : null,
         'sms_channel' => !empty($order['sms_channel']),
+        'client_order_uuid' => orders_serialize_client_order_uuid($order),
         'user_id' => (int) $order['user_id'],
         'phone' => (string) $order['phone'],
         'customer_name' => isset($order['customer_name']) && $order['customer_name'] !== null
@@ -1422,6 +1470,7 @@ function orders_serialize_client_list_row(
     return [
         'id' => (int) $order['id'],
         'public_code' => (string) $order['public_code'],
+        'client_order_uuid' => orders_serialize_client_order_uuid($order),
         'user_id' => (int) $order['user_id'],
         'phone' => (string) $order['phone'],
         'status' => (string) $order['status'],
@@ -1796,7 +1845,7 @@ function orders_admin_serialize(array $order, array $items, array $events): arra
             'visual_id' => isset($item['visual_id']) && $item['visual_id'] !== null && trim((string) $item['visual_id']) !== ''
                 ? (string) $item['visual_id']
                 : null,
-        ], orders_serialize_item_adjustment_fields($item));
+        ], orders_serialize_item_adjustment_fields($item), flash_deals_order_item_payload($item));
     }
 
     $payload = orders_serialize($order, $items, $events);
@@ -2063,6 +2112,7 @@ function orders_save_payment_upload(array $file): string
  */
 function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
 {
+    require_once __DIR__ . '/flash-deals.php';
     require_once __DIR__ . '/car-model-factories.php';
     require_once __DIR__ . '/product-car-models.php';
     require_once __DIR__ . '/product-categories.php';
@@ -2086,6 +2136,22 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
             continue;
         }
         $quantity = min(99, $quantity);
+        $flashDealId = isset($raw['flash_deal_id']) ? (int) $raw['flash_deal_id'] : 0;
+        $expectedPromo = 0;
+        if (isset($raw['expected_promo_toman']) || isset($raw['confirm_promo_toman'])) {
+            $expectedRaw = $raw['expected_promo_toman'] ?? $raw['confirm_promo_toman'];
+            if (is_int($expectedRaw)) {
+                $expectedPromo = $expectedRaw;
+            } elseif (is_string($expectedRaw) && trim($expectedRaw) !== '') {
+                try {
+                    $expectedPromo = flash_deals_parse_toman($expectedRaw);
+                } catch (Throwable $e) {
+                    $expectedPromo = 0;
+                }
+            } elseif (is_numeric($expectedRaw)) {
+                $expectedPromo = (int) $expectedRaw;
+            }
+        }
         $unitType = isset($raw['unit_type']) && (string) $raw['unit_type'] === 'pack'
             ? 'pack'
             : 'piece';
@@ -2105,6 +2171,8 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
             'model_name' => null,
             'category_name' => null,
             'visual_id' => null,
+            'flash_deal_id' => $flashDealId > 0 ? $flashDealId : null,
+            'expected_promo_toman' => $expectedPromo > 0 ? $expectedPromo : null,
         ];
 
         if (isset($raw['price_text']) && is_string($raw['price_text']) && trim($raw['price_text']) !== '') {
@@ -2232,7 +2300,8 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
         }
 
         $mergeKey = ($isSeriesKit ? 'series:' . (-$productId) : (string) $productId)
-            . ':' . $snapshot['unit_type'];
+            . ':' . $snapshot['unit_type']
+            . ($flashDealId > 0 ? ':fd' . $flashDealId : '');
         if (isset($normalized[$mergeKey])) {
             $normalized[$mergeKey]['quantity'] = min(
                 99,
@@ -2344,6 +2413,9 @@ function orders_resolve_site_user_for_sales(PDO $pdo, array $salesUser): array
  *   branch_phone: ?string
  * } $branchSnap
  */
+/**
+ * @return array{order_id:int, duplicate:bool}
+ */
 function orders_create_from_normalized(
     PDO $pdo,
     int $userId,
@@ -2353,10 +2425,11 @@ function orders_create_from_normalized(
     ?int $salesUserId,
     string $submitNote,
     array $createOptions = []
-): int {
+): array {
     if ($normalized === []) {
         throw new InvalidArgumentException('اقلام سفارش نامعتبر است');
     }
+    flash_deals_ensure_schema($pdo);
 
     $eventActor = trim((string) ($createOptions['event_actor'] ?? 'client'));
     if ($eventActor === '') {
@@ -2379,6 +2452,25 @@ function orders_create_from_normalized(
         $smsRef = '';
     }
     $smsChannel = !empty($createOptions['sms_channel']) ? 1 : 0;
+    $clientUuid = orders_normalize_client_order_uuid(
+        isset($createOptions['client_order_uuid']) ? (string) $createOptions['client_order_uuid'] : null
+    );
+    if ($clientUuid !== null && $smsRef === '') {
+        $smsRef = orders_compact_sms_ref_from_uuid($clientUuid);
+    }
+    $owner = [
+        'role' => (string) ($createOptions['owner_role'] ?? ($salesUserId ? 'sales' : 'shop')),
+        'user_id' => isset($createOptions['owner_user_id'])
+            ? (int) $createOptions['owner_user_id']
+            : $userId,
+        'sales_user_id' => isset($createOptions['owner_sales_user_id'])
+            ? (int) $createOptions['owner_sales_user_id']
+            : $salesUserId,
+    ];
+    if (($createOptions['event_actor'] ?? '') === 'admin' || ($owner['role'] ?? '') === 'admin') {
+        $owner['role'] = 'admin';
+    }
+
     if (is_file(__DIR__ . '/gsm-sms.php')) {
         require_once __DIR__ . '/gsm-sms.php';
         if (function_exists('gsm_sms_ensure_schema')) {
@@ -2386,17 +2478,52 @@ function orders_create_from_normalized(
         }
     }
 
+    $existing = orders_try_existing_identity(
+        $pdo,
+        $clientUuid,
+        $smsRef !== '' ? $smsRef : null,
+        $normalized,
+        $owner
+    );
+    if ($existing !== null) {
+        if (function_exists('cms_app_log') || is_file(__DIR__ . '/application-logs.php')) {
+            require_once __DIR__ . '/application-logs.php';
+            cms_app_log([
+                'source_app' => !empty($createOptions['sms_channel']) ? 'sms_processor' : 'backend',
+                'severity' => 'NOTICE',
+                'category' => 'order',
+                'event_code' => 'order_duplicate_prevented',
+                'summary' => 'جلوگیری از ثبت تکراری سفارش',
+                'related_order_id' => (int) ($existing['order_id'] ?? 0),
+                'user_type' => $salesUserId ? 'sales' : 'client',
+                'user_id' => $salesUserId ?: $userId,
+                'metadata' => ['sms_channel' => $smsChannel === 1],
+            ]);
+        }
+        return $existing;
+    }
+
+    if (flash_deals_cart_has_promo($normalized)) {
+        require_once __DIR__ . '/flash-deals.php';
+        $normalized = flash_deals_finalize_cart($pdo, $normalized, [
+            'sms_channel' => $smsChannel === 1,
+            'sales_user_id' => $salesUserId,
+            'site_user_id' => $userId,
+        ]);
+    }
+
     $pdo->beginTransaction();
     try {
         $publicCode = orders_generate_public_code($pdo);
         $ins = $pdo->prepare(
             'INSERT INTO orders (
-               public_code, sms_ref, sms_channel, user_id, sales_user_id, sales_user_name, phone, customer_name, status,
+               public_code, client_order_uuid, sms_ref, sms_channel, user_id, sales_user_id, sales_user_name, phone, customer_name, status,
                branch_id, branch_name, branch_city, branch_province_name, branch_phone
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, \'submitted\', ?, ?, ?, ?, ?)'
         );
         $ins->execute([
             $publicCode,
+            $clientUuid,
             $smsRef !== '' ? $smsRef : null,
             $smsChannel,
             $userId,
@@ -2412,14 +2539,30 @@ function orders_create_from_normalized(
         ]);
         $orderId = (int) $pdo->lastInsertId();
 
+        if (flash_deals_cart_has_promo($normalized)) {
+            flash_deals_consume_limits(
+                $pdo,
+                $normalized,
+                $salesUserId,
+                $userId
+            );
+        }
+
+        if (!empty($createOptions['test_fail_after_header'])) {
+            throw new RuntimeException('test_fail_after_header');
+        }
+
         $itemIns = $pdo->prepare(
             'INSERT INTO order_items
               (order_id, product_id, name, slug, price_text, image, quantity,
                unit_type, pack_size, original_quantity, original_unit_type, original_pack_size,
-               factory_name, model_name, category_name, visual_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+               factory_name, model_name, category_name, visual_id,
+               flash_deal_id, flash_deal_title, flash_deal_version,
+               regular_unit_price, promo_unit_price, discount_amount, line_total)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($normalized as $item) {
+            $flashId = isset($item['flash_deal_id']) ? (int) $item['flash_deal_id'] : 0;
             $itemIns->execute([
                 $orderId,
                 $item['product_id'],
@@ -2437,6 +2580,13 @@ function orders_create_from_normalized(
                 $item['model_name'],
                 $item['category_name'],
                 $item['visual_id'] ?? null,
+                $flashId > 0 ? $flashId : null,
+                $flashId > 0 ? (string) ($item['flash_deal_title'] ?? '') : null,
+                $flashId > 0 ? (int) ($item['flash_deal_version'] ?? 0) : null,
+                $flashId > 0 ? (int) ($item['regular_unit_price'] ?? 0) : null,
+                $flashId > 0 ? (int) ($item['promo_unit_price'] ?? 0) : null,
+                $flashId > 0 ? (int) ($item['discount_amount'] ?? 0) : null,
+                $flashId > 0 ? (int) ($item['line_total'] ?? 0) : null,
             ]);
         }
 
@@ -2445,6 +2595,18 @@ function orders_create_from_normalized(
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
+        }
+        if (orders_is_identity_duplicate_key($e)) {
+            $recovered = orders_try_existing_identity(
+                $pdo,
+                $clientUuid,
+                $smsRef !== '' ? $smsRef : null,
+                $normalized,
+                $owner
+            );
+            if ($recovered !== null) {
+                return $recovered;
+            }
         }
         throw $e;
     }
@@ -2461,11 +2623,40 @@ function orders_create_from_normalized(
                 admin_push_notify_new_order($pdo, $orderId);
             } catch (Throwable $pushErr) {
                 error_log('[orders_create_from_normalized] push failed: ' . $pushErr->getMessage());
+                if (is_file(__DIR__ . '/application-logs.php')) {
+                    require_once __DIR__ . '/application-logs.php';
+                    cms_app_log_exception($pushErr, [
+                        'category' => 'push',
+                        'event_code' => 'new_order_push_failed',
+                        'related_order_id' => $orderId,
+                        'summary' => 'پوش سفارش جدید ناموفق بود',
+                    ]);
+                }
             }
         }
     }
 
-    return $orderId;
+    if (function_exists('cms_app_log') || is_file(__DIR__ . '/application-logs.php')) {
+        require_once __DIR__ . '/application-logs.php';
+        cms_app_log([
+            'source_app' => $smsChannel === 1 ? 'sms_processor' : 'backend',
+            'severity' => 'INFO',
+            'category' => 'order',
+            'event_code' => 'order_created',
+            'summary' => 'سفارش جدید ثبت شد' . ($smsChannel === 1 ? ' (پیامک)' : ''),
+            'related_order_id' => $orderId,
+            'user_type' => $salesUserId ? 'sales' : ($eventActor === 'admin' ? 'admin' : 'client'),
+            'user_id' => $adminUserId ?: ($salesUserId ?: $userId),
+            'related_customer_id' => $userId > 0 ? $userId : null,
+            'metadata' => [
+                'public_code' => $publicCode,
+                'sms_channel' => $smsChannel === 1,
+                'item_count' => count($normalized),
+            ],
+        ]);
+    }
+
+    return ['order_id' => $orderId, 'duplicate' => false];
 }
 
 /**
@@ -2588,7 +2779,8 @@ function orders_admin_create_manual(PDO $pdo, array $body, ?array $adminUser): a
         throw new RuntimeException('نوع مشتری نامعتبر است');
     }
 
-    $orderId = orders_create_from_normalized(
+    $clientUuid = orders_client_order_uuid_from_request($body);
+    $created = orders_create_from_normalized(
         $pdo,
         (int) $siteUser['id'],
         (string) $siteUser['phone'],
@@ -2601,8 +2793,13 @@ function orders_admin_create_manual(PDO $pdo, array $body, ?array $adminUser): a
             'customer_name' => $customerName,
             'notify_admins' => false,
             'admin_user_id' => $adminUser !== null ? (int) $adminUser['id'] : null,
+            'client_order_uuid' => $clientUuid,
+            'owner_role' => 'admin',
+            'owner_user_id' => (int) $siteUser['id'],
+            'owner_sales_user_id' => $salesUserId,
         ]
     );
+    $orderId = $created['order_id'];
 
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
@@ -2619,6 +2816,7 @@ function orders_admin_create_manual(PDO $pdo, array $body, ?array $adminUser): a
 
     return [
         'ok' => true,
+        'duplicate' => !empty($created['duplicate']),
         'order_id' => $orderId,
         'pricing_api_version' => 2,
         'order' => $orderPayload,
@@ -3044,6 +3242,20 @@ function orders_cancel(PDO $pdo, array $order, string $actor, string $message = 
     orders_add_event($pdo, $orderId, $current, 'cancelled', $actor, $eventMessage);
     $pdo->commit();
 
+    if (function_exists('cms_app_log') || is_file(__DIR__ . '/application-logs.php')) {
+        require_once __DIR__ . '/application-logs.php';
+        cms_app_log([
+            'source_app' => $actor === 'admin' ? 'backend' : 'backend',
+            'severity' => 'INFO',
+            'category' => 'order',
+            'event_code' => 'order_cancelled',
+            'summary' => 'سفارش لغو شد',
+            'related_order_id' => $orderId,
+            'user_type' => $actor === 'admin' ? 'admin' : 'client',
+            'metadata' => ['from_status' => $current, 'actor' => $actor],
+        ]);
+    }
+
     if ($actor === 'admin') {
         orders_admin_audit($pdo, $order, 'cancel');
     }
@@ -3386,6 +3598,19 @@ function orders_admin_apply_action(
     $next = $nextMap[$action];
     $allowedNext = $allowed[$current] ?? [];
     if (!in_array($next, $allowedNext, true)) {
+        if (is_file(__DIR__ . '/application-logs.php')) {
+            require_once __DIR__ . '/application-logs.php';
+            cms_app_log([
+                'source_app' => 'backend',
+                'severity' => 'WARNING',
+                'category' => 'order',
+                'event_code' => 'order_invalid_transition',
+                'summary' => 'تغییر وضعیت نامعتبر سفارش رد شد',
+                'related_order_id' => $orderId,
+                'user_type' => 'admin',
+                'metadata' => ['action' => $action, 'from_status' => $current, 'to_status' => $next],
+            ]);
+        }
         throw new RuntimeException('این تغییر وضعیت مجاز نیست');
     }
     if ($action === 'reject' && $message === '') {
@@ -3437,6 +3662,26 @@ function orders_admin_apply_action(
     orders_admin_audit($pdo, $order, $action);
 
     orders_notify_sales_client($pdo, $orderId, $next, $message);
+
+    if (function_exists('cms_app_log') || is_file(__DIR__ . '/application-logs.php')) {
+        require_once __DIR__ . '/application-logs.php';
+        $sev = $invoiceWarning !== null ? 'WARNING' : 'INFO';
+        cms_app_log([
+            'source_app' => 'backend',
+            'severity' => $sev,
+            'category' => 'order',
+            'event_code' => 'order_status_' . $action,
+            'summary' => 'تغییر وضعیت سفارش: ' . $current . ' → ' . $next,
+            'related_order_id' => $orderId,
+            'user_type' => 'admin',
+            'metadata' => [
+                'action' => $action,
+                'from_status' => $current,
+                'to_status' => $next,
+                'invoice_warning' => $invoiceWarning,
+            ],
+        ]);
+    }
 
     return ['message' => $resultMessage, 'invoice_warning' => $invoiceWarning];
 }

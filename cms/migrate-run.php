@@ -888,6 +888,14 @@ try {
         ? 'price_import_car_aliases table ready'
         : 'Created price_import_car_aliases table';
 
+    require_once __DIR__ . '/lib/application-logs.php';
+    application_logs_ensure_schema($pdo);
+    $log[] = 'Ensured application_logs table';
+
+    require_once __DIR__ . '/lib/flash-deals.php';
+    flash_deals_ensure_schema($pdo);
+    $log[] = 'Ensured flash_deals tables and order item snapshots';
+
     require_once __DIR__ . '/lib/analytics-orders.php';
     analytics_orders_ensure_schema($pdo);
     $analyticsCounts = analytics_orders_refresh($pdo);
