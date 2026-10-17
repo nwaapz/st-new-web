@@ -126,6 +126,27 @@ function admin_push_all_tokens(PDO $pdo): array
     return $tokens;
 }
 
+function admin_push_delete_token(PDO $pdo, string $token): void
+{
+    admin_push_ensure_schema($pdo);
+    $token = trim($token);
+    if ($token === '') {
+        return;
+    }
+    $stmt = $pdo->prepare('DELETE FROM admin_push_tokens WHERE fcm_token = ?');
+    $stmt->execute([$token]);
+}
+
+function admin_push_last_fcm_error(): ?string
+{
+    return $GLOBALS['admin_push_last_fcm_error'] ?? null;
+}
+
+function admin_push_set_last_fcm_error(?string $message): void
+{
+    $GLOBALS['admin_push_last_fcm_error'] = $message;
+}
+
 function admin_push_base64url_encode(string $data): string
 {
     return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
@@ -199,11 +220,13 @@ function admin_push_fetch_access_token(): ?string
 /**
  * @param array<string, string> $data
  */
-function admin_push_send_to_token(string $token, string $title, string $body, array $data = []): bool
+function admin_push_send_to_token(string $token, string $title, string $body, array $data = [], ?PDO $pdo = null): bool
 {
+    admin_push_set_last_fcm_error(null);
     $projectId = admin_push_firebase_project_id();
     $accessToken = admin_push_fetch_access_token();
     if ($projectId === null || $accessToken === null) {
+        admin_push_set_last_fcm_error('firebase_service_account_or_oauth_unavailable');
         return false;
     }
 
@@ -230,10 +253,6 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
             'data' => $dataPayload,
             'android' => [
                 'priority' => 'HIGH',
-                'notification' => [
-                    'channel_id' => 'fcm_default',
-                    'sound' => 'default',
-                ],
             ],
         ],
     ];
@@ -261,7 +280,24 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return true;
     }
 
-    error_log('[admin-push] FCM send failed HTTP ' . $status . ': ' . (is_string($response) ? $response : ''));
+    $responseText = is_string($response) ? $response : '';
+    $errorMessage = $responseText;
+    if ($responseText !== '') {
+        $decoded = json_decode($responseText, true);
+        if (is_array($decoded)) {
+            $errorMessage = trim((string) ($decoded['error']['message'] ?? $responseText));
+        }
+    }
+    admin_push_set_last_fcm_error('HTTP ' . $status . ': ' . $errorMessage);
+
+    if ($pdo !== null && $responseText !== '') {
+        $upper = strtoupper($responseText);
+        if (str_contains($upper, 'UNREGISTERED') || str_contains($upper, 'NOT_FOUND')) {
+            admin_push_delete_token($pdo, $token);
+        }
+    }
+
+    error_log('[admin-push] FCM send failed HTTP ' . $status . ': ' . $responseText);
     if (is_file(__DIR__ . '/application-logs.php')) {
         require_once __DIR__ . '/application-logs.php';
         cms_app_log([
@@ -273,6 +309,7 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
             'metadata' => [
                 'http_status' => $status,
                 'provider' => 'fcm',
+                'fcm_error' => mb_substr($errorMessage, 0, 500),
             ],
         ]);
     }
@@ -316,7 +353,7 @@ function admin_push_notify_order_activity(PDO $pdo, int $orderId, string $activi
 
     $sent = 0;
     foreach ($tokens as $token) {
-        if (admin_push_send_to_token($token, $copy['title'], $copy['body'], $data)) {
+        if (admin_push_send_to_token($token, $copy['title'], $copy['body'], $data, $pdo)) {
             $sent++;
         }
     }
@@ -419,7 +456,8 @@ function admin_push_notify_order_message(PDO $pdo, int $orderId, string $senderN
             $token,
             'پیام سفارش ' . $publicCode,
             $senderName . ': ' . $preview,
-            $data
+            $data,
+            $pdo
         );
     }
 }
@@ -430,6 +468,7 @@ function admin_push_notify_direct_message(PDO $pdo, int $salesUserId, string $se
         return;
     }
     if (admin_push_service_account_path() === null) {
+        error_log('[admin-push] firebase-service-account.json not found — direct_chat push skipped');
         return;
     }
     $preview = mb_strlen($body) > 120 ? mb_substr($body, 0, 117) . '…' : $body;
@@ -438,12 +477,31 @@ function admin_push_notify_direct_message(PDO $pdo, int $salesUserId, string $se
         'sales_user_id' => (string) $salesUserId,
     ];
     $tokens = admin_push_all_tokens($pdo);
+    if ($tokens === []) {
+        error_log('[admin-push] no admin FCM tokens registered — direct_chat push skipped');
+        if (is_file(__DIR__ . '/application-logs.php')) {
+            require_once __DIR__ . '/application-logs.php';
+            cms_app_log([
+                'source_app' => 'backend',
+                'severity' => 'INFO',
+                'category' => 'push',
+                'event_code' => 'push_no_admin_tokens',
+                'summary' => 'پیام فروشنده ثبت شد اما توکن پوش ادمین وجود ندارد',
+                'metadata' => [
+                    'sales_user_id' => $salesUserId,
+                    'type' => 'direct_chat',
+                ],
+            ]);
+        }
+        return;
+    }
     foreach ($tokens as $token) {
         admin_push_send_to_token(
             $token,
             'پیام فروشنده',
             $senderName . ': ' . $preview,
-            $data
+            $data,
+            $pdo
         );
     }
 }
