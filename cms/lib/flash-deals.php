@@ -1406,9 +1406,6 @@ function flash_deals_pack_product_ids(PDO $pdo, int $dealId): array
     $stmt->execute([$dealId]);
     $ids = [];
     foreach ($stmt->fetchAll() ?: [] as $row) {
-        if ((string) ($row['eligibility_status'] ?? 'eligible') !== 'eligible') {
-            continue;
-        }
         $promo = (int) $row['promo_unit_price'];
         $regular = (int) $row['regular_unit_price'];
         if ($promo <= 0 || $regular <= 0 || $promo >= $regular) {
@@ -1473,9 +1470,6 @@ function flash_deals_build_sales_offer(
 ): ?array {
     $lines = [];
     foreach ($products as $product) {
-        if ((string) ($product['eligibility_status'] ?? 'eligible') !== 'eligible') {
-            continue;
-        }
         $promo = (int) ($product['promo_unit_price'] ?? 0);
         $regular = (int) ($product['regular_unit_price'] ?? 0);
         if ($promo <= 0 || $regular <= 0 || $promo >= $regular) {
@@ -1489,6 +1483,7 @@ function flash_deals_build_sales_offer(
         }
         $inStock = $product['stock_qty'] === null || (int) $product['stock_qty'] > 0;
         $published = $product['published'] === true;
+        $eligible = (string) ($product['eligibility_status'] ?? 'eligible') === 'eligible';
         $lines[] = [
             'product_id' => (int) $product['product_id'],
             'name' => (string) $product['name'],
@@ -1504,7 +1499,7 @@ function flash_deals_build_sales_offer(
             'per_order_qty_limit' => $product['per_order_qty_limit'],
             'per_customer_qty_limit' => $product['per_customer_qty_limit'],
             'campaign_qty_remaining' => $remaining,
-            'line_ok' => $published && $inStock && $remainingOk,
+            'line_ok' => $eligible && $published && $inStock && $remainingOk,
         ];
     }
     if ($lines === []) {
@@ -1536,6 +1531,7 @@ function flash_deals_build_sales_offer(
     $discount = flash_deals_discount($regularTotal, $promoTotal);
     $first = $lines[0];
     $isSingle = count($lines) === 1;
+    $isPack = count($lines) > 1;
     $clientLines = [];
     foreach ($lines as $line) {
         unset($line['line_ok'], $line['per_order_qty_limit'], $line['per_customer_qty_limit'], $line['campaign_qty_remaining']);
@@ -1571,6 +1567,8 @@ function flash_deals_build_sales_offer(
         'per_order_qty_limit' => $perOrder === [] ? null : min($perOrder),
         'per_customer_qty_limit' => $perCustomer === [] ? null : min($perCustomer),
         'campaign_qty_remaining' => $remainings === [] ? null : min($remainings),
+        'is_pack' => $isPack,
+        'product_count' => count($clientLines),
         'products' => $clientLines,
     ];
 }
