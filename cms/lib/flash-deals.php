@@ -1110,46 +1110,15 @@ function flash_deals_sales_offers(PDO $pdo): array
         }
         $inWindow = $now >= $start && $now < $end;
         $campaign = flash_deals_serialize($deal);
-        foreach (flash_deals_fetch_products($pdo, (int) $deal['id']) as $product) {
-            $promo = (int) ($product['promo_unit_price'] ?? 0);
-            $regular = (int) ($product['regular_unit_price'] ?? 0);
-            if ($promo <= 0 || $regular <= 0 || $promo >= $regular) {
-                continue;
-            }
-            $remaining = null;
-            $remainingOk = true;
-            if ($product['campaign_qty_limit'] !== null) {
-                $remaining = max(0, (int) $product['campaign_qty_limit'] - (int) $product['campaign_qty_sold']);
-                $remainingOk = $remaining > 0;
-            }
-            $inStock = $product['stock_qty'] === null || (int) $product['stock_qty'] > 0;
-            $published = $product['published'] === true;
-            $offers[] = [
-                'flash_deal_id' => $campaign['id'],
-                'flash_deal_version' => $campaign['version'],
-                'campaign_title' => $campaign['title'],
-                'campaign_description' => $campaign['description'],
-                'banner_image' => $campaign['banner_image'],
-                'starts_at' => $campaign['starts_at'],
-                'starts_at_jalali' => cms_jalali_format_datetime((string) $deal['starts_at']),
-                'ends_at' => $campaign['ends_at'],
-                'ends_at_jalali' => cms_jalali_format_datetime((string) $deal['ends_at']),
-                'purchasable' => $inWindow && $published && $inStock && $remainingOk,
-                'product_id' => $product['product_id'],
-                'name' => $product['name'],
-                'slug' => $product['slug'],
-                'visual_id' => $product['visual_id'],
-                'image' => $product['image'],
-                'regular_unit_price' => $product['regular_unit_price'],
-                'promo_unit_price' => $product['promo_unit_price'],
-                'regular_price_text' => $product['regular_price_text'],
-                'promo_price_text' => $product['promo_price_text'],
-                'discount_amount' => $product['discount_amount'],
-                'discount_percent' => $product['discount_percent'],
-                'per_order_qty_limit' => $product['per_order_qty_limit'],
-                'per_customer_qty_limit' => $product['per_customer_qty_limit'],
-                'campaign_qty_remaining' => $remaining,
-            ];
+        $offer = flash_deals_build_sales_offer(
+            $campaign,
+            flash_deals_fetch_products($pdo, (int) $deal['id']),
+            $inWindow,
+            cms_jalali_format_datetime((string) $deal['starts_at']),
+            cms_jalali_format_datetime((string) $deal['ends_at'])
+        );
+        if ($offer !== null) {
+            $offers[] = $offer;
         }
     }
 
@@ -1334,7 +1303,195 @@ function flash_deals_finalize_cart(PDO $pdo, array $normalized, array $ctx, ?Dat
         $normalized[$key] = $item;
     }
 
+    flash_deals_assert_complete_packs($pdo, $normalized);
+
     return $normalized;
+}
+
+/**
+ * Priced products that belong to one sale. A campaign with more than one of
+ * these is a pack and must be purchased together.
+ *
+ * @return list<int>
+ */
+function flash_deals_pack_product_ids(PDO $pdo, int $dealId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT product_id, regular_unit_price, promo_unit_price, eligibility_status
+         FROM flash_deal_products
+         WHERE flash_deal_id = ?
+         ORDER BY display_priority DESC, id ASC'
+    );
+    $stmt->execute([$dealId]);
+    $ids = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        if ((string) ($row['eligibility_status'] ?? 'eligible') !== 'eligible') {
+            continue;
+        }
+        $promo = (int) $row['promo_unit_price'];
+        $regular = (int) $row['regular_unit_price'];
+        if ($promo <= 0 || $regular <= 0 || $promo >= $regular) {
+            continue;
+        }
+        $ids[] = (int) $row['product_id'];
+    }
+
+    return $ids;
+}
+
+/**
+ * @param array<string, array<string, mixed>> $normalized
+ */
+function flash_deals_assert_complete_packs(PDO $pdo, array $normalized): void
+{
+    $qtyByDeal = [];
+    foreach ($normalized as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $dealId = flash_deals_item_id($item);
+        if ($dealId <= 0) {
+            continue;
+        }
+        $productId = (int) ($item['product_id'] ?? 0);
+        if (!isset($qtyByDeal[$dealId])) {
+            $qtyByDeal[$dealId] = [];
+        }
+        $qtyByDeal[$dealId][$productId] = (int) ($item['quantity'] ?? 0);
+    }
+
+    foreach ($qtyByDeal as $dealId => $qtyByProduct) {
+        $required = flash_deals_pack_product_ids($pdo, (int) $dealId);
+        if (count($required) <= 1) {
+            continue;
+        }
+        $quantities = [];
+        foreach ($required as $productId) {
+            if (!isset($qtyByProduct[$productId])) {
+                throw new FlashDealException('FLASH_DEAL_UNAVAILABLE', 'محصول این پیشنهاد در دسترس نیست', 409);
+            }
+            $quantities[] = (int) $qtyByProduct[$productId];
+        }
+        if (count(array_unique($quantities)) !== 1) {
+            throw new FlashDealException('FLASH_DEAL_UNAVAILABLE', 'محصول این پیشنهاد در دسترس نیست', 409);
+        }
+    }
+}
+
+/**
+ * @param array<string, mixed> $campaign
+ * @param list<array<string, mixed>> $products
+ * @return array<string, mixed>|null
+ */
+function flash_deals_build_sales_offer(
+    array $campaign,
+    array $products,
+    bool $inWindow,
+    string $startsAtJalali,
+    string $endsAtJalali
+): ?array {
+    $lines = [];
+    foreach ($products as $product) {
+        if ((string) ($product['eligibility_status'] ?? 'eligible') !== 'eligible') {
+            continue;
+        }
+        $promo = (int) ($product['promo_unit_price'] ?? 0);
+        $regular = (int) ($product['regular_unit_price'] ?? 0);
+        if ($promo <= 0 || $regular <= 0 || $promo >= $regular) {
+            continue;
+        }
+        $remaining = null;
+        $remainingOk = true;
+        if ($product['campaign_qty_limit'] !== null) {
+            $remaining = max(0, (int) $product['campaign_qty_limit'] - (int) $product['campaign_qty_sold']);
+            $remainingOk = $remaining > 0;
+        }
+        $inStock = $product['stock_qty'] === null || (int) $product['stock_qty'] > 0;
+        $published = $product['published'] === true;
+        $lines[] = [
+            'product_id' => (int) $product['product_id'],
+            'name' => (string) $product['name'],
+            'slug' => (string) $product['slug'],
+            'visual_id' => $product['visual_id'],
+            'image' => $product['image'],
+            'regular_unit_price' => $regular,
+            'promo_unit_price' => $promo,
+            'regular_price_text' => (string) $product['regular_price_text'],
+            'promo_price_text' => (string) $product['promo_price_text'],
+            'discount_amount' => (int) $product['discount_amount'],
+            'discount_percent' => (string) $product['discount_percent'],
+            'per_order_qty_limit' => $product['per_order_qty_limit'],
+            'per_customer_qty_limit' => $product['per_customer_qty_limit'],
+            'campaign_qty_remaining' => $remaining,
+            'line_ok' => $published && $inStock && $remainingOk,
+        ];
+    }
+    if ($lines === []) {
+        return null;
+    }
+
+    $regularTotal = 0;
+    $promoTotal = 0;
+    $purchasable = $inWindow;
+    $remainings = [];
+    $perOrder = [];
+    $perCustomer = [];
+    foreach ($lines as $line) {
+        $regularTotal += (int) $line['regular_unit_price'];
+        $promoTotal += (int) $line['promo_unit_price'];
+        if (!$line['line_ok']) {
+            $purchasable = false;
+        }
+        if ($line['campaign_qty_remaining'] !== null) {
+            $remainings[] = (int) $line['campaign_qty_remaining'];
+        }
+        if ($line['per_order_qty_limit'] !== null) {
+            $perOrder[] = (int) $line['per_order_qty_limit'];
+        }
+        if ($line['per_customer_qty_limit'] !== null) {
+            $perCustomer[] = (int) $line['per_customer_qty_limit'];
+        }
+    }
+    $discount = flash_deals_discount($regularTotal, $promoTotal);
+    $first = $lines[0];
+    $isSingle = count($lines) === 1;
+    $clientLines = [];
+    foreach ($lines as $line) {
+        unset($line['line_ok'], $line['per_order_qty_limit'], $line['per_customer_qty_limit'], $line['campaign_qty_remaining']);
+        $clientLines[] = $line;
+    }
+
+    return [
+        'flash_deal_id' => $campaign['id'],
+        'flash_deal_version' => $campaign['version'],
+        'campaign_title' => $campaign['title'],
+        'campaign_description' => $campaign['description'],
+        'banner_image' => $campaign['banner_image'],
+        'starts_at' => $campaign['starts_at'],
+        'starts_at_jalali' => $startsAtJalali,
+        'ends_at' => $campaign['ends_at'],
+        'ends_at_jalali' => $endsAtJalali,
+        'purchasable' => $purchasable,
+        'product_id' => $isSingle ? (int) $first['product_id'] : 0,
+        'name' => $isSingle ? (string) $first['name'] : (string) $campaign['title'],
+        'slug' => $isSingle ? (string) $first['slug'] : '',
+        'visual_id' => $isSingle ? $first['visual_id'] : null,
+        'image' => $isSingle
+            ? $first['image']
+            : ($campaign['banner_image'] ?: $first['image']),
+        'regular_unit_price' => $isSingle ? (int) $first['regular_unit_price'] : $regularTotal,
+        'promo_unit_price' => $isSingle ? (int) $first['promo_unit_price'] : $promoTotal,
+        'regular_total' => $regularTotal,
+        'promo_total' => $promoTotal,
+        'regular_price_text' => invoices_format_toman($regularTotal),
+        'promo_price_text' => invoices_format_toman($promoTotal),
+        'discount_amount' => $discount['amount'],
+        'discount_percent' => $discount['percent'],
+        'per_order_qty_limit' => $perOrder === [] ? null : min($perOrder),
+        'per_customer_qty_limit' => $perCustomer === [] ? null : min($perCustomer),
+        'campaign_qty_remaining' => $remainings === [] ? null : min($remainings),
+        'products' => $clientLines,
+    ];
 }
 
 /**
