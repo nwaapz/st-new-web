@@ -207,9 +207,9 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return false;
     }
 
-    // Data-only Android payloads so the app always receives onMessageReceived and
-    // shows a local notification with a PendingIntent (deep link). A notification
-    // payload would let the system tray handle taps without our extras.
+    // Keep both notification (reliable tray display when app is background/killed)
+    // and data (order_id, type, … on tap). Foreground: onMessageReceived still runs
+    // and the app shows a local notification with a deep-link PendingIntent.
     $data['title'] = $title;
     $data['body'] = $body;
     $dataPayload = [];
@@ -223,9 +223,13 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
     $payload = [
         'message' => [
             'token' => $token,
+            'notification' => [
+                'title' => $title,
+                'body' => $body,
+            ],
             'data' => $dataPayload,
             'android' => [
-                'priority' => 'high',
+                'priority' => 'HIGH',
             ],
         ],
     ];
