@@ -2124,6 +2124,7 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
     cms_ensure_product_car_models_schema($pdo);
     cms_ensure_product_categories_schema($pdo);
 
+    $rawItems = flash_deals_expand_unkeyed_pack_lines($pdo, $rawItems);
     $normalized = [];
     foreach ($rawItems as $raw) {
         if (!is_array($raw)) {

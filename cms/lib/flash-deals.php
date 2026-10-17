@@ -1309,6 +1309,87 @@ function flash_deals_finalize_cart(PDO $pdo, array $normalized, array $ctx, ?Dat
 }
 
 /**
+ * A pack bought from an older client arrives as one line with no product id
+ * and the discounted total. Turn that into one line per product.
+ *
+ * @param list<array<string, mixed>> $rawItems
+ * @return list<array<string, mixed>>
+ */
+function flash_deals_expand_unkeyed_pack_lines(PDO $pdo, array $rawItems): array
+{
+    $out = [];
+    foreach ($rawItems as $raw) {
+        if (!is_array($raw)) {
+            $out[] = $raw;
+            continue;
+        }
+        $productId = (int) ($raw['id'] ?? $raw['product_id'] ?? 0);
+        $dealId = (int) ($raw['flash_deal_id'] ?? 0);
+        if ($productId > 0 || $dealId <= 0) {
+            $out[] = $raw;
+            continue;
+        }
+        $lines = [];
+        $sum = 0;
+        foreach (flash_deals_fetch_products($pdo, $dealId) as $product) {
+            if ((string) ($product['eligibility_status'] ?? 'eligible') !== 'eligible') {
+                continue;
+            }
+            $promo = (int) ($product['promo_unit_price'] ?? 0);
+            $regular = (int) ($product['regular_unit_price'] ?? 0);
+            if ($promo <= 0 || $regular <= 0 || $promo >= $regular) {
+                continue;
+            }
+            $lines[] = $product;
+            $sum += $promo;
+        }
+        if ($lines === []) {
+            continue;
+        }
+        $expected = 0;
+        if (isset($raw['expected_promo_toman']) || isset($raw['confirm_promo_toman'])) {
+            $expectedRaw = $raw['expected_promo_toman'] ?? $raw['confirm_promo_toman'];
+            if (is_int($expectedRaw) || is_float($expectedRaw) || (is_string($expectedRaw) && is_numeric($expectedRaw))) {
+                $expected = (int) $expectedRaw;
+            }
+        }
+        if ($expected > 0 && $expected !== $sum) {
+            throw new FlashDealException(
+                'FLASH_DEAL_OFFER_CHANGED',
+                'قیمت این پیشنهاد تغییر کرده است. قیمت جدید را بررسی و دوباره تأیید کنید.',
+                409,
+                [
+                    'product_id' => 0,
+                    'flash_deal_id' => $dealId,
+                    'server_promo_toman' => $sum,
+                    'promo_price_text' => invoices_format_toman($sum),
+                ]
+            );
+        }
+        $qty = isset($raw['quantity']) ? (int) $raw['quantity'] : 1;
+        if ($qty < 1) {
+            $qty = 1;
+        }
+        foreach ($lines as $product) {
+            $out[] = [
+                'id' => (int) $product['product_id'],
+                'name' => (string) $product['name'],
+                'slug' => (string) ($product['slug'] ?? ''),
+                'quantity' => $qty,
+                'unit_type' => 'piece',
+                'image' => $product['image'] ?? null,
+                'visual_id' => $product['visual_id'] ?? null,
+                'price_text' => (string) ($product['promo_price_text'] ?? ''),
+                'flash_deal_id' => $dealId,
+                'expected_promo_toman' => (int) $product['promo_unit_price'],
+            ];
+        }
+    }
+
+    return $out;
+}
+
+/**
  * Priced products that belong to one sale. A campaign with more than one of
  * these is a pack and must be purchased together.
  *
