@@ -230,6 +230,10 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
             'data' => $dataPayload,
             'android' => [
                 'priority' => 'HIGH',
+                'notification' => [
+                    'channel_id' => 'fcm_default',
+                    'sound' => 'default',
+                ],
             ],
         ],
     ];
