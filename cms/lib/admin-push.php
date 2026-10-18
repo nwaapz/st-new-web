@@ -230,11 +230,7 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return false;
     }
 
-    // Keep both notification (reliable tray display when app is background/killed)
-    // and data (order_id, type, … on tap). Foreground: onMessageReceived still runs
-    // and the app shows a local notification with a deep-link PendingIntent.
-    $data['title'] = $title;
-    $data['body'] = $body;
+    // Tray: notification payload (background). Tap/deep link: data keys only (no title/body in data).
     $dataPayload = [];
     foreach ($data as $key => $value) {
         if (!is_scalar($value)) {
@@ -253,6 +249,11 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
             'data' => $dataPayload,
             'android' => [
                 'priority' => 'HIGH',
+                'notification' => [
+                    // Firebase SDK creates this channel on first launch; must exist for tray display.
+                    'channel_id' => 'fcm_fallback_notification_channel',
+                    'sound' => 'default',
+                ],
             ],
         ],
     ];

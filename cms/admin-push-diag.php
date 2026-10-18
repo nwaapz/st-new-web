@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/lib/site-base.php';
 require_once __DIR__ . '/lib/admin-push.php';
+require_once __DIR__ . '/lib/sales-push.php';
 
 cms_require_login();
 
@@ -15,13 +16,16 @@ $onProduction = cms_is_production_host();
 
 $pdo = cms_pdo();
 admin_push_ensure_schema($pdo);
+sales_push_ensure_schema($pdo);
+$salesTokenCount = (int) $pdo->query('SELECT COUNT(DISTINCT fcm_token) FROM sales_push_tokens')->fetchColumn();
 
 $status = [
     'ok' => true,
     'service_account' => admin_push_service_account_path() !== null,
     'service_account_path' => admin_push_service_account_path(),
     'firebase_project_id' => admin_push_firebase_project_id(),
-    'registered_tokens' => count(admin_push_all_tokens($pdo)),
+    'admin_registered_tokens' => count(admin_push_all_tokens($pdo)),
+    'sales_registered_tokens' => $salesTokenCount,
     'admin_user_id' => cms_current_admin_id(),
     'host' => (string) ($_SERVER['HTTP_HOST'] ?? ''),
     'canonical_site_base' => $remoteBase,

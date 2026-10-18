@@ -211,13 +211,13 @@ function sales_push_notify_status_change(
 
     $tokens = sales_push_tokens_for_user($pdo, $salesUserId);
     foreach ($tokens as $token) {
-        admin_push_send_to_token($token, $copy['title'], $copy['body'], $data);
+        admin_push_send_to_token($token, $copy['title'], $copy['body'], $data, $pdo);
     }
 
     if (in_array($notifyType, $chequeTypes, true) && function_exists('admin_push_all_tokens')) {
         require_once __DIR__ . '/admin-push.php';
         foreach (admin_push_all_tokens($pdo) as $adminToken) {
-            admin_push_send_to_token($adminToken, $copy['title'], $copy['body'], $data);
+            admin_push_send_to_token($adminToken, $copy['title'], $copy['body'], $data, $pdo);
         }
     }
 }
@@ -287,7 +287,8 @@ function sales_push_notify_order_message(PDO $pdo, int $orderId, string $senderN
             $token,
             'پیام سفارش ' . $publicCode,
             $senderName . ': ' . $preview,
-            $data
+            $data,
+            $pdo
         );
     }
 }
@@ -308,7 +309,8 @@ function sales_push_notify_direct_message(PDO $pdo, int $salesUserId, string $se
             $token,
             'پیام جدید',
             $senderName . ': ' . $preview,
-            $data
+            $data,
+            $pdo
         );
     }
 }
