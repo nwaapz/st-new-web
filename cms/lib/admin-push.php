@@ -252,10 +252,8 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return false;
     }
 
-    // Tray display needs the notification block and must NOT set channel_id.
-    // On Android 8+, Play Services drops the notification when that channel does not
-    // already exist on the phone, while the FCM HTTP call still returns success.
-    // Tap targets stay in data and arrive as activity extras when the user taps.
+    // Same channel the apps create at startup (startech_push_v3). A local test can
+    // succeed on that channel while FCM stays on an older, silenced one.
     $data['title'] = $title;
     $data['body'] = $body;
     $dataPayload = [];
@@ -276,9 +274,13 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
             'title' => $title,
             'body' => $body,
         ],
-        'android' => [
-            'priority' => 'HIGH',
-        ],
+            'android' => [
+                'priority' => 'HIGH',
+                'notification' => [
+                    'channel_id' => 'startech_push_v3',
+                    'sound' => 'default',
+                ],
+            ],
     ];
     if ($dataPayload !== []) {
         $message['data'] = $dataPayload;
