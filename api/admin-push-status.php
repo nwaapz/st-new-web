@@ -52,41 +52,14 @@ try {
     }
 
     if ($method === 'POST') {
-        $tokens = admin_push_all_tokens($pdo);
-        if ($tokens === []) {
-            api_error('هیچ توکن FCM ثبت نشده — اپ ادمین را باز کنید و وارد شوید', 400);
-        }
-        if (admin_push_service_account_path() === null) {
-            api_error('firebase-service-account.json روی سرور یافت نشد', 503);
-        }
-
-        $data = [
-            'order_id' => '0',
-            'type' => 'test',
-            'public_code' => '',
-            'activity' => 'test',
-        ];
-        admin_push_queue_all($pdo, 'تست اعلان', 'اتصال FCM برقرار است');
-        $sent = 0;
-        $failed = 0;
-        foreach ($tokens as $token) {
-            if (admin_push_send_to_token($token, 'تست اعلان', 'اتصال FCM برقرار است', $data, $pdo)) {
-                $sent++;
-            } else {
-                $failed++;
-            }
-        }
-        if ($sent === 0) {
-            api_error(
-                'ارسال FCM ناموفق بود — ' . (admin_push_last_fcm_error() ?? 'error log سرور را بررسی کنید'),
-                502
-            );
-        }
+        $result = admin_push_send_test($pdo, (int) $admin['id'], 'تست اعلان', 'اتصال FCM برقرار است');
         api_json([
             'ok' => true,
-            'sent' => $sent,
-            'failed' => $failed,
-            'tokens' => count($tokens),
+            'queued_phone' => $result['queued'],
+            'sent' => $result['sent'],
+            'failed' => $result['failed'],
+            'fcm_tokens' => $result['fcm_tokens'],
+            'tray' => admin_push_delivery_mode(),
             'last_fcm_error' => admin_push_last_fcm_error(),
         ]);
     }

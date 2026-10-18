@@ -5,6 +5,12 @@ declare(strict_types=1);
  * FCM push notifications for CMS admin mobile app.
  */
 
+/** Bumped when server delivery changes; diag must match this string. */
+function admin_push_delivery_mode(): string
+{
+    return 'fcm';
+}
+
 function admin_push_ensure_schema(PDO $pdo): void
 {
     static $ready = false;
@@ -137,6 +143,40 @@ function admin_push_client_status(PDO $pdo, int $adminUserId): ?array
     return [
         'note' => (string) ($row['note'] ?? ''),
         'updated_at' => (string) ($row['updated_at'] ?? ''),
+    ];
+}
+
+/**
+ * Queue for the admin app inbox (works without Google FCM), then try FCM as a bonus.
+ *
+ * @return array{queued: bool, sent: int, failed: int, fcm_tokens: int}
+ */
+function admin_push_send_test(PDO $pdo, int $adminUserId, string $title, string $body): array
+{
+    admin_push_queue($pdo, $adminUserId, $title, $body);
+    $tokens = admin_push_all_tokens($pdo);
+    $data = [
+        'order_id' => '0',
+        'type' => 'test',
+        'public_code' => '',
+        'activity' => 'test',
+    ];
+    $sent = 0;
+    $failed = 0;
+    if (admin_push_service_account_path() !== null && $tokens !== []) {
+        foreach ($tokens as $token) {
+            if (admin_push_send_to_token($token, $title, $body, $data, $pdo)) {
+                $sent++;
+            } else {
+                $failed++;
+            }
+        }
+    }
+    return [
+        'queued' => true,
+        'sent' => $sent,
+        'failed' => $failed,
+        'fcm_tokens' => count($tokens),
     ];
 }
 
@@ -364,26 +404,15 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return false;
     }
 
-    // Data only. The app posts the tray notification itself. A system
-    // notification payload was accepted by Google and never shown on the phone.
-    $fields = [];
-    foreach ($data as $key => $value) {
-        if (!is_scalar($value)) {
-            continue;
-        }
-        $text = trim((string) $value);
-        if ($text === '') {
-            continue;
-        }
-        $fields[(string) $key] = $text;
-    }
-    $fields['title'] = $title;
-    $fields['body'] = $body;
-
+    // Standard FCM: notification payload only. Android shows it in the tray;
+    // tap opens the app. No data payload and no channel_id (avoids silent drops).
     $payload = [
         'message' => [
             'token' => $token,
-            'data' => $fields,
+            'notification' => [
+                'title' => $title,
+                'body' => $body,
+            ],
             'android' => [
                 'priority' => 'HIGH',
             ],
