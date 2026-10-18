@@ -35,7 +35,11 @@ try {
             api_error('توکن FCM الزامی است', 400);
         }
         admin_push_register_token($pdo, (int) $admin['id'], $token, $platform);
-        api_json(['ok' => true]);
+        api_json([
+            'ok' => true,
+            'suffix' => substr($token, -8),
+            'admin_user_id' => (int) $admin['id'],
+        ]);
     }
 
     if ($method === 'DELETE') {

@@ -151,10 +151,34 @@ function admin_push_client_status(PDO $pdo, int $adminUserId): ?array
  *
  * @return array{queued: bool, sent: int, failed: int, fcm_tokens: int}
  */
+/**
+ * @return list<string>
+ */
+function admin_push_tokens_for_user(PDO $pdo, int $adminUserId): array
+{
+    admin_push_ensure_schema($pdo);
+    if ($adminUserId <= 0) {
+        return [];
+    }
+    $stmt = $pdo->prepare(
+        'SELECT fcm_token FROM admin_push_tokens WHERE admin_user_id = ? ORDER BY updated_at DESC'
+    );
+    $stmt->execute([$adminUserId]);
+    $rows = $stmt ? $stmt->fetchAll() : [];
+    $tokens = [];
+    foreach ($rows as $row) {
+        $token = trim((string) ($row['fcm_token'] ?? ''));
+        if ($token !== '') {
+            $tokens[] = $token;
+        }
+    }
+    return $tokens;
+}
+
 function admin_push_send_test(PDO $pdo, int $adminUserId, string $title, string $body): array
 {
     admin_push_queue($pdo, $adminUserId, $title, $body);
-    $tokens = admin_push_all_tokens($pdo);
+    $tokens = admin_push_tokens_for_user($pdo, $adminUserId);
     $data = [
         'order_id' => '0',
         'type' => 'test',
@@ -404,14 +428,18 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return false;
     }
 
-    // Standard FCM: notification payload only. Android shows it in the tray;
-    // tap opens the app. No data payload and no channel_id (avoids silent drops).
+    // Notification for background tray; duplicate title/body in data for foreground.
     $payload = [
         'message' => [
             'token' => $token,
             'notification' => [
                 'title' => $title,
                 'body' => $body,
+            ],
+            'data' => [
+                'title' => $title,
+                'body' => $body,
+                'type' => 'alert',
             ],
             'android' => [
                 'priority' => 'HIGH',
