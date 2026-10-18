@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/lib/site-base.php';
+require_once __DIR__ . '/lib/admin-push.php';
 
 cms_require_login();
 
@@ -12,39 +13,66 @@ $diagUrl = $remoteBase . '/cms/admin-push-diag.php';
 $loginUrl = $remoteBase . '/cms/login.php';
 $onProduction = cms_is_production_host();
 
+$pdo = cms_pdo();
+admin_push_ensure_schema($pdo);
+
+$status = [
+    'ok' => true,
+    'service_account' => admin_push_service_account_path() !== null,
+    'service_account_path' => admin_push_service_account_path(),
+    'firebase_project_id' => admin_push_firebase_project_id(),
+    'registered_tokens' => count(admin_push_all_tokens($pdo)),
+    'admin_user_id' => cms_current_admin_id(),
+    'host' => (string) ($_SERVER['HTTP_HOST'] ?? ''),
+    'canonical_site_base' => $remoteBase,
+];
+$getBody = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+
 $flash = '';
-$getBody = '';
-
-if ($onProduction && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test'])) {
-    $ch = curl_init($statusUrl);
-    if ($ch !== false) {
-        $cookie = session_name() . '=' . session_id();
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => ['Cookie: ' . $cookie],
-            CURLOPT_TIMEOUT => 30,
-        ]);
-        $body = curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        $flash = 'POST HTTP ' . $code . ': ' . (is_string($body) ? $body : '');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test'])) {
+    $tokens = admin_push_all_tokens($pdo);
+    if ($tokens === []) {
+        $flash = json_encode([
+            'ok' => false,
+            'error' => 'هیچ توکن FCM ثبت نشده — اپ ادمین را باز کنید و وارد شوید',
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    } elseif (admin_push_service_account_path() === null) {
+        $flash = json_encode([
+            'ok' => false,
+            'error' => 'firebase-service-account.json روی سرور یافت نشد',
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
     } else {
-        $flash = 'curl_init failed';
-    }
-}
-
-if ($onProduction) {
-    $ch = curl_init($statusUrl);
-    if ($ch !== false) {
-        $cookie = session_name() . '=' . session_id();
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => ['Cookie: ' . $cookie],
-            CURLOPT_TIMEOUT => 15,
-        ]);
-        $getBody = (string) curl_exec($ch);
-        curl_close($ch);
+        $data = [
+            'order_id' => '0',
+            'type' => 'test',
+            'public_code' => '',
+            'activity' => 'test',
+        ];
+        $sent = 0;
+        $failed = 0;
+        foreach ($tokens as $token) {
+            if (admin_push_send_to_token($token, 'تست اعلان', 'اتصال FCM برقرار است', $data, $pdo)) {
+                $sent++;
+            } else {
+                $failed++;
+            }
+        }
+        if ($sent === 0) {
+            $flash = json_encode([
+                'ok' => false,
+                'error' => 'ارسال FCM ناموفق بود — ' . (admin_push_last_fcm_error() ?? 'error log سرور'),
+                'failed' => $failed,
+                'tokens' => count($tokens),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        } else {
+            $flash = json_encode([
+                'ok' => true,
+                'sent' => $sent,
+                'failed' => $failed,
+                'tokens' => count($tokens),
+                'last_fcm_error' => admin_push_last_fcm_error(),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        }
     }
 }
 
@@ -65,25 +93,25 @@ header('Content-Type: text/html; charset=utf-8');
 </head>
 <body>
     <h1>تست پوش FCM (ادمین)</h1>
-    <p>سرور تست: <strong><?= htmlspecialchars($remoteBase, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong></p>
-    <p>API: <a href="<?= htmlspecialchars($statusUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"><?= htmlspecialchars($statusUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a></p>
+    <p>سرور موبایل (اپ‌ها): <strong><?= htmlspecialchars($remoteBase, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong></p>
+    <p>API (اختیاری): <a href="<?= htmlspecialchars($statusUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"><?= htmlspecialchars($statusUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a></p>
 
     <?php if (!$onProduction): ?>
         <div class="note">
-            <p>این صفحه روی localhost است؛ پوش و توکن‌های FCM روی <strong>سرور اصلی</strong> ثبت می‌شوند.</p>
-            <p>۱. <a href="<?= htmlspecialchars($loginUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">ورود به CMS روی startechgroup.ir</a></p>
-            <p>۲. <a href="<?= htmlspecialchars($diagUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">باز کردن همین صفحه روی سرور اصلی</a></p>
+            <p>این نصب localhost است؛ اعداد زیر از <strong>دیتابیس محلی XAMPP</strong> هستند، نه startechgroup.ir.</p>
+            <p>تست واقعی پوش: <a href="<?= htmlspecialchars($loginUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">ورود CMS</a> →
+                <a href="<?= htmlspecialchars($diagUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">diag روی سرور اصلی</a></p>
         </div>
-    <?php else: ?>
-        <p>وضعیت فعلی (GET):</p>
-        <pre><?= htmlspecialchars($getBody, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></pre>
-        <form method="post">
-            <button type="submit" name="send_test" value="1">ارسال اعلان تست (POST)</button>
-        </form>
-        <?php if ($flash !== ''): ?>
-            <p>نتیجه تست:</p>
-            <pre><?= htmlspecialchars($flash, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></pre>
-        <?php endif; ?>
+    <?php endif; ?>
+
+    <p>وضعیت (همین سرور / دیتابیس):</p>
+    <pre><?= htmlspecialchars($getBody, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></pre>
+    <form method="post">
+        <button type="submit" name="send_test" value="1">ارسال اعلان تست</button>
+    </form>
+    <?php if ($flash !== ''): ?>
+        <p>نتیجه تست:</p>
+        <pre><?= htmlspecialchars($flash, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></pre>
     <?php endif; ?>
 
     <p><a href="index.php">بازگشت به CMS</a></p>
