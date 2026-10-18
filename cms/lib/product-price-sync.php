@@ -209,15 +209,17 @@ function product_price_sync_apply_admin_delta(PDO $pdo, array $updates): array
         $values[] = $productId;
         $stmt = $pdo->prepare('UPDATE products SET ' . implode(', ', $setParts) . ' WHERE id = ?');
         $stmt->execute($values);
-        if ($stmt->rowCount() > 0) {
-            $updatedIds[] = $productId;
-        } else {
+        $saved = $stmt->rowCount() > 0;
+        if (!$saved) {
             $check = $pdo->prepare('SELECT id FROM products WHERE id = ? LIMIT 1');
             $check->execute([$productId]);
             if ($check->fetchColumn()) {
                 product_price_sync_mark_product($pdo, $productId);
-                $updatedIds[] = $productId;
+                $saved = true;
             }
+        }
+        if ($saved) {
+            $updatedIds[] = $productId;
         }
     }
 

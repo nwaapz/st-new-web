@@ -229,7 +229,7 @@ function price_sheet_sync_row_to_series(PDO $pdo, string $visualId, array $field
 
 /**
  * @param list<string> $visualIds
- * @return array<string, array{model_name:string,warranty_text:string,stock_qty:?int,is_series:bool}>
+ * @return array<string, array{model_name:string,warranty_text:string,stock_qty:?int,is_series:bool,price_text:string,pack_size:?int}>
  */
 function price_sheet_load_catalog_meta_by_visual_ids(PDO $pdo, array $visualIds): array
 {
@@ -241,14 +241,14 @@ function price_sheet_load_catalog_meta_by_visual_ids(PDO $pdo, array $visualIds)
     cms_ensure_product_car_models_schema($pdo);
     price_sheet_ensure_series_model_column($pdo);
 
-    /** @var array<string, array{model_name:string,warranty_text:string,stock_qty:?int,is_series:bool}> $metaByVisual */
+    /** @var array<string, array{model_name:string,warranty_text:string,stock_qty:?int,is_series:bool,price_text:string,pack_size:?int}> $metaByVisual */
     $metaByVisual = [];
     $placeholders = implode(',', array_fill(0, count($visualIds), '?'));
     $params = array_values($visualIds);
 
     $productModelSql = cms_product_model_names_sql('p');
     $productStmt = $pdo->prepare(
-        "SELECT p.visual_id, p.description, p.stock_qty, {$productModelSql} AS model_name
+        "SELECT p.visual_id, p.description, p.stock_qty, p.price_text, p.pack_size, {$productModelSql} AS model_name
          FROM products p
          WHERE p.visual_id IN ({$placeholders})"
     );
@@ -264,11 +264,13 @@ function price_sheet_load_catalog_meta_by_visual_ids(PDO $pdo, array $visualIds)
             'warranty_text' => price_sheet_warranty_text((string) ($productRow['description'] ?? '')),
             'stock_qty' => $productStock !== null ? max(0, (int) $productStock) : null,
             'is_series' => false,
+            'price_text' => trim((string) ($productRow['price_text'] ?? '')),
+            'pack_size' => price_import_db_pack_size($productRow),
         ];
     }
 
     $seriesStmt = $pdo->prepare(
-        "SELECT s.visual_id, s.description,
+        "SELECT s.visual_id, s.description, s.price_text, s.pack_size,
                 (SELECT GROUP_CONCAT(m.name ORDER BY pscm.sort_order ASC, m.sort_order ASC, m.name ASC SEPARATOR ' · ')
                  FROM product_series_car_models pscm
                  JOIN car_models m ON m.id = pscm.car_model_id
@@ -293,11 +295,17 @@ function price_sheet_load_catalog_meta_by_visual_ids(PDO $pdo, array $visualIds)
                 'warranty_text' => $seriesWarranty,
                 'stock_qty' => null,
                 'is_series' => true,
+                'price_text' => trim((string) ($seriesRow['price_text'] ?? '')),
+                'pack_size' => price_import_db_pack_size($seriesRow),
             ];
             continue;
         }
 
         $existing['is_series'] = true;
+        if (($existing['price_text'] ?? '') === '') {
+            $existing['price_text'] = trim((string) ($seriesRow['price_text'] ?? ''));
+            $existing['pack_size'] = price_import_db_pack_size($seriesRow);
+        }
         if ($seriesModel !== '') {
             $existing['model_name'] = $seriesModel;
         }
@@ -312,7 +320,7 @@ function price_sheet_load_catalog_meta_by_visual_ids(PDO $pdo, array $visualIds)
 
 /**
  * @param array<string,mixed> $sheetRow
- * @param array{model_name:string,warranty_text:string,stock_qty:?int,is_series?:bool}|null $catalogMeta
+ * @param array{model_name:string,warranty_text:string,stock_qty:?int,is_series?:bool,price_text?:string,pack_size?:?int}|null $catalogMeta
  */
 function price_sheet_apply_catalog_meta_to_row(array &$sheetRow, ?array $catalogMeta): void
 {
@@ -327,6 +335,34 @@ function price_sheet_apply_catalog_meta_to_row(array &$sheetRow, ?array $catalog
     if (($sheetRow['stock_qty'] ?? null) === null && ($catalogMeta['stock_qty'] ?? null) !== null) {
         $sheetRow['stock_qty'] = $catalogMeta['stock_qty'];
     }
+    $catalogPrice = trim((string) ($catalogMeta['price_text'] ?? ''));
+    if ($catalogPrice !== '') {
+        $sheetRow['price_text'] = $catalogPrice;
+    }
+    if (array_key_exists('pack_size', $catalogMeta)) {
+        $sheetRow['pack_size'] = $catalogMeta['pack_size'];
+    }
+}
+
+/**
+ * Push one spreadsheet row to the live catalog (shop + client apps). Prices live only on products / product_series.
+ *
+ * @param array<string,mixed> $row
+ */
+function price_sheet_push_row_to_catalog(PDO $pdo, array $row, int $line = 1): void
+{
+    $result = price_sheet_apply_row_to_catalog($pdo, $row, $line);
+    if (!empty($result['updated'])) {
+        return;
+    }
+    $reason = trim((string) ($result['reason'] ?? ''));
+    if ($reason === '') {
+        return;
+    }
+    $visualId = (string) ($result['visual_id'] ?? '');
+    throw new RuntimeException(
+        $visualId !== '' ? $reason . ' (کد ' . $visualId . ')' : $reason
+    );
 }
 
 function price_sheet_resolve_catalog_category_id(PDO $pdo, string $visualId): ?int
@@ -1016,12 +1052,17 @@ function price_sheet_list_rows(PDO $pdo, int $categoryId): array
     $stmt->execute([$categoryId]);
 
     $rows = [];
+    $visualIds = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $packSize = $row['pack_size'];
+        $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
+        if ($visualId !== '') {
+            $visualIds[$visualId] = true;
+        }
         $rows[] = [
             'id' => (int) ($row['id'] ?? 0),
             'category_id' => (int) ($row['category_id'] ?? 0),
-            'visual_id' => (string) ($row['visual_id'] ?? ''),
+            'visual_id' => $visualId,
             'name' => (string) ($row['name'] ?? ''),
             'price_text' => (string) ($row['price_text'] ?? ''),
             'pack_size' => $packSize !== null ? (int) $packSize : null,
@@ -1029,6 +1070,13 @@ function price_sheet_list_rows(PDO $pdo, int $categoryId): array
             'updated_at' => (string) ($row['updated_at'] ?? ''),
         ];
     }
+
+    $catalogByVisual = price_sheet_load_catalog_meta_by_visual_ids($pdo, array_keys($visualIds));
+    foreach ($rows as &$sheetRow) {
+        $visualId = (string) ($sheetRow['visual_id'] ?? '');
+        price_sheet_apply_catalog_meta_to_row($sheetRow, $catalogByVisual[$visualId] ?? null);
+    }
+    unset($sheetRow);
 
     return $rows;
 }
@@ -1116,15 +1164,14 @@ function price_sheet_apply_posted_rows(
             $sortOrder
         );
 
-        price_sheet_sync_row_to_product($pdo, $visualId, [
+        price_sheet_push_row_to_catalog($pdo, [
+            'visual_id' => $visualId,
             'name' => $name,
+            'price_text' => $priceText,
+            'pack_size' => $packSize,
             'warranty_text' => $warrantyText,
             'stock_qty' => $stockQty,
-        ]);
-        price_sheet_sync_row_to_series($pdo, $visualId, [
-            'name' => $name,
-            'warranty_text' => $warrantyText,
-        ]);
+        ], $saved + 1);
         $saved++;
         $sortOrder++;
     }
@@ -1421,6 +1468,14 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
             $stockQty,
             $sortOrder,
         ]);
+        price_sheet_push_row_to_catalog($pdo, [
+            'visual_id' => $visualId,
+            'name' => $name,
+            'price_text' => $priceText,
+            'pack_size' => $packSize,
+            'warranty_text' => $warrantyText,
+            'stock_qty' => $stockQty,
+        ], $imported + 1);
         $imported++;
         $sortByCategory[$rowCategoryId]++;
     }
@@ -1687,6 +1742,20 @@ function price_sheet_rows_for_publish(PDO $pdo, ?int $categoryId = null): array
             'stock_qty' => $stockQty !== null ? (int) $stockQty : null,
         ];
     }
+
+    $visualIds = [];
+    foreach ($rows as $row) {
+        $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
+        if ($visualId !== '') {
+            $visualIds[$visualId] = true;
+        }
+    }
+    $catalogByVisual = price_sheet_load_catalog_meta_by_visual_ids($pdo, array_keys($visualIds));
+    foreach ($rows as &$sheetRow) {
+        $visualId = price_import_normalize_visual_id((string) ($sheetRow['visual_id'] ?? ''));
+        price_sheet_apply_catalog_meta_to_row($sheetRow, $catalogByVisual[$visualId] ?? null);
+    }
+    unset($sheetRow);
 
     return $rows;
 }

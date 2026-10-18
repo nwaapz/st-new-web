@@ -308,5 +308,10 @@ function admin_product_series_save(PDO $pdo, array $data): int
         throw $e;
     }
 
+    if ($priceText !== '') {
+        require_once __DIR__ . '/product-price-sync.php';
+        product_price_sync_mark_series($pdo, $seriesId);
+    }
+
     return $seriesId;
 }
