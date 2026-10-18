@@ -252,15 +252,26 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return false;
     }
 
-    // Plain tray notification. No channel id and no deep-link data: the system
-    // shows it and a tap just opens the app, which is the path that worked before.
+    // Data only. The app posts the tray notification itself. A system
+    // notification payload was accepted by Google and never shown on the phone.
+    $fields = [];
+    foreach ($data as $key => $value) {
+        if (!is_scalar($value)) {
+            continue;
+        }
+        $text = trim((string) $value);
+        if ($text === '') {
+            continue;
+        }
+        $fields[(string) $key] = $text;
+    }
+    $fields['title'] = $title;
+    $fields['body'] = $body;
+
     $payload = [
         'message' => [
             'token' => $token,
-            'notification' => [
-                'title' => $title,
-                'body' => $body,
-            ],
+            'data' => $fields,
             'android' => [
                 'priority' => 'HIGH',
             ],
