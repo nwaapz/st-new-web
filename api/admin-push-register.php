@@ -24,7 +24,14 @@ try {
         $body = admin_auth_request_json();
         $token = trim((string) ($body['fcm_token'] ?? $body['token'] ?? ''));
         $platform = trim((string) ($body['platform'] ?? 'android'));
+        $note = trim((string) ($body['note'] ?? ''));
+        if ($note !== '') {
+            admin_push_save_client_note($pdo, (int) $admin['id'], $note);
+        }
         if ($token === '') {
+            if ($note !== '') {
+                api_json(['ok' => true]);
+            }
             api_error('توکن FCM الزامی است', 400);
         }
         admin_push_register_token($pdo, (int) $admin['id'], $token, $platform);

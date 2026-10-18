@@ -24,8 +24,120 @@ function admin_push_ensure_schema(PDO $pdo): void
           KEY idx_fcm_token (fcm_token)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS admin_push_inbox (
+          id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+          admin_user_id INT UNSIGNED NOT NULL,
+          title VARCHAR(180) NOT NULL,
+          body VARCHAR(500) NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          KEY idx_admin_inbox (admin_user_id, id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS admin_push_client_status (
+          admin_user_id INT UNSIGNED NOT NULL,
+          note VARCHAR(255) NOT NULL DEFAULT \'\',
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (admin_user_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
 
     $ready = true;
+}
+
+function admin_push_queue(PDO $pdo, int $adminUserId, string $title, string $body): void
+{
+    admin_push_ensure_schema($pdo);
+    if ($adminUserId <= 0) {
+        return;
+    }
+    $title = mb_substr(trim($title), 0, 180);
+    $body = mb_substr(trim($body), 0, 500);
+    if ($title === '' && $body === '') {
+        return;
+    }
+    $stmt = $pdo->prepare('INSERT INTO admin_push_inbox (admin_user_id, title, body) VALUES (?, ?, ?)');
+    $stmt->execute([$adminUserId, $title, $body]);
+}
+
+function admin_push_queue_all(PDO $pdo, string $title, string $body): void
+{
+    admin_push_ensure_schema($pdo);
+    $stmt = $pdo->query('SELECT DISTINCT admin_user_id FROM admin_push_tokens');
+    $ids = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN) : [];
+    foreach ($ids as $id) {
+        admin_push_queue($pdo, (int) $id, $title, $body);
+    }
+}
+
+/**
+ * @return list<array{id: int, title: string, body: string}>
+ */
+function admin_push_pull(PDO $pdo, int $adminUserId): array
+{
+    admin_push_ensure_schema($pdo);
+    if ($adminUserId <= 0) {
+        return [];
+    }
+    $stmt = $pdo->prepare(
+        'SELECT id, title, body FROM admin_push_inbox WHERE admin_user_id = ? ORDER BY id ASC LIMIT 20'
+    );
+    $stmt->execute([$adminUserId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($rows === []) {
+        return [];
+    }
+    $ids = [];
+    $items = [];
+    foreach ($rows as $row) {
+        $ids[] = (int) $row['id'];
+        $items[] = [
+            'id' => (int) $row['id'],
+            'title' => (string) $row['title'],
+            'body' => (string) $row['body'],
+        ];
+    }
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $delete = $pdo->prepare('DELETE FROM admin_push_inbox WHERE id IN (' . $placeholders . ')');
+    $delete->execute($ids);
+    return $items;
+}
+
+function admin_push_save_client_note(PDO $pdo, int $adminUserId, string $note): void
+{
+    admin_push_ensure_schema($pdo);
+    if ($adminUserId <= 0) {
+        return;
+    }
+    $note = mb_substr(trim($note), 0, 255);
+    $stmt = $pdo->prepare(
+        'INSERT INTO admin_push_client_status (admin_user_id, note) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE note = VALUES(note), updated_at = CURRENT_TIMESTAMP'
+    );
+    $stmt->execute([$adminUserId, $note]);
+}
+
+/**
+ * @return array{note: string, updated_at: string}|null
+ */
+function admin_push_client_status(PDO $pdo, int $adminUserId): ?array
+{
+    admin_push_ensure_schema($pdo);
+    if ($adminUserId <= 0) {
+        return null;
+    }
+    $stmt = $pdo->prepare('SELECT note, updated_at FROM admin_push_client_status WHERE admin_user_id = ?');
+    $stmt->execute([$adminUserId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($row)) {
+        return null;
+    }
+    return [
+        'note' => (string) ($row['note'] ?? ''),
+        'updated_at' => (string) ($row['updated_at'] ?? ''),
+    ];
 }
 
 function admin_push_service_account_path(): ?string
@@ -360,6 +472,7 @@ function admin_push_notify_order_activity(PDO $pdo, int $orderId, string $activi
         'activity' => $activityType,
         'scope' => $branchId > 0 ? 'branches' : 'customers',
     ];
+    admin_push_queue_all($pdo, $copy['title'], $copy['body']);
 
     if (admin_push_service_account_path() === null) {
         error_log('[admin-push] firebase-service-account.json not found — place it in deploy/ or cms/ on the server');
@@ -467,6 +580,8 @@ function admin_push_notify_order_message(PDO $pdo, int $orderId, string $senderN
         'public_code' => $publicCode,
     ];
 
+    admin_push_queue_all($pdo, 'پیام سفارش ' . $publicCode, $senderName . ': ' . $preview);
+
     if (admin_push_service_account_path() === null) {
         return;
     }
@@ -488,15 +603,16 @@ function admin_push_notify_direct_message(PDO $pdo, int $salesUserId, string $se
     if ($salesUserId <= 0) {
         return;
     }
-    if (admin_push_service_account_path() === null) {
-        error_log('[admin-push] firebase-service-account.json not found — direct_chat push skipped');
-        return;
-    }
     $preview = mb_strlen($body) > 120 ? mb_substr($body, 0, 117) . '…' : $body;
     $data = [
         'type' => 'direct_chat',
         'sales_user_id' => (string) $salesUserId,
     ];
+    admin_push_queue_all($pdo, 'پیام فروشنده', $senderName . ': ' . $preview);
+    if (admin_push_service_account_path() === null) {
+        error_log('[admin-push] firebase-service-account.json not found — direct_chat push skipped');
+        return;
+    }
     $tokens = admin_push_all_tokens($pdo);
     if ($tokens === []) {
         error_log('[admin-push] no admin FCM tokens registered — direct_chat push skipped');

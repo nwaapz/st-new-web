@@ -216,6 +216,9 @@ function sales_push_notify_status_change(
 
     if (in_array($notifyType, $chequeTypes, true) && function_exists('admin_push_all_tokens')) {
         require_once __DIR__ . '/admin-push.php';
+        if (function_exists('admin_push_queue_all')) {
+            admin_push_queue_all($pdo, $copy['title'], $copy['body']);
+        }
         foreach (admin_push_all_tokens($pdo) as $adminToken) {
             admin_push_send_to_token($adminToken, $copy['title'], $copy['body'], $data, $pdo);
         }

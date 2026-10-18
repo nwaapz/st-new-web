@@ -18,6 +18,7 @@ $pdo = cms_pdo();
 admin_push_ensure_schema($pdo);
 sales_push_ensure_schema($pdo);
 $salesTokenCount = (int) $pdo->query('SELECT COUNT(DISTINCT fcm_token) FROM sales_push_tokens')->fetchColumn();
+$clientStatus = admin_push_client_status($pdo, (int) cms_current_admin_id());
 
 $status = [
     'ok' => true,
@@ -26,9 +27,11 @@ $status = [
     'firebase_project_id' => admin_push_firebase_project_id(),
     'admin_registered_tokens' => count(admin_push_all_tokens($pdo)),
     'admin_tokens' => admin_push_token_summaries($pdo),
-    'tray' => 'app',
+    'tray' => 'phone',
     'sales_registered_tokens' => $salesTokenCount,
     'admin_user_id' => cms_current_admin_id(),
+    'app_seen_at' => is_array($clientStatus) ? $clientStatus['updated_at'] : null,
+    'app_note' => is_array($clientStatus) ? $clientStatus['note'] : null,
     'host' => (string) ($_SERVER['HTTP_HOST'] ?? ''),
     'canonical_site_base' => $remoteBase,
 ];
@@ -54,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test'])) {
             'public_code' => '',
             'activity' => 'test',
         ];
+        admin_push_queue_all($pdo, 'تست اعلان', 'اتصال FCM برقرار است');
         $sent = 0;
         $failed = 0;
         foreach ($tokens as $token) {
@@ -76,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test'])) {
                 'sent' => $sent,
                 'failed' => $failed,
                 'tokens' => count($tokens),
-                'tray' => 'app',
+                'tray' => 'phone',
                 'last_fcm_error' => admin_push_last_fcm_error(),
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
         }

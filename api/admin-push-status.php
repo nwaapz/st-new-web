@@ -66,6 +66,7 @@ try {
             'public_code' => '',
             'activity' => 'test',
         ];
+        admin_push_queue_all($pdo, 'تست اعلان', 'اتصال FCM برقرار است');
         $sent = 0;
         $failed = 0;
         foreach ($tokens as $token) {
