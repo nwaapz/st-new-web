@@ -1299,6 +1299,45 @@ function orders_apply_item_adjustments(PDO $pdo, int $orderId, array $adjustment
 
 /**
  * @param array<string, mixed> $order
+ */
+function orders_client_pre_invoice_sent(array $order): bool
+{
+    if (isset($order['pre_invoice_created_at']) && trim((string) $order['pre_invoice_created_at']) !== '') {
+        return true;
+    }
+    if (isset($order['pre_invoice_file']) && trim((string) $order['pre_invoice_file']) !== '') {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Locked order line price for shop/sales clients (not live catalog).
+ *
+ * @param array<string, mixed> $order
+ * @param array<string, mixed> $item
+ */
+function orders_client_serialize_item_price_text(array $order, array $item): ?string
+{
+    $stored = isset($item['price_text']) && trim((string) $item['price_text']) !== ''
+        ? (string) $item['price_text']
+        : null;
+    if ((int) ($item['flash_deal_id'] ?? 0) > 0) {
+        return $stored;
+    }
+    if (orders_client_pre_invoice_sent($order)) {
+        return $stored;
+    }
+    if (cms_call_for_price_enabled()) {
+        return null;
+    }
+
+    return $stored;
+}
+
+/**
+ * @param array<string, mixed> $order
  * @param list<array<string, mixed>> $items
  * @param list<array<string, mixed>> $events
  * @return array<string, mixed>
@@ -1314,9 +1353,7 @@ function orders_serialize(array $order, array $items, array $events): array
                 : null,
             'name' => (string) $item['name'],
             'slug' => (string) ($item['slug'] ?? ''),
-            'price_text' => cms_call_for_price_enabled() && (int) ($item['flash_deal_id'] ?? 0) <= 0
-                ? null
-                : ($item['price_text'] !== null ? (string) $item['price_text'] : null),
+            'price_text' => orders_client_serialize_item_price_text($order, $item),
             'image' => $item['image'] !== null ? (string) $item['image'] : null,
             'quantity' => (int) $item['quantity'],
             'unit_type' => orders_item_unit_type($item),
