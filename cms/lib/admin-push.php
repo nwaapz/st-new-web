@@ -126,6 +126,28 @@ function admin_push_all_tokens(PDO $pdo): array
     return $tokens;
 }
 
+/**
+ * @return list<array{suffix: string, updated_at: string}>
+ */
+function admin_push_token_summaries(PDO $pdo): array
+{
+    admin_push_ensure_schema($pdo);
+    $stmt = $pdo->query('SELECT fcm_token, updated_at FROM admin_push_tokens ORDER BY updated_at DESC');
+    $rows = $stmt ? $stmt->fetchAll() : [];
+    $out = [];
+    foreach ($rows as $row) {
+        $token = trim((string) ($row['fcm_token'] ?? ''));
+        if ($token === '') {
+            continue;
+        }
+        $out[] = [
+            'suffix' => substr($token, -8),
+            'updated_at' => (string) ($row['updated_at'] ?? ''),
+        ];
+    }
+    return $out;
+}
+
 function admin_push_delete_token(PDO $pdo, string $token): void
 {
     admin_push_ensure_schema($pdo);

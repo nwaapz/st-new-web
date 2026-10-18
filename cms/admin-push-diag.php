@@ -25,6 +25,8 @@ $status = [
     'service_account_path' => admin_push_service_account_path(),
     'firebase_project_id' => admin_push_firebase_project_id(),
     'admin_registered_tokens' => count(admin_push_all_tokens($pdo)),
+    'admin_tokens' => admin_push_token_summaries($pdo),
+    'tray' => 'app_default_channel',
     'sales_registered_tokens' => $salesTokenCount,
     'admin_user_id' => cms_current_admin_id(),
     'host' => (string) ($_SERVER['HTTP_HOST'] ?? ''),
@@ -74,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test'])) {
                 'sent' => $sent,
                 'failed' => $failed,
                 'tokens' => count($tokens),
+                'tray' => 'app_default_channel',
                 'last_fcm_error' => admin_push_last_fcm_error(),
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
         }
