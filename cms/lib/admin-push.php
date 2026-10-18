@@ -230,32 +230,39 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return false;
     }
 
-    // Tray: notification payload (background). Tap/deep link: data keys only (no title/body in data).
+    // Tray display needs the notification block and must NOT set channel_id.
+    // On Android 8+, Play Services drops the notification when that channel does not
+    // already exist on the phone, while the FCM HTTP call still returns success.
+    // Tap targets stay in data and arrive as activity extras when the user taps.
+    $data['title'] = $title;
+    $data['body'] = $body;
     $dataPayload = [];
     foreach ($data as $key => $value) {
         if (!is_scalar($value)) {
             continue;
         }
-        $dataPayload[(string) $key] = (string) $value;
+        $stringValue = trim((string) $value);
+        if ($stringValue === '') {
+            continue;
+        }
+        $dataPayload[(string) $key] = $stringValue;
     }
 
-    $payload = [
-        'message' => [
-            'token' => $token,
-            'notification' => [
-                'title' => $title,
-                'body' => $body,
-            ],
-            'data' => $dataPayload,
-            'android' => [
-                'priority' => 'HIGH',
-                'notification' => [
-                    // Firebase SDK creates this channel on first launch; must exist for tray display.
-                    'channel_id' => 'fcm_fallback_notification_channel',
-                    'sound' => 'default',
-                ],
-            ],
+    $message = [
+        'token' => $token,
+        'notification' => [
+            'title' => $title,
+            'body' => $body,
         ],
+        'android' => [
+            'priority' => 'HIGH',
+        ],
+    ];
+    if ($dataPayload !== []) {
+        $message['data'] = $dataPayload;
+    }
+    $payload = [
+        'message' => $message,
     ];
 
     $url = 'https://fcm.googleapis.com/v1/projects/' . rawurlencode($projectId) . '/messages:send';
