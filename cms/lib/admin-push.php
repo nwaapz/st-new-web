@@ -252,41 +252,19 @@ function admin_push_send_to_token(string $token, string $title, string $body, ar
         return false;
     }
 
-    // Same channel the apps create at startup (startech_push_v3). A local test can
-    // succeed on that channel while FCM stays on an older, silenced one.
-    $data['title'] = $title;
-    $data['body'] = $body;
-    $dataPayload = [];
-    foreach ($data as $key => $value) {
-        if (!is_scalar($value)) {
-            continue;
-        }
-        $stringValue = trim((string) $value);
-        if ($stringValue === '') {
-            continue;
-        }
-        $dataPayload[(string) $key] = $stringValue;
-    }
-
-    $message = [
-        'token' => $token,
-        'notification' => [
-            'title' => $title,
-            'body' => $body,
-        ],
+    // Plain tray notification. No channel id and no deep-link data: the system
+    // shows it and a tap just opens the app, which is the path that worked before.
+    $payload = [
+        'message' => [
+            'token' => $token,
+            'notification' => [
+                'title' => $title,
+                'body' => $body,
+            ],
             'android' => [
                 'priority' => 'HIGH',
-                'notification' => [
-                    'channel_id' => 'startech_push_v3',
-                    'sound' => 'default',
-                ],
             ],
-    ];
-    if ($dataPayload !== []) {
-        $message['data'] = $dataPayload;
-    }
-    $payload = [
-        'message' => $message,
+        ],
     ];
 
     $url = 'https://fcm.googleapis.com/v1/projects/' . rawurlencode($projectId) . '/messages:send';
