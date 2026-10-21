@@ -128,6 +128,38 @@ function order_cheques_fetch(PDO $pdo, int $orderId): array
 }
 
 /**
+ * All cheques for orders owned by a sales client user (read-only list).
+ *
+ * @return list<array<string, mixed>>
+ */
+function order_cheques_fetch_for_sales_user(PDO $pdo, int $salesUserId, int $limit = 200): array
+{
+    order_cheques_ensure_schema($pdo);
+    if ($salesUserId <= 0) {
+        return [];
+    }
+    $limit = max(1, min(500, $limit));
+    $stmt = $pdo->prepare(
+        'SELECT c.*, o.public_code AS order_public_code
+         FROM order_cheques c
+         INNER JOIN orders o ON o.id = c.order_id
+         WHERE o.sales_user_id = ?
+         ORDER BY c.due_on ASC, c.id ASC
+         LIMIT ' . (int) $limit
+    );
+    $stmt->execute([$salesUserId]);
+    $rows = $stmt->fetchAll() ?: [];
+    $out = [];
+    foreach ($rows as $row) {
+        $serialized = order_cheques_serialize_row($row);
+        $serialized['order_public_code'] = (string) ($row['order_public_code'] ?? '');
+        $out[] = $serialized;
+    }
+
+    return $out;
+}
+
+/**
  * @param array<string, mixed> $row
  * @return array<string, mixed>
  */
