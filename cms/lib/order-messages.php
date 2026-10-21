@@ -159,14 +159,21 @@ function order_messages_mark_read_for_client(PDO $pdo, int $orderId): void
 
 function order_messages_upload_error_message(int $code): string
 {
-    return match ($code) {
-        UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'حجم تصویر بیش از حد مجاز است',
-        UPLOAD_ERR_PARTIAL => 'آپلود تصویر ناقص بود',
-        UPLOAD_ERR_NO_TMP_DIR => 'پوشه موقت سرور در دسترس نیست',
-        UPLOAD_ERR_CANT_WRITE => 'ذخیره تصویر روی سرور ممکن نیست',
-        UPLOAD_ERR_EXTENSION => 'آپلود تصویر توسط سرور مسدود شد',
-        default => 'آپلود تصویر ناموفق بود',
-    };
+    switch ($code) {
+        case UPLOAD_ERR_INI_SIZE:
+        case UPLOAD_ERR_FORM_SIZE:
+            return 'حجم تصویر بیش از حد مجاز است';
+        case UPLOAD_ERR_PARTIAL:
+            return 'آپلود تصویر ناقص بود';
+        case UPLOAD_ERR_NO_TMP_DIR:
+            return 'پوشه موقت سرور در دسترس نیست';
+        case UPLOAD_ERR_CANT_WRITE:
+            return 'ذخیره تصویر روی سرور ممکن نیست';
+        case UPLOAD_ERR_EXTENSION:
+            return 'آپلود تصویر توسط سرور مسدود شد';
+        default:
+            return 'آپلود تصویر ناموفق بود';
+    }
 }
 
 /**
@@ -196,12 +203,21 @@ function order_messages_resolve_image_type(string $tmpPath, string $clientType, 
     }
     if ($mime === '' || $mime === 'application/octet-stream') {
         $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-        $mime = match ($ext) {
-            'jpg', 'jpeg' => 'image/jpeg',
-            'png' => 'image/png',
-            'webp' => 'image/webp',
-            default => '',
-        };
+        switch ($ext) {
+            case 'jpg':
+            case 'jpeg':
+                $mime = 'image/jpeg';
+                break;
+            case 'png':
+                $mime = 'image/png';
+                break;
+            case 'webp':
+                $mime = 'image/webp';
+                break;
+            default:
+                $mime = '';
+                break;
+        }
     }
     if ($mime === 'image/jpg' || $mime === 'image/pjpeg') {
         $mime = 'image/jpeg';
