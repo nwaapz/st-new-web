@@ -59,6 +59,11 @@ function order_messages_ensure_schema(PDO $pdo): void
                 'ALTER TABLE order_messages ADD COLUMN client_read_at TIMESTAMP NULL DEFAULT NULL AFTER sales_read_at'
             );
         }
+        if (!isset($cols['image'])) {
+            $pdo->exec(
+                "ALTER TABLE order_messages ADD COLUMN image VARCHAR(512) NULL DEFAULT NULL AFTER body"
+            );
+        }
         $actorType = '';
         $typeStmt = $pdo->query("SHOW COLUMNS FROM order_messages LIKE 'actor'");
         $typeRow = $typeStmt ? $typeStmt->fetch() : false;
@@ -152,6 +157,118 @@ function order_messages_mark_read_for_client(PDO $pdo, int $orderId): void
     )->execute([$orderId]);
 }
 
+function order_messages_upload_error_message(int $code): string
+{
+    return match ($code) {
+        UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'حجم تصویر بیش از حد مجاز است',
+        UPLOAD_ERR_PARTIAL => 'آپلود تصویر ناقص بود',
+        UPLOAD_ERR_NO_TMP_DIR => 'پوشه موقت سرور در دسترس نیست',
+        UPLOAD_ERR_CANT_WRITE => 'ذخیره تصویر روی سرور ممکن نیست',
+        UPLOAD_ERR_EXTENSION => 'آپلود تصویر توسط سرور مسدود شد',
+        default => 'آپلود تصویر ناموفق بود',
+    };
+}
+
+/**
+ * @return array{ext: string, mime: string}|null
+ */
+function order_messages_resolve_image_type(string $tmpPath, string $clientType, string $originalName): ?array
+{
+    $map = [
+        'image/jpeg' => '.jpg',
+        'image/jpg' => '.jpg',
+        'image/pjpeg' => '.jpg',
+        'image/png' => '.png',
+        'image/x-png' => '.png',
+        'image/webp' => '.webp',
+    ];
+
+    $mime = '';
+    if ($tmpPath !== '' && is_file($tmpPath) && class_exists('finfo')) {
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = strtolower($finfo->file($tmpPath) ?: '');
+    }
+    if ($mime === '' || $mime === 'application/octet-stream') {
+        $clientType = strtolower(trim($clientType));
+        if (isset($map[$clientType])) {
+            $mime = $clientType === 'image/jpg' ? 'image/jpeg' : $clientType;
+        }
+    }
+    if ($mime === '' || $mime === 'application/octet-stream') {
+        $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+        $mime = match ($ext) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            default => '',
+        };
+    }
+    if ($mime === 'image/jpg' || $mime === 'image/pjpeg') {
+        $mime = 'image/jpeg';
+    }
+    if ($mime === '' || !isset($map[$mime])) {
+        return null;
+    }
+
+    return ['ext' => $map[$mime], 'mime' => $mime];
+}
+
+function order_messages_handle_image_upload(string $field = 'image'): ?string
+{
+    if (!isset($_FILES[$field]) || !is_array($_FILES[$field])) {
+        return null;
+    }
+    $error = (int) ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($error === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+    if ($error !== UPLOAD_ERR_OK) {
+        throw new InvalidArgumentException(order_messages_upload_error_message($error));
+    }
+    $tmp = (string) ($_FILES[$field]['tmp_name'] ?? '');
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        throw new InvalidArgumentException('فایل آپلود معتبر نیست');
+    }
+
+    $resolved = order_messages_resolve_image_type(
+        $tmp,
+        (string) ($_FILES[$field]['type'] ?? ''),
+        (string) ($_FILES[$field]['name'] ?? ''),
+    );
+    if ($resolved === null) {
+        throw new InvalidArgumentException('فقط JPEG/PNG/WebP مجاز است');
+    }
+    if ((int) ($_FILES[$field]['size'] ?? 0) > 5 * 1024 * 1024) {
+        throw new InvalidArgumentException('حداکثر حجم تصویر ۵ مگابایت است');
+    }
+
+    $dir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'order-chat';
+    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+        throw new RuntimeException('ساخت پوشه آپلود ممکن نیست');
+    }
+
+    $name = 'order-chat-' . bin2hex(random_bytes(8)) . $resolved['ext'];
+    $dest = $dir . DIRECTORY_SEPARATOR . $name;
+    if (!move_uploaded_file($tmp, $dest)) {
+        throw new RuntimeException('ذخیره تصویر ناموفق بود');
+    }
+
+    return '/uploads/order-chat/' . $name;
+}
+
+function order_messages_notify_preview(string $body, ?string $image): string
+{
+    $body = trim($body);
+    if ($body !== '') {
+        return $body;
+    }
+    if ($image !== null && trim($image) !== '') {
+        return 'تصویر';
+    }
+
+    return '';
+}
+
 function order_messages_mark_read_for_sales(PDO $pdo, int $orderId): void
 {
     order_messages_ensure_schema($pdo);
@@ -165,8 +282,14 @@ function order_messages_mark_read_for_sales(PDO $pdo, int $orderId): void
 /**
  * @return array<string, mixed>
  */
-function order_messages_post_admin(PDO $pdo, int $orderId, int $adminUserId, string $adminName, string $body): array
-{
+function order_messages_post_admin(
+    PDO $pdo,
+    int $orderId,
+    int $adminUserId,
+    string $adminName,
+    string $body,
+    ?string $image = null
+): array {
     order_messages_ensure_schema($pdo);
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
@@ -176,8 +299,9 @@ function order_messages_post_admin(PDO $pdo, int $orderId, int $adminUserId, str
         throw new InvalidArgumentException('این سفارش بسته شده — ارسال پیام جدید مجاز نیست');
     }
     $body = trim($body);
-    if ($body === '') {
-        throw new InvalidArgumentException('متن پیام الزامی است');
+    $image = $image !== null ? trim($image) : '';
+    if ($body === '' && $image === '') {
+        throw new InvalidArgumentException('متن یا تصویر پیام الزامی است');
     }
     if (mb_strlen($body) > 4000) {
         throw new InvalidArgumentException('پیام خیلی طولانی است');
@@ -185,10 +309,10 @@ function order_messages_post_admin(PDO $pdo, int $orderId, int $adminUserId, str
 
     $stmt = $pdo->prepare(
         'INSERT INTO order_messages
-         (order_id, actor, admin_user_id, admin_name, body, admin_read_at)
-         VALUES (?, \'admin\', ?, ?, ?, CURRENT_TIMESTAMP)'
+         (order_id, actor, admin_user_id, admin_name, body, image, admin_read_at)
+         VALUES (?, \'admin\', ?, ?, ?, ?, CURRENT_TIMESTAMP)'
     );
-    $stmt->execute([$orderId, $adminUserId, $adminName, $body]);
+    $stmt->execute([$orderId, $adminUserId, $adminName, $body, $image !== '' ? $image : null]);
     $id = (int) $pdo->lastInsertId();
 
     $row = $pdo->prepare('SELECT * FROM order_messages WHERE id = ? LIMIT 1');
@@ -198,7 +322,12 @@ function order_messages_post_admin(PDO $pdo, int $orderId, int $adminUserId, str
         throw new RuntimeException('ثبت پیام ناموفق بود');
     }
 
-    order_messages_notify_sales($pdo, $orderId, $adminName, $body);
+    order_messages_notify_sales(
+        $pdo,
+        $orderId,
+        $adminName,
+        order_messages_notify_preview($body, $image !== '' ? $image : null)
+    );
 
     return order_messages_serialize($message);
 }
@@ -206,8 +335,14 @@ function order_messages_post_admin(PDO $pdo, int $orderId, int $adminUserId, str
 /**
  * @return array<string, mixed>
  */
-function order_messages_post_sales(PDO $pdo, int $orderId, int $salesUserId, string $salesName, string $body): array
-{
+function order_messages_post_sales(
+    PDO $pdo,
+    int $orderId,
+    int $salesUserId,
+    string $salesName,
+    string $body,
+    ?string $image = null
+): array {
     order_messages_ensure_schema($pdo);
     $order = orders_get_by_id($pdo, $orderId);
     if ($order === null) {
@@ -217,8 +352,9 @@ function order_messages_post_sales(PDO $pdo, int $orderId, int $salesUserId, str
         throw new InvalidArgumentException('این سفارش بسته شده — ارسال پیام جدید مجاز نیست');
     }
     $body = trim($body);
-    if ($body === '') {
-        throw new InvalidArgumentException('متن پیام الزامی است');
+    $image = $image !== null ? trim($image) : '';
+    if ($body === '' && $image === '') {
+        throw new InvalidArgumentException('متن یا تصویر پیام الزامی است');
     }
     if (mb_strlen($body) > 4000) {
         throw new InvalidArgumentException('پیام خیلی طولانی است');
@@ -226,10 +362,10 @@ function order_messages_post_sales(PDO $pdo, int $orderId, int $salesUserId, str
 
     $stmt = $pdo->prepare(
         'INSERT INTO order_messages
-         (order_id, actor, sales_user_id, sales_name, body, sales_read_at)
-         VALUES (?, \'sales\', ?, ?, ?, CURRENT_TIMESTAMP)'
+         (order_id, actor, sales_user_id, sales_name, body, image, sales_read_at)
+         VALUES (?, \'sales\', ?, ?, ?, ?, CURRENT_TIMESTAMP)'
     );
-    $stmt->execute([$orderId, $salesUserId, $salesName, $body]);
+    $stmt->execute([$orderId, $salesUserId, $salesName, $body, $image !== '' ? $image : null]);
     $id = (int) $pdo->lastInsertId();
 
     $row = $pdo->prepare('SELECT * FROM order_messages WHERE id = ? LIMIT 1');
@@ -239,7 +375,12 @@ function order_messages_post_sales(PDO $pdo, int $orderId, int $salesUserId, str
         throw new RuntimeException('ثبت پیام ناموفق بود');
     }
 
-    order_messages_notify_admins($pdo, $orderId, $salesName, $body);
+    order_messages_notify_admins(
+        $pdo,
+        $orderId,
+        $salesName,
+        order_messages_notify_preview($body, $image !== '' ? $image : null)
+    );
 
     return order_messages_serialize($message);
 }
@@ -267,8 +408,14 @@ function order_messages_verify_client_order(PDO $pdo, int $orderId, int $userId)
 /**
  * @return array<string, mixed>
  */
-function order_messages_post_client(PDO $pdo, int $orderId, int $userId, string $clientName, string $body): array
-{
+function order_messages_post_client(
+    PDO $pdo,
+    int $orderId,
+    int $userId,
+    string $clientName,
+    string $body,
+    ?string $image = null
+): array {
     order_messages_ensure_schema($pdo);
     $order = order_messages_verify_client_order($pdo, $orderId, $userId);
     if ($order === null) {
@@ -278,8 +425,9 @@ function order_messages_post_client(PDO $pdo, int $orderId, int $userId, string 
         throw new InvalidArgumentException('این سفارش بسته شده — ارسال پیام جدید مجاز نیست');
     }
     $body = trim($body);
-    if ($body === '') {
-        throw new InvalidArgumentException('متن پیام الزامی است');
+    $image = $image !== null ? trim($image) : '';
+    if ($body === '' && $image === '') {
+        throw new InvalidArgumentException('متن یا تصویر پیام الزامی است');
     }
     if (mb_strlen($body) > 4000) {
         throw new InvalidArgumentException('پیام خیلی طولانی است');
@@ -287,10 +435,10 @@ function order_messages_post_client(PDO $pdo, int $orderId, int $userId, string 
 
     $stmt = $pdo->prepare(
         'INSERT INTO order_messages
-         (order_id, actor, client_user_id, client_name, body, client_read_at)
-         VALUES (?, \'client\', ?, ?, ?, CURRENT_TIMESTAMP)'
+         (order_id, actor, client_user_id, client_name, body, image, client_read_at)
+         VALUES (?, \'client\', ?, ?, ?, ?, CURRENT_TIMESTAMP)'
     );
-    $stmt->execute([$orderId, $userId, $clientName, $body]);
+    $stmt->execute([$orderId, $userId, $clientName, $body, $image !== '' ? $image : null]);
     $id = (int) $pdo->lastInsertId();
 
     $row = $pdo->prepare('SELECT * FROM order_messages WHERE id = ? LIMIT 1');
@@ -300,7 +448,12 @@ function order_messages_post_client(PDO $pdo, int $orderId, int $userId, string 
         throw new RuntimeException('ثبت پیام ناموفق بود');
     }
 
-    order_messages_notify_admins($pdo, $orderId, $clientName, $body);
+    order_messages_notify_admins(
+        $pdo,
+        $orderId,
+        $clientName,
+        order_messages_notify_preview($body, $image !== '' ? $image : null)
+    );
 
     return order_messages_serialize($message);
 }
@@ -316,12 +469,15 @@ function order_messages_serialize(array $row): array
         $senderName = (string) ($row['sales_name'] ?? '');
     }
 
+    $image = isset($row['image']) ? trim((string) $row['image']) : '';
+
     return [
         'id' => (int) ($row['id'] ?? 0),
         'order_id' => (int) ($row['order_id'] ?? 0),
         'actor' => $actor,
         'sender_name' => $senderName,
         'body' => (string) ($row['body'] ?? ''),
+        'image' => $image !== '' ? $image : null,
         'created_at' => (string) ($row['created_at'] ?? ''),
     ];
 }
