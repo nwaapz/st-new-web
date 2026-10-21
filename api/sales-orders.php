@@ -55,13 +55,21 @@ try {
         );
         $stmt->execute([$salesUserId]);
         $rows = $stmt->fetchAll() ?: [];
+        $orderIds = [];
+        foreach ($rows as $row) {
+            $orderIds[] = (int) $row['id'];
+        }
+        $summaries = orders_list_item_summaries($pdo, $orderIds);
         $orders = [];
         foreach ($rows as $row) {
             $id = (int) $row['id'];
-            $orders[] = orders_serialize(
+            $summary = $summaries[$id] ?? ['item_count' => 0, 'first_name' => null, 'has_flash' => false];
+            $orders[] = orders_serialize_client_list_row(
                 $row,
-                orders_fetch_items($pdo, $id),
-                orders_fetch_events($pdo, $id)
+                (int) $summary['item_count'],
+                0,
+                $summary['first_name'],
+                (bool) $summary['has_flash']
             );
         }
         api_json(['ok' => true, 'orders' => $orders]);

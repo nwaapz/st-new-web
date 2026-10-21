@@ -4,30 +4,51 @@ declare(strict_types=1);
 require_once __DIR__ . '/_common.php';
 require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 
-function car_models_api_row(PDO $pdo, array $row): array
+function car_models_api_rows(PDO $pdo, array $rows): array
 {
-    $factoryIdsStmt = $pdo->prepare(
-        'SELECT factory_id FROM car_model_factories
-         WHERE car_model_id = ?
-         ORDER BY sort_order ASC, factory_id ASC'
-    );
-    $factoryIdsStmt->execute([(int) $row['id']]);
-    $factoryIds = array_map(
-        static fn (array $r): int => (int) $r['factory_id'],
-        $factoryIdsStmt->fetchAll() ?: []
-    );
+    if ($rows === []) {
+        return [];
+    }
+    $ids = [];
+    foreach ($rows as $row) {
+        $id = (int) ($row['id'] ?? 0);
+        if ($id > 0) {
+            $ids[] = $id;
+        }
+    }
+    $factoryMap = [];
+    if ($ids !== []) {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare(
+            "SELECT car_model_id, factory_id
+             FROM car_model_factories
+             WHERE car_model_id IN ({$placeholders})
+             ORDER BY sort_order ASC, factory_id ASC"
+        );
+        $stmt->execute($ids);
+        foreach ($stmt->fetchAll() ?: [] as $link) {
+            $factoryMap[(int) $link['car_model_id']][] = (int) $link['factory_id'];
+        }
+    }
 
-    return [
-        'id' => (int) $row['id'],
-        'factory_id' => (int) ($row['factory_id'] ?? ($factoryIds[0] ?? 0)),
-        'factory_ids' => $factoryIds,
-        'factory_names' => (string) ($row['factory_names'] ?? ''),
-        'name' => (string) $row['name'],
-        'slug' => (string) $row['slug'],
-        'description' => $row['description'] ?? null,
-        'image' => $row['image'] ?? null,
-        'sort_order' => (int) ($row['sort_order'] ?? 0),
-    ];
+    $items = [];
+    foreach ($rows as $row) {
+        $id = (int) $row['id'];
+        $factoryIds = $factoryMap[$id] ?? [];
+        $items[] = [
+            'id' => $id,
+            'factory_id' => (int) ($row['factory_id'] ?? ($factoryIds[0] ?? 0)),
+            'factory_ids' => $factoryIds,
+            'factory_names' => (string) ($row['factory_names'] ?? ''),
+            'name' => (string) $row['name'],
+            'slug' => (string) $row['slug'],
+            'description' => $row['description'] ?? null,
+            'image' => $row['image'] ?? null,
+            'sort_order' => (int) ($row['sort_order'] ?? 0),
+        ];
+    }
+
+    return $items;
 }
 
 try {
@@ -51,9 +72,10 @@ try {
         if (!$row) {
             api_error('Car model not found', 404);
         }
-        api_json(['item' => car_models_api_row($pdo, $row)]);
+        api_json(['item' => car_models_api_rows($pdo, [$row])[0]]);
     }
 
+    $all = isset($_GET['all']) && (string) $_GET['all'] === '1';
     $factoryId = isset($_GET['factory_id']) ? (int) $_GET['factory_id'] : 0;
     $factorySlug = trim((string) ($_GET['factory_slug'] ?? ''));
 
@@ -63,8 +85,19 @@ try {
         $factoryId = (int) ($s->fetchColumn() ?: 0);
     }
 
-    if ($factoryId <= 0) {
+    if (!$all && $factoryId <= 0) {
         api_error('factory_id, factory_slug, or id required', 400);
+    }
+
+    if ($all) {
+        $stmt = $pdo->query(
+            "SELECT m.id, {$primaryFactorySql} AS factory_id, {$factoryNamesSql} AS factory_names,
+                    m.name, m.slug, m.description, m.image, m.sort_order
+             FROM car_models m
+             WHERE m.published = 1
+             ORDER BY m.sort_order ASC, m.name ASC"
+        );
+        api_json(['items' => car_models_api_rows($pdo, $stmt->fetchAll() ?: [])]);
     }
 
     $filterSql = cms_car_model_factory_filter_sql('m');
@@ -76,11 +109,7 @@ try {
          ORDER BY m.sort_order ASC, m.name ASC"
     );
     $stmt->execute([$factoryId]);
-    $items = [];
-    foreach ($stmt->fetchAll() ?: [] as $row) {
-        $items[] = car_models_api_row($pdo, $row);
-    }
-    api_json(['items' => $items]);
+    api_json(['items' => car_models_api_rows($pdo, $stmt->fetchAll() ?: [])]);
 } catch (Throwable $e) {
     api_error('Car models unavailable', 503);
 }

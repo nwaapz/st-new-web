@@ -32,13 +32,22 @@ try {
         }
 
         if (isset($_GET['timeline']) && (string) $_GET['timeline'] === '1') {
+            $since = '';
+            if (isset($_GET['since'])) {
+                $candidate = trim((string) $_GET['since']);
+                if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $candidate) === 1) {
+                    $since = $candidate;
+                }
+            }
+            $messages = sales_direct_messages_timeline_for_sales($pdo, $salesUserId, $since);
             sales_direct_messages_mark_read_for_sales($pdo, $salesUserId);
             sales_direct_messages_mark_order_chats_read_for_sales($pdo, $salesUserId);
             api_json([
                 'ok' => true,
                 'sales_user_id' => $salesUserId,
-                'messages' => sales_direct_messages_timeline_for_sales($pdo, $salesUserId),
+                'messages' => $messages,
                 'unread_count' => 0,
+                'history_complete' => $since === '',
             ]);
         }
 

@@ -1499,10 +1499,59 @@ function orders_serialize(array $order, array $items, array $events): array
  * @param array<string, mixed> $order
  * @return array<string, mixed>
  */
+/**
+ * @param list<int> $orderIds
+ * @return array<int, array{item_count:int,first_name:?string,has_flash:bool}>
+ */
+function orders_list_item_summaries(PDO $pdo, array $orderIds): array
+{
+    $orderIds = array_values(array_unique(array_filter(
+        array_map('intval', $orderIds),
+        static fn (int $id): bool => $id > 0
+    )));
+    if ($orderIds === []) {
+        return [];
+    }
+
+    $hasFlash = false;
+    try {
+        $hasFlash = (bool) $pdo->query("SHOW COLUMNS FROM order_items LIKE 'flash_deal_id'")->fetch();
+    } catch (Throwable $e) {
+        $hasFlash = false;
+    }
+    $flashExpr = $hasFlash
+        ? 'MAX(CASE WHEN oi.flash_deal_id IS NOT NULL AND oi.flash_deal_id > 0 THEN 1 ELSE 0 END)'
+        : '0';
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT oi.order_id,
+                COALESCE(SUM(oi.quantity), 0) AS item_count,
+                SUBSTRING_INDEX(GROUP_CONCAT(oi.name ORDER BY oi.id SEPARATOR '\n'), '\n', 1) AS first_name,
+                {$flashExpr} AS has_flash
+         FROM order_items oi
+         WHERE oi.order_id IN ({$placeholders})
+         GROUP BY oi.order_id"
+    );
+    $stmt->execute($orderIds);
+    $map = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $name = trim((string) ($row['first_name'] ?? ''));
+        $map[(int) $row['order_id']] = [
+            'item_count' => (int) $row['item_count'],
+            'first_name' => $name !== '' ? $name : null,
+            'has_flash' => (int) ($row['has_flash'] ?? 0) === 1,
+        ];
+    }
+
+    return $map;
+}
+
 function orders_serialize_client_list_row(
     array $order,
     int $itemCount = 0,
-    int $unreadAdminEvents = 0
+    int $unreadAdminEvents = 0,
+    ?string $firstItemName = null,
+    bool $hasFlashDeal = false
 ): array {
     return [
         'id' => (int) $order['id'],
@@ -1529,7 +1578,16 @@ function orders_serialize_client_list_row(
         'items' => [],
         'events' => [],
         'item_count' => $itemCount,
+        'first_item_name' => $firstItemName,
+        'has_flash_deal' => $hasFlashDeal,
         'unread_admin_events' => $unreadAdminEvents,
+        'sms_ref' => isset($order['sms_ref']) && trim((string) $order['sms_ref']) !== ''
+            ? strtoupper(trim((string) $order['sms_ref']))
+            : null,
+        'sms_channel' => !empty($order['sms_channel']),
+        'items_adjustment_pending' => orders_items_adjustment_pending_flag($order),
+        'items_adjustment_confirmed_at' => orders_items_adjustment_confirmed_at($order),
+        'can_proceed_to_pre_invoice' => !orders_items_adjustment_pending_flag($order),
     ];
 }
 

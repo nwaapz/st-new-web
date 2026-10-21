@@ -9,6 +9,12 @@ require_once __DIR__ . '/admin-products.php';
 const ADMIN_SERIES_GALLERY_MAX = 12;
 const ADMIN_SERIES_PAGE_SIZE = 20;
 
+function admin_series_normalize_banner(mixed $value): string
+{
+    $banner = strtolower(trim((string) $value));
+    return in_array($banner, ['new', 'off'], true) ? $banner : 'none';
+}
+
 function admin_product_series_ensure_schema(PDO $pdo): void
 {
     cms_series_ensure_categories_schema($pdo);
@@ -23,6 +29,12 @@ function admin_product_series_ensure_schema(PDO $pdo): void
     $packCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'pack_size'")->fetchAll();
     if (count($packCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
+    }
+    $bannerCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'banner'")->fetchAll();
+    if (count($bannerCol) === 0) {
+        $pdo->exec(
+            "ALTER TABLE product_series ADD COLUMN banner ENUM('none','new','off') NOT NULL DEFAULT 'none' AFTER pack_size"
+        );
     }
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS product_series_images (
@@ -152,6 +164,7 @@ function admin_product_series_list(PDO $pdo, string $q = '', int $page = 1, int 
             'pack_size' => isset($row['pack_size']) && $row['pack_size'] !== null && (int) $row['pack_size'] > 0
                 ? (int) $row['pack_size']
                 : null,
+            'banner' => admin_series_normalize_banner($row['banner'] ?? 'none'),
             'image' => (string) ($row['image'] ?? ''),
             'category_names' => (string) ($row['category_names'] ?? ''),
             'product_count' => (int) ($row['product_count'] ?? 0),
@@ -188,6 +201,7 @@ function admin_product_series_get(PDO $pdo, int $id): ?array
         'pack_size' => isset($row['pack_size']) && $row['pack_size'] !== null && (int) $row['pack_size'] > 0
             ? (int) $row['pack_size']
             : null,
+        'banner' => admin_series_normalize_banner($row['banner'] ?? 'none'),
         'image' => (string) ($row['image'] ?? ''),
         'sort_order' => (int) ($row['sort_order'] ?? 0),
         'published' => (int) ($row['published'] ?? 0) === 1,
@@ -225,6 +239,7 @@ function admin_product_series_save(PDO $pdo, array $data): int
     if ($packSize === 0) {
         $packSize = null;
     }
+    $banner = admin_series_normalize_banner($data['banner'] ?? 'none');
     $image = admin_normalize_upload_path(isset($data['image']) ? (string) $data['image'] : null);
     $sortOrder = (int) ($data['sort_order'] ?? 0);
     $published = admin_bool_from_payload($data['published'] ?? true) ? 1 : 0;
@@ -246,7 +261,7 @@ function admin_product_series_save(PDO $pdo, array $data): int
     try {
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, image=?, sort_order=?, published=? WHERE id=?'
+                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, banner=?, image=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
                 $name,
@@ -255,6 +270,7 @@ function admin_product_series_save(PDO $pdo, array $data): int
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
                 $packSize,
+                $banner,
                 $image,
                 $sortOrder,
                 $published,
@@ -263,8 +279,8 @@ function admin_product_series_save(PDO $pdo, array $data): int
             $seriesId = $id;
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO product_series (name, slug, visual_id, description, price_text, pack_size, image, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO product_series (name, slug, visual_id, description, price_text, pack_size, banner, image, sort_order, published)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name,
@@ -273,6 +289,7 @@ function admin_product_series_save(PDO $pdo, array $data): int
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
                 $packSize,
+                $banner,
                 $image,
                 $sortOrder,
                 $published,

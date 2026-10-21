@@ -400,3 +400,88 @@ function cms_ensure_product_car_models_schema(PDO $pdo): void
 
     $ready = true;
 }
+
+/**
+ * Model and factory labels for a set of products, one query.
+ *
+ * @param list<int> $productIds
+ * @return array<int, array{car_model_id:int,model_name:string,factory_id:int,factory_name:string}>
+ */
+function cms_product_load_shop_labels_map(PDO $pdo, array $productIds): array
+{
+    $productIds = array_values(array_unique(array_filter(
+        array_map('intval', $productIds),
+        static fn (int $id): bool => $id > 0
+    )));
+    if ($productIds === []) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT pcm.product_id, pcm.car_model_id, m.name AS car_name,
+                f.id AS factory_id, f.name AS factory_name, f.sort_order AS factory_sort
+         FROM product_car_models pcm
+         JOIN car_models m ON m.id = pcm.car_model_id
+         LEFT JOIN car_model_factories cmf ON cmf.car_model_id = pcm.car_model_id
+         LEFT JOIN factories f ON f.id = cmf.factory_id
+         WHERE pcm.product_id IN ({$placeholders})
+         ORDER BY pcm.product_id ASC, pcm.sort_order ASC, pcm.car_model_id ASC"
+    );
+    $stmt->execute($productIds);
+
+    $bucket = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $pid = (int) $row['product_id'];
+        if (!isset($bucket[$pid])) {
+            $bucket[$pid] = [
+                'car_model_id' => (int) $row['car_model_id'],
+                'cars' => [],
+                'factories' => [],
+            ];
+        }
+        $carName = trim((string) ($row['car_name'] ?? ''));
+        if ($carName !== '' && !in_array($carName, $bucket[$pid]['cars'], true)) {
+            $bucket[$pid]['cars'][] = $carName;
+        }
+        $factoryId = (int) ($row['factory_id'] ?? 0);
+        $factoryName = trim((string) ($row['factory_name'] ?? ''));
+        if ($factoryId > 0 && $factoryName !== '') {
+            $bucket[$pid]['factories'][$factoryId] = [
+                'name' => $factoryName,
+                'sort' => (int) ($row['factory_sort'] ?? 0),
+            ];
+        }
+    }
+
+    $map = [];
+    foreach ($bucket as $pid => $row) {
+        $factories = array_values($row['factories']);
+        usort($factories, static function (array $a, array $b): int {
+            return [$a['sort'], $a['name']] <=> [$b['sort'], $b['name']];
+        });
+        $factoryNames = [];
+        foreach ($factories as $factory) {
+            if (!in_array($factory['name'], $factoryNames, true)) {
+                $factoryNames[] = $factory['name'];
+            }
+        }
+        $firstFactoryId = 0;
+        foreach ($factories as $factory) {
+            foreach ($row['factories'] as $factoryId => $meta) {
+                if ($meta['name'] === $factory['name']) {
+                    $firstFactoryId = (int) $factoryId;
+                    break 2;
+                }
+            }
+        }
+        $map[$pid] = [
+            'car_model_id' => $row['car_model_id'],
+            'model_name' => implode(' · ', $row['cars']),
+            'factory_id' => $firstFactoryId,
+            'factory_name' => implode(' · ', $factoryNames),
+        ];
+    }
+
+    return $map;
+}

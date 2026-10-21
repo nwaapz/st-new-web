@@ -61,6 +61,43 @@ function cms_product_resolve_display_category_names(
     return implode(' · ', $names);
 }
 
+/**
+ * Same label as cms_product_resolve_display_category_names(), using names already loaded.
+ *
+ * @param array<int, string> $namesById
+ * @param list<int> $productCategoryIds
+ * @param list<array{car_model_id?:int,category_id?:int}> $carModelCategories
+ */
+function cms_product_display_category_label(
+    array $namesById,
+    array $productCategoryIds,
+    array $carModelCategories
+): string {
+    $orderedIds = [];
+    foreach ($productCategoryIds as $categoryId) {
+        $categoryId = (int) $categoryId;
+        if ($categoryId > 0 && !in_array($categoryId, $orderedIds, true)) {
+            $orderedIds[] = $categoryId;
+        }
+    }
+    foreach ($carModelCategories as $pair) {
+        $categoryId = (int) ($pair['category_id'] ?? 0);
+        if ($categoryId > 0 && !in_array($categoryId, $orderedIds, true)) {
+            $orderedIds[] = $categoryId;
+        }
+    }
+    $orderedIds = array_slice($orderedIds, 0, 2);
+    $names = [];
+    foreach ($orderedIds as $categoryId) {
+        $name = $namesById[$categoryId] ?? '';
+        if ($name !== '') {
+            $names[] = $name;
+        }
+    }
+
+    return implode(' · ', $names);
+}
+
 function cms_product_primary_category_id_sql(string $productAlias = 'p'): string
 {
     return '(SELECT pc.category_id

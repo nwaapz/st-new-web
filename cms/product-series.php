@@ -36,6 +36,12 @@ function product_series_ensure_schema(PDO $pdo): void
     if (count($packCol) === 0) {
         $pdo->exec('ALTER TABLE product_series ADD COLUMN pack_size INT UNSIGNED NULL AFTER price_text');
     }
+    $bannerCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'banner'")->fetchAll();
+    if (count($bannerCol) === 0) {
+        $pdo->exec(
+            "ALTER TABLE product_series ADD COLUMN banner ENUM('none','new','off') NOT NULL DEFAULT 'none' AFTER pack_size"
+        );
+    }
     $modelCol = $pdo->query("SHOW COLUMNS FROM product_series LIKE 'model_name'")->fetchAll();
     if (count($modelCol) === 0) {
         $pdo->exec(
@@ -243,6 +249,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($packSize === 0) {
             $packSize = null;
         }
+        $banner = (string) ($_POST['banner'] ?? 'none');
+        if (!in_array($banner, ['none', 'new', 'off'], true)) {
+            $banner = 'none';
+        }
         $description = trim((string) ($_POST['description'] ?? ''));
         $carModelIds = isset($_POST['car_model_ids']) && is_array($_POST['car_model_ids'])
             ? $_POST['car_model_ids']
@@ -295,7 +305,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, image=?,
+                'UPDATE product_series SET name=?, slug=?, visual_id=?, description=?, price_text=?, pack_size=?, banner=?, image=?,
                  detail_lead_image=?, image_setup_override=?, sort_order=?, published=? WHERE id=?'
             );
             $stmt->execute([
@@ -305,6 +315,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
                 $packSize,
+                $banner,
                 $image !== '' ? $image : null,
                 $detailLeadImage !== '' ? $detailLeadImage : null,
                 $imageSetupOverride !== '' ? $imageSetupOverride : null,
@@ -317,9 +328,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_flash('سری به‌روز شد');
         } else {
             $stmt = $pdo->prepare(
-                'INSERT INTO product_series (name, slug, visual_id, description, price_text, pack_size, image,
+                'INSERT INTO product_series (name, slug, visual_id, description, price_text, pack_size, banner, image,
                  detail_lead_image, image_setup_override, sort_order, published)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $stmt->execute([
                 $name,
@@ -328,6 +339,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $description !== '' ? $description : null,
                 $priceText !== '' ? $priceText : null,
                 $packSize,
+                $banner,
                 $image !== '' ? $image : null,
                 $detailLeadImage !== '' ? $detailLeadImage : null,
                 $imageSetupOverride !== '' ? $imageSetupOverride : null,
@@ -516,6 +528,15 @@ cms_layout_start('سری محصولات', cms_current_username(), 'shop');
       <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">اگر پر باشد، مشتری می‌تواند عدد یا بسته بخرد.</span>
     </label>
   </div>
+  <?php $seriesBannerLabels = ['none' => 'بدون بنر', 'new' => 'NEW', 'off' => 'OFF']; ?>
+  <label class="cms-field"><span class="cms-label">بنر فروشگاه (جدید / تخفیف)</span>
+    <select class="cms-select" name="banner">
+      <?php foreach ($seriesBannerLabels as $value => $label): ?>
+        <option value="<?= cms_h($value) ?>" <?= ($edit['banner'] ?? 'none') === $value ? 'selected' : '' ?>><?= cms_h($label) ?></option>
+      <?php endforeach; ?>
+    </select>
+    <span class="cms-muted" style="display:block;margin-top:.35rem;font-size:.85rem">فقط روی خود کیت اعمال می‌شود؛ بنر اعضای کیت جداگانه است.</span>
+  </label>
   <label class="cms-field"><span class="cms-label">توضیحات</span>
     <textarea class="cms-textarea" name="description"><?= cms_h($edit['description'] ?? '') ?></textarea>
   </label>

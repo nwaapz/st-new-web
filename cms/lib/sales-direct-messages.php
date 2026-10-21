@@ -351,8 +351,12 @@ function sales_direct_messages_insert(
  *
  * @return list<array<string, mixed>>
  */
-function sales_direct_messages_timeline_for_admin(PDO $pdo, int $salesUserId): array
-{
+function sales_direct_messages_timeline_for_admin(
+    PDO $pdo,
+    int $salesUserId,
+    string $since = '',
+    bool $fullHistory = false
+): array {
     sales_direct_messages_ensure_schema($pdo);
     if ($salesUserId <= 0) {
         return [];
@@ -362,8 +366,20 @@ function sales_direct_messages_timeline_for_admin(PDO $pdo, int $salesUserId): a
     }
     order_messages_ensure_schema($pdo);
 
+    $since = trim($since);
+    $useSince = $since !== '';
+    $limitRecent = !$fullHistory && !$useSince;
     $items = [];
-    foreach (sales_direct_messages_fetch($pdo, $salesUserId, 0) as $row) {
+    $directSql = 'SELECT * FROM sales_direct_messages WHERE sales_user_id = ?';
+    $directParams = [$salesUserId];
+    if ($useSince) {
+        $directSql .= ' AND created_at >= ?';
+        $directParams[] = $since;
+    }
+    $directSql .= $limitRecent ? ' ORDER BY id DESC LIMIT 400' : ' ORDER BY id ASC';
+    $directStmt = $pdo->prepare($directSql);
+    $directStmt->execute($directParams);
+    foreach ($directStmt->fetchAll() ?: [] as $row) {
         $items[] = [
             'kind' => 'direct',
             'id' => (int) ($row['id'] ?? 0),
@@ -379,14 +395,18 @@ function sales_direct_messages_timeline_for_admin(PDO $pdo, int $salesUserId): a
         ];
     }
 
-    $stmt = $pdo->prepare(
-        'SELECT m.*, o.public_code
+    $orderSql = 'SELECT m.*, o.public_code
          FROM order_messages m
          INNER JOIN orders o ON o.id = m.order_id
-         WHERE o.sales_user_id = ?
-         ORDER BY m.created_at ASC, m.id ASC'
-    );
-    $stmt->execute([$salesUserId]);
+         WHERE o.sales_user_id = ?';
+    $orderParams = [$salesUserId];
+    if ($useSince) {
+        $orderSql .= ' AND m.created_at >= ?';
+        $orderParams[] = $since;
+    }
+    $orderSql .= $limitRecent ? ' ORDER BY m.id DESC LIMIT 400' : ' ORDER BY m.id ASC';
+    $stmt = $pdo->prepare($orderSql);
+    $stmt->execute($orderParams);
     foreach ($stmt->fetchAll() ?: [] as $row) {
         $serialized = order_messages_serialize($row);
         $code = trim((string) ($row['public_code'] ?? ''));
@@ -408,6 +428,9 @@ function sales_direct_messages_timeline_for_admin(PDO $pdo, int $salesUserId): a
     usort($items, function (array $a, array $b): int {
         return strcmp((string) $a['created_at'], (string) $b['created_at']);
     });
+    if ($limitRecent && count($items) > 400) {
+        $items = array_slice($items, -400);
+    }
 
     return $items;
 }
@@ -417,9 +440,9 @@ function sales_direct_messages_timeline_for_admin(PDO $pdo, int $salesUserId): a
  *
  * @return list<array<string, mixed>>
  */
-function sales_direct_messages_timeline_for_sales(PDO $pdo, int $salesUserId): array
+function sales_direct_messages_timeline_for_sales(PDO $pdo, int $salesUserId, string $since = ''): array
 {
-    return sales_direct_messages_timeline_for_admin($pdo, $salesUserId);
+    return sales_direct_messages_timeline_for_admin($pdo, $salesUserId, $since, true);
 }
 
 function sales_direct_messages_mark_order_chats_read_for_sales(PDO $pdo, int $salesUserId): void

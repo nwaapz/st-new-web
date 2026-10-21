@@ -80,7 +80,17 @@ try {
     $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : 0;
 
     $page = isset($_GET['page']) ? max(1, (int) $_GET['page']) : 1;
-    $perPage = isset($_GET['per_page']) ? max(1, min(50, (int) $_GET['per_page'])) : 10;
+    $catalogDump = isset($_GET['catalog']) && (string) $_GET['catalog'] === '1'
+        && $categoryId <= 0
+        && $categoryIds === []
+        && $carModelId <= 0
+        && $factoryId <= 0
+        && $seriesId <= 0
+        && $relatedTo <= 0
+        && $banner === ''
+        && trim((string) ($_GET['q'] ?? '')) === '';
+    $perPageMax = $catalogDump ? 2000 : 50;
+    $perPage = isset($_GET['per_page']) ? max(1, min($perPageMax, (int) $_GET['per_page'])) : 10;
     $usePaginated = isset($_GET['page']) || isset($_GET['per_page']);
 
     $q = search_normalize((string) ($_GET['q'] ?? ''));
@@ -272,48 +282,12 @@ try {
         }
     }
 
-    $modelNamesSql = cms_product_model_names_sql('p');
-
-    $factoryNamesSql = cms_product_factory_names_sql('p');
-
-    $primaryModelSql = cms_product_primary_car_model_id_sql('p');
-
-    $primaryFactorySql = cms_product_primary_factory_id_sql('p');
-
-    $primaryCategorySql = cms_product_primary_category_id_sql('p');
-
-    $categoryNamesSql = cms_product_category_names_sql('p');
-
-    $primaryCategoryJoinSql = cms_product_primary_category_join_sql('p');
-
-    $sql = 'SELECT p.id, ' . $primaryCategorySql . ' AS category_id, p.name, p.slug, p.visual_id, p.description,
-
+    $sql = 'SELECT p.id, p.name, p.slug, p.visual_id, p.description,
                    p.price_text, p.pack_size, p.banner, p.image, p.shop_display_image, p.sort_order,
-
-                   COALESCE(NULLIF(p.shop_display_image, \'\'), NULLIF(p.image, \'\'), NULLIF(c.image, \'\')) AS display_image,
-
-                   ' . $categoryNamesSql . ' AS category_name,
-
-                   c.image AS category_image,
-
-                   ' . $modelNamesSql . ' AS model_name,
-
-                   ' . $modelNamesSql . ' AS model_names,
-
-                   ' . $factoryNamesSql . ' AS factory_name,
-
-                   ' . $primaryModelSql . ' AS car_model_id,
-
-                   ' . $primaryFactorySql . ' AS factory_id
-
+                   p.published, p.stock_qty
             FROM products p
-
             ' . $seriesJoin . '
-
-            ' . $primaryCategoryJoinSql . '
-
             WHERE ' . $whereSql . '
-
             ORDER BY ' . $orderBy;
 
 
@@ -349,6 +323,39 @@ try {
 
     $categoryNamesMap = cms_product_load_category_names_map($pdo, $productIds);
 
+    $shopLabels = cms_product_load_shop_labels_map($pdo, $productIds);
+
+    $categoryNamesById = [];
+    $categoryImagesById = [];
+    $neededCategoryIds = [];
+    foreach ($categoryMap as $categoryIdsForProduct) {
+        foreach ($categoryIdsForProduct as $neededId) {
+            if ((int) $neededId > 0) {
+                $neededCategoryIds[(int) $neededId] = true;
+            }
+        }
+    }
+    foreach ($carModelCategoryMap as $pairs) {
+        foreach ($pairs as $pair) {
+            $neededId = (int) ($pair['category_id'] ?? 0);
+            if ($neededId > 0) {
+                $neededCategoryIds[$neededId] = true;
+            }
+        }
+    }
+    if ($neededCategoryIds !== []) {
+        $catIds = array_keys($neededCategoryIds);
+        $placeholders = implode(',', array_fill(0, count($catIds), '?'));
+        $catStmt = $pdo->prepare("SELECT id, name, image FROM categories WHERE id IN ({$placeholders})");
+        $catStmt->execute($catIds);
+        foreach ($catStmt->fetchAll() ?: [] as $catRow) {
+            $catId = (int) $catRow['id'];
+            $categoryNamesById[$catId] = (string) $catRow['name'];
+            $image = trim((string) ($catRow['image'] ?? ''));
+            $categoryImagesById[$catId] = $image !== '' ? $image : null;
+        }
+    }
+
     foreach ($items as &$item) {
 
         $pid = (int) $item['id'];
@@ -371,12 +378,36 @@ try {
 
         $item['category_names'] = $categoryNamesMap[$pid] ?? [];
 
+        $labels = $shopLabels[$pid] ?? null;
+        $modelName = is_array($labels) ? trim((string) ($labels['model_name'] ?? '')) : '';
+        $factoryName = is_array($labels) ? trim((string) ($labels['factory_name'] ?? '')) : '';
+        $item['model_name'] = $modelName !== '' ? $modelName : null;
+        $item['model_names'] = $item['model_name'];
+        $item['factory_name'] = $factoryName !== '' ? $factoryName : null;
+        $factoryIdValue = is_array($labels) ? (int) ($labels['factory_id'] ?? 0) : 0;
+        $item['factory_id'] = $factoryIdValue > 0 ? $factoryIdValue : null;
+        $labelCarId = is_array($labels) ? (int) ($labels['car_model_id'] ?? 0) : 0;
+        if (empty($item['car_model_id']) && $labelCarId > 0) {
+            $item['car_model_id'] = $labelCarId;
+        }
+        $primaryCategoryId = (int) ($item['category_ids'][0] ?? 0);
+        $categoryImage = $categoryImagesById[$primaryCategoryId] ?? null;
+        $item['category_image'] = $categoryImage;
+        $displayImage = trim((string) ($item['shop_display_image'] ?? ''));
+        if ($displayImage === '') {
+            $displayImage = trim((string) ($item['image'] ?? ''));
+        }
+        if ($displayImage === '' && $categoryImage !== null) {
+            $displayImage = $categoryImage;
+        }
+        $item['display_image'] = $displayImage !== '' ? $displayImage : null;
+
         $item['car_model_categories'] = $carModelCategoryMap[$pid] ?? [];
 
         $item['car_model_entries'] = $carModelEntriesMap[$pid] ?? [];
 
-        $displayCategory = cms_product_resolve_display_category_names(
-            $pdo,
+        $displayCategory = cms_product_display_category_label(
+            $categoryNamesById,
             $item['category_ids'],
             $item['car_model_categories']
         );
@@ -384,7 +415,9 @@ try {
             $item['category_name'] = $displayCategory;
         }
 
-        $item['orderable'] = products_is_orderable($pdo, $pid);
+        $item['orderable'] = (int) ($item['published'] ?? 0) === 1
+            && (int) ($item['stock_qty'] ?? 0) > 0;
+        unset($item['published'], $item['stock_qty']);
 
     }
 
