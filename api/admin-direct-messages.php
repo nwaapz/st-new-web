@@ -11,6 +11,7 @@ try {
     $pdo = cms_pdo();
     sales_direct_messages_ensure_schema($pdo);
     $admin = admin_auth_require_user($pdo);
+    admin_auth_session_release();
 
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
     if ($method === 'OPTIONS') {
@@ -84,20 +85,25 @@ try {
         $text = trim((string) ($payload['body'] ?? ''));
     }
 
+    $senderName = (string) ($admin['username'] ?? 'ادمین');
     $message = sales_direct_messages_insert(
         $pdo,
         $salesUserId,
         'admin',
-        (string) ($admin['username'] ?? 'ادمین'),
+        $senderName,
         $text,
         $image,
-        (int) $admin['id']
+        (int) $admin['id'],
+        false
     );
 
-    api_json([
-        'ok' => true,
-        'message' => $message,
-    ]);
+    $preview = $text !== '' ? $text : 'تصویر';
+    api_json_then(
+        ['ok' => true, 'message' => $message],
+        static function () use ($pdo, $salesUserId, $senderName, $preview): void {
+            sales_direct_messages_notify_sales($pdo, $salesUserId, $senderName, $preview);
+        }
+    );
 } catch (InvalidArgumentException $e) {
     api_error($e->getMessage(), 400);
 } catch (Throwable $e) {

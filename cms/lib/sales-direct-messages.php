@@ -289,7 +289,8 @@ function sales_direct_messages_insert(
     string $senderName,
     string $body,
     ?string $image,
-    ?int $adminUserId
+    ?int $adminUserId,
+    bool $notify = true
 ): array {
     sales_direct_messages_ensure_schema($pdo);
     $user = sales_users_get($pdo, $salesUserId);
@@ -337,11 +338,13 @@ function sales_direct_messages_insert(
     }
 
     $message = sales_direct_messages_serialize($row);
-    $preview = $body !== '' ? $body : 'تصویر';
-    if ($actor === 'admin') {
-        sales_direct_messages_notify_sales($pdo, $salesUserId, $senderName, $preview);
-    } else {
-        sales_direct_messages_notify_admins($pdo, $salesUserId, $senderName, $preview);
+    if ($notify) {
+        $preview = $body !== '' ? $body : 'تصویر';
+        if ($actor === 'admin') {
+            sales_direct_messages_notify_sales($pdo, $salesUserId, $senderName, $preview);
+        } else {
+            sales_direct_messages_notify_admins($pdo, $salesUserId, $senderName, $preview);
+        }
     }
     return $message;
 }

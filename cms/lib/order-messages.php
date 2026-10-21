@@ -304,7 +304,8 @@ function order_messages_post_admin(
     int $adminUserId,
     string $adminName,
     string $body,
-    ?string $image = null
+    ?string $image = null,
+    bool $notify = true
 ): array {
     order_messages_ensure_schema($pdo);
     $order = orders_get_by_id($pdo, $orderId);
@@ -338,12 +339,14 @@ function order_messages_post_admin(
         throw new RuntimeException('ثبت پیام ناموفق بود');
     }
 
-    order_messages_notify_sales(
-        $pdo,
-        $orderId,
-        $adminName,
-        order_messages_notify_preview($body, $image !== '' ? $image : null)
-    );
+    if ($notify) {
+        order_messages_notify_sales(
+            $pdo,
+            $orderId,
+            $adminName,
+            order_messages_notify_preview($body, $image !== '' ? $image : null)
+        );
+    }
 
     return order_messages_serialize($message);
 }
@@ -357,7 +360,8 @@ function order_messages_post_sales(
     int $salesUserId,
     string $salesName,
     string $body,
-    ?string $image = null
+    ?string $image = null,
+    bool $notify = true
 ): array {
     order_messages_ensure_schema($pdo);
     $order = orders_get_by_id($pdo, $orderId);
@@ -391,12 +395,14 @@ function order_messages_post_sales(
         throw new RuntimeException('ثبت پیام ناموفق بود');
     }
 
-    order_messages_notify_admins(
-        $pdo,
-        $orderId,
-        $salesName,
-        order_messages_notify_preview($body, $image !== '' ? $image : null)
-    );
+    if ($notify) {
+        order_messages_notify_admins(
+            $pdo,
+            $orderId,
+            $salesName,
+            order_messages_notify_preview($body, $image !== '' ? $image : null)
+        );
+    }
 
     return order_messages_serialize($message);
 }
@@ -430,7 +436,8 @@ function order_messages_post_client(
     int $userId,
     string $clientName,
     string $body,
-    ?string $image = null
+    ?string $image = null,
+    bool $notify = true
 ): array {
     order_messages_ensure_schema($pdo);
     $order = order_messages_verify_client_order($pdo, $orderId, $userId);
@@ -464,12 +471,14 @@ function order_messages_post_client(
         throw new RuntimeException('ثبت پیام ناموفق بود');
     }
 
-    order_messages_notify_admins(
-        $pdo,
-        $orderId,
-        $clientName,
-        order_messages_notify_preview($body, $image !== '' ? $image : null)
-    );
+    if ($notify) {
+        order_messages_notify_admins(
+            $pdo,
+            $orderId,
+            $clientName,
+            order_messages_notify_preview($body, $image !== '' ? $image : null)
+        );
+    }
 
     return order_messages_serialize($message);
 }

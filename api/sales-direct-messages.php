@@ -15,6 +15,7 @@ try {
         api_error('لطفاً وارد حساب کاربری شوید', 401);
     }
     $salesUserId = (int) $salesUser['id'];
+    sales_auth_session_release();
 
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
     if ($method === 'OPTIONS') {
@@ -95,13 +96,17 @@ try {
         $displayName,
         $text,
         $image,
-        null
+        null,
+        false
     );
 
-    api_json([
-        'ok' => true,
-        'message' => $message,
-    ]);
+    $preview = $text !== '' ? $text : 'تصویر';
+    api_json_then(
+        ['ok' => true, 'message' => $message],
+        static function () use ($pdo, $salesUserId, $displayName, $preview): void {
+            sales_direct_messages_notify_admins($pdo, $salesUserId, $displayName, $preview);
+        }
+    );
 } catch (InvalidArgumentException $e) {
     api_error($e->getMessage(), 400);
 } catch (Throwable $e) {

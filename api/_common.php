@@ -21,6 +21,42 @@ function api_error(string $message, int $status = 500): void
     api_json(['ok' => false, 'error' => $message], $status);
 }
 
+/**
+ * Send JSON immediately, then run $after (push) without holding the client.
+ *
+ * @param callable(): void $after
+ */
+function api_json_then($data, callable $after, int $status = 200): void
+{
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        $json = '{"ok":false,"error":"encode failed"}';
+        $status = 500;
+    }
+    http_response_code($status);
+    header('Connection: close');
+    header('Content-Length: ' . strlen($json));
+    echo $json;
+    if (function_exists('ob_get_level')) {
+        while (ob_get_level() > 0) {
+            @ob_end_flush();
+        }
+    }
+    flush();
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    } elseif (function_exists('litespeed_finish_request')) {
+        litespeed_finish_request();
+    }
+    ignore_user_abort(true);
+    try {
+        $after();
+    } catch (Throwable $e) {
+        error_log('[api_json_then] ' . $e->getMessage());
+    }
+    exit;
+}
+
 function api_request_is_multipart(): bool
 {
     $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));

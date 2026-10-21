@@ -46,6 +46,16 @@ function sales_auth_cookie_secure(): bool
     return isset($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443';
 }
 
+/**
+ * Unlock the session file so a long-poll cannot block the next send.
+ */
+function sales_auth_session_release(): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+}
+
 function sales_auth_login(int $userId, string $username): void
 {
     sales_auth_session_start();
