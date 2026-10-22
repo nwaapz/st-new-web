@@ -64,7 +64,46 @@ function product_series_api_ensure_schema(PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
     }
+    $imageCols = [];
+    foreach ($pdo->query('SHOW COLUMNS FROM product_series_images')->fetchAll() ?: [] as $col) {
+        $imageCols[(string) ($col['Field'] ?? '')] = true;
+    }
+    if (!isset($imageCols['alt_text'])) {
+        try {
+            $after = isset($imageCols['image']) ? ' AFTER image' : '';
+            $pdo->exec(
+                'ALTER TABLE product_series_images ADD COLUMN alt_text VARCHAR(255) NOT NULL DEFAULT \'\'' . $after
+            );
+        } catch (Throwable $e) {
+            error_log('[product-series] alt_text column: ' . $e->getMessage());
+        }
+    }
+    if (!isset($imageCols['sort_order'])) {
+        try {
+            $pdo->exec(
+                'ALTER TABLE product_series_images ADD COLUMN sort_order INT NOT NULL DEFAULT 0'
+            );
+        } catch (Throwable $e) {
+            error_log('[product-series] sort_order column: ' . $e->getMessage());
+        }
+    }
     $ready = true;
+}
+
+/**
+ * @template T
+ * @param callable(): T $fn
+ * @param T $fallback
+ * @return T
+ */
+function product_series_api_attempt(string $label, callable $fn, mixed $fallback): mixed
+{
+    try {
+        return $fn();
+    } catch (Throwable $e) {
+        error_log('[product-series] ' . $label . ': ' . $e->getMessage());
+        return $fallback;
+    }
 }
 
 function product_series_api_load_gallery(PDO $pdo, int $seriesId): array
@@ -230,12 +269,24 @@ function product_series_api_enrich(PDO $pdo, array $item, int $seriesId, bool $i
     $item['category_ids'] = $categoryIds;
     $item['category_names'] = $categoryNames;
     $item['category_name'] = $categoryNames !== [] ? implode(' · ', $categoryNames) : null;
-    $item['images'] = product_series_api_load_gallery($pdo, $seriesId);
+    $item['images'] = product_series_api_attempt(
+        'detail gallery',
+        static fn () => product_series_api_load_gallery($pdo, $seriesId),
+        []
+    );
 
-    $members = product_series_api_load_members($pdo, $seriesId);
+    $members = product_series_api_attempt(
+        'detail members',
+        static fn () => product_series_api_load_members($pdo, $seriesId),
+        []
+    );
     $item['parts_lines'] = product_series_api_parts_lines($members);
     $item['car_lines'] = product_series_api_car_lines($members);
-    $factoryIds = cms_series_load_factory_ids($pdo, $seriesId);
+    $factoryIds = product_series_api_attempt(
+        'detail factories',
+        static fn () => cms_series_load_factory_ids($pdo, $seriesId),
+        []
+    );
     $item['factory_ids'] = $factoryIds;
     $factoryNames = [];
     if ($factoryIds !== []) {
@@ -278,7 +329,11 @@ function product_series_api_build_list(PDO $pdo, array $rows, bool $callForPrice
     }
 
     $placeholders = implode(',', array_fill(0, count($seriesIds), '?'));
-    $categoryMap = cms_series_load_category_ids_map($pdo, $seriesIds);
+    $categoryMap = product_series_api_attempt(
+        'categories',
+        static fn () => cms_series_load_category_ids_map($pdo, $seriesIds),
+        []
+    );
 
     $neededCategoryIds = [];
     foreach ($categoryMap as $categoryIds) {
@@ -300,28 +355,34 @@ function product_series_api_build_list(PDO $pdo, array $rows, bool $callForPrice
     }
 
     $productIdsBySeries = [];
-    $idStmt = $pdo->prepare(
-        "SELECT series_id, product_id
-         FROM product_series_items
-         WHERE series_id IN ({$placeholders})
-         ORDER BY series_id ASC, sort_order ASC, product_id ASC"
-    );
-    $idStmt->execute($seriesIds);
-    foreach ($idStmt->fetchAll() ?: [] as $link) {
+    $memberLinks = product_series_api_attempt('member ids', static function () use ($pdo, $placeholders, $seriesIds): array {
+        $idStmt = $pdo->prepare(
+            "SELECT series_id, product_id
+             FROM product_series_items
+             WHERE series_id IN ({$placeholders})
+             ORDER BY series_id ASC, sort_order ASC, product_id ASC"
+        );
+        $idStmt->execute($seriesIds);
+        return $idStmt->fetchAll() ?: [];
+    }, []);
+    foreach ($memberLinks as $link) {
         $productIdsBySeries[(int) $link['series_id']][] = (int) $link['product_id'];
     }
 
     $membersBySeries = [];
     $memberProductIds = [];
-    $memberStmt = $pdo->prepare(
-        "SELECT psi.series_id, p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.shop_display_image
-         FROM product_series_items psi
-         JOIN products p ON p.id = psi.product_id AND p.published = 1
-         WHERE psi.series_id IN ({$placeholders})
-         ORDER BY psi.series_id ASC, psi.sort_order ASC, psi.product_id ASC"
-    );
-    $memberStmt->execute($seriesIds);
-    foreach ($memberStmt->fetchAll() ?: [] as $memberRow) {
+    $memberRows = product_series_api_attempt('members', static function () use ($pdo, $placeholders, $seriesIds): array {
+        $memberStmt = $pdo->prepare(
+            "SELECT psi.series_id, p.id, p.name, p.slug, p.visual_id, p.price_text, p.image, p.shop_display_image
+             FROM product_series_items psi
+             JOIN products p ON p.id = psi.product_id AND p.published = 1
+             WHERE psi.series_id IN ({$placeholders})
+             ORDER BY psi.series_id ASC, psi.sort_order ASC, psi.product_id ASC"
+        );
+        $memberStmt->execute($seriesIds);
+        return $memberStmt->fetchAll() ?: [];
+    }, []);
+    foreach ($memberRows as $memberRow) {
         $seriesId = (int) $memberRow['series_id'];
         $productId = (int) $memberRow['id'];
         $memberProductIds[$productId] = true;
@@ -345,7 +406,11 @@ function product_series_api_build_list(PDO $pdo, array $rows, bool $callForPrice
         ];
     }
 
-    $labels = cms_product_load_shop_labels_map($pdo, array_keys($memberProductIds));
+    $labels = product_series_api_attempt(
+        'member labels',
+        static fn () => cms_product_load_shop_labels_map($pdo, array_keys($memberProductIds)),
+        []
+    );
     foreach ($membersBySeries as &$members) {
         foreach ($members as &$member) {
             $label = $labels[(int) $member['id']] ?? null;
@@ -358,14 +423,17 @@ function product_series_api_build_list(PDO $pdo, array $rows, bool $callForPrice
     unset($members);
 
     $galleries = [];
-    $galleryStmt = $pdo->prepare(
-        "SELECT id, series_id, image, alt_text, sort_order
-         FROM product_series_images
-         WHERE series_id IN ({$placeholders})
-         ORDER BY series_id ASC, sort_order ASC, id ASC"
-    );
-    $galleryStmt->execute($seriesIds);
-    foreach ($galleryStmt->fetchAll() ?: [] as $imageRow) {
+    $galleryRows = product_series_api_attempt('gallery', static function () use ($pdo, $placeholders, $seriesIds): array {
+        $galleryStmt = $pdo->prepare(
+            "SELECT id, series_id, image, alt_text, sort_order
+             FROM product_series_images
+             WHERE series_id IN ({$placeholders})
+             ORDER BY series_id ASC, sort_order ASC, id ASC"
+        );
+        $galleryStmt->execute($seriesIds);
+        return $galleryStmt->fetchAll() ?: [];
+    }, []);
+    foreach ($galleryRows as $imageRow) {
         $image = trim((string) ($imageRow['image'] ?? ''));
         if ($image === '') {
             continue;
@@ -380,16 +448,19 @@ function product_series_api_build_list(PDO $pdo, array $rows, bool $callForPrice
 
     $factoryIdsBySeries = [];
     $factoryNamesBySeries = [];
-    $factoryStmt = $pdo->prepare(
-        "SELECT DISTINCT pscm.series_id, f.id AS factory_id, f.name AS factory_name, f.sort_order
-         FROM product_series_car_models pscm
-         JOIN car_model_factories cmf ON cmf.car_model_id = pscm.car_model_id
-         JOIN factories f ON f.id = cmf.factory_id
-         WHERE pscm.series_id IN ({$placeholders})
-         ORDER BY f.sort_order ASC, f.name ASC"
-    );
-    $factoryStmt->execute($seriesIds);
-    foreach ($factoryStmt->fetchAll() ?: [] as $factoryRow) {
+    $factoryRows = product_series_api_attempt('factories', static function () use ($pdo, $placeholders, $seriesIds): array {
+        $factoryStmt = $pdo->prepare(
+            "SELECT DISTINCT pscm.series_id, f.id AS factory_id, f.name AS factory_name, f.sort_order
+             FROM product_series_car_models pscm
+             JOIN car_model_factories cmf ON cmf.car_model_id = pscm.car_model_id
+             JOIN factories f ON f.id = cmf.factory_id
+             WHERE pscm.series_id IN ({$placeholders})
+             ORDER BY f.sort_order ASC, f.name ASC"
+        );
+        $factoryStmt->execute($seriesIds);
+        return $factoryStmt->fetchAll() ?: [];
+    }, []);
+    foreach ($factoryRows as $factoryRow) {
         $seriesId = (int) $factoryRow['series_id'];
         $factoryId = (int) $factoryRow['factory_id'];
         $factoryIdsBySeries[$seriesId][$factoryId] = $factoryId;
@@ -400,17 +471,20 @@ function product_series_api_build_list(PDO $pdo, array $rows, bool $callForPrice
     }
 
     $orderableBySeries = [];
-    $stockStmt = $pdo->prepare(
-        "SELECT psi.series_id,
-                COUNT(*) AS member_count,
-                SUM(CASE WHEN p.published = 1 AND p.stock_qty > 0 THEN 1 ELSE 0 END) AS orderable_count
-         FROM product_series_items psi
-         JOIN products p ON p.id = psi.product_id
-         WHERE psi.series_id IN ({$placeholders})
-         GROUP BY psi.series_id"
-    );
-    $stockStmt->execute($seriesIds);
-    foreach ($stockStmt->fetchAll() ?: [] as $stockRow) {
+    $stockRows = product_series_api_attempt('stock', static function () use ($pdo, $placeholders, $seriesIds): array {
+        $stockStmt = $pdo->prepare(
+            "SELECT psi.series_id,
+                    COUNT(*) AS member_count,
+                    SUM(CASE WHEN p.published = 1 AND p.stock_qty > 0 THEN 1 ELSE 0 END) AS orderable_count
+             FROM product_series_items psi
+             JOIN products p ON p.id = psi.product_id
+             WHERE psi.series_id IN ({$placeholders})
+             GROUP BY psi.series_id"
+        );
+        $stockStmt->execute($seriesIds);
+        return $stockStmt->fetchAll() ?: [];
+    }, []);
+    foreach ($stockRows as $stockRow) {
         $memberCount = (int) $stockRow['member_count'];
         $orderableCount = (int) $stockRow['orderable_count'];
         $orderableBySeries[(int) $stockRow['series_id']] = $memberCount > 0 && $orderableCount === $memberCount;
@@ -504,10 +578,18 @@ try {
         $itemStmt->execute([$seriesId]);
         $productIds = array_map('intval', $itemStmt->fetchAll(PDO::FETCH_COLUMN));
         $item = product_series_api_row($row, $productIds);
-        $item = product_series_api_enrich($pdo, $item, $seriesId, true);
+        $item = product_series_api_attempt(
+            'detail',
+            static fn () => product_series_api_enrich($pdo, $item, $seriesId, true),
+            $item
+        );
         $callForPrice = cms_call_for_price_enabled();
         product_series_api_apply_price_mode($item, $callForPrice, cms_call_for_price_label());
-        $item['orderable'] = products_series_is_orderable($pdo, $seriesId);
+        $item['orderable'] = product_series_api_attempt(
+            'detail stock',
+            static fn () => products_series_is_orderable($pdo, $seriesId),
+            false
+        );
         api_json(['item' => $item, 'call_for_price' => $callForPrice]);
     }
 
@@ -605,12 +687,19 @@ try {
          ORDER BY sort_order ASC, name ASC'
     );
     $listStmt->execute($listParams);
-    $rows = $listStmt->fetchAll();
+    $rows = $listStmt->fetchAll() ?: [];
 
     $callForPrice = cms_call_for_price_enabled();
     $callLabel = cms_call_for_price_label();
 
-    $items = product_series_api_build_list($pdo, $rows ?: [], $callForPrice, $callLabel);
+    $items = product_series_api_attempt(
+        'list',
+        static fn () => product_series_api_build_list($pdo, $rows, $callForPrice, $callLabel),
+        array_map(
+            static fn (array $row): array => product_series_api_row($row, []),
+            $rows
+        )
+    );
 
     api_json(['items' => $items, 'call_for_price' => $callForPrice]);
 } catch (Throwable $e) {
