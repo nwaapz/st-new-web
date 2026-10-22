@@ -557,28 +557,42 @@ try {
     }
 
     $where = ['product_series.published = 1'];
+    $narrow = [];
     $listParams = [];
     if ($searchQ !== '') {
         [$searchSql, $searchParams] = cms_series_search_match_sql('product_series', $searchRawQ, $searchQ);
-        $where[] = $searchSql;
+        $narrow[] = $searchSql;
         array_push($listParams, ...$searchParams);
     }
     if ($carModelId > 0 && $categoryIds !== []) {
-        $where[] = cms_series_car_and_category_shop_filter_sql('product_series', count($categoryIds));
+        $narrow[] = cms_series_car_and_category_shop_filter_sql('product_series', count($categoryIds));
         cms_series_push_car_category_shop_params($listParams, $carModelId, $categoryIds);
     } else {
         if ($categoryIds !== []) {
-            $where[] = cms_series_category_shop_filter_sql('product_series', count($categoryIds));
+            $narrow[] = cms_series_category_shop_filter_sql('product_series', count($categoryIds));
             cms_series_push_category_shop_params($listParams, $categoryIds);
         }
         if ($carModelId > 0) {
-            $where[] = cms_series_car_model_shop_filter_sql('product_series');
+            $narrow[] = cms_series_car_model_shop_filter_sql('product_series');
             $listParams[] = $carModelId;
             $listParams[] = $carModelId;
         } elseif ($factoryId > 0) {
-            $where[] = cms_series_factory_shop_filter_sql('product_series');
+            $narrow[] = cms_series_factory_shop_filter_sql('product_series');
             $listParams[] = $factoryId;
             $listParams[] = $factoryId;
+        }
+    }
+    $typedQuery = trim((string) ($_GET['q_raw'] ?? ''));
+    if ($typedQuery === '') {
+        $typedQuery = $rawQ;
+    }
+    [$tokenSql, $tokenParams] = cms_series_token_match_sql('product_series', $typedQuery);
+    if ($narrow !== [] && $tokenSql !== '0=1') {
+        $where[] = '((' . implode(' AND ', $narrow) . ') OR ' . $tokenSql . ')';
+        array_push($listParams, ...$tokenParams);
+    } else {
+        foreach ($narrow as $clause) {
+            $where[] = $clause;
         }
     }
     if ($banner !== '') {
@@ -602,5 +616,6 @@ try {
 
     api_json(['items' => $items, 'call_for_price' => $callForPrice]);
 } catch (Throwable $e) {
+    error_log('[product-series] ' . $e->getMessage());
     api_error('Product series unavailable', 503);
 }
