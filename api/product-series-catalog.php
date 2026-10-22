@@ -62,12 +62,13 @@ try {
 
     $seriesIds = array_map(static fn (array $row): int => (int) $row['id'], $rows);
     $categoryNamesBySeries = [];
+    $categoryIdsBySeries = [];
     $productIdsBySeries = [];
 
     if ($seriesIds !== []) {
         $placeholders = implode(',', array_fill(0, count($seriesIds), '?'));
         $catStmt = $pdo->prepare(
-            "SELECT sc.series_id, c.name
+            "SELECT sc.series_id, sc.category_id, c.name
              FROM product_series_categories sc
              JOIN categories c ON c.id = sc.category_id
              WHERE sc.series_id IN ({$placeholders})
@@ -76,6 +77,10 @@ try {
         $catStmt->execute($seriesIds);
         foreach ($catStmt->fetchAll() ?: [] as $catRow) {
             $sid = (int) $catRow['series_id'];
+            $cid = (int) ($catRow['category_id'] ?? 0);
+            if ($cid > 0) {
+                $categoryIdsBySeries[$sid][] = $cid;
+            }
             $name = trim((string) ($catRow['name'] ?? ''));
             if ($name !== '') {
                 $categoryNamesBySeries[$sid][] = $name;
@@ -135,6 +140,7 @@ try {
             'banner' => $bannerVal,
             'sort_order' => (int) ($row['sort_order'] ?? 0),
             'product_ids' => $productIds,
+            'category_ids' => array_values(array_unique($categoryIdsBySeries[$sid] ?? [])),
             'category_name' => $names !== [] ? implode(' · ', $names) : null,
             'category_names' => $names,
             'orderable' => $orderableBySeries[$sid] ?? false,
