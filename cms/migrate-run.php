@@ -896,6 +896,10 @@ try {
     flash_deals_ensure_schema($pdo);
     $log[] = 'Ensured flash_deals tables and order item snapshots';
 
+    require_once __DIR__ . '/lib/festivals.php';
+    festivals_ensure_schema($pdo);
+    $log[] = 'Ensured festival_campaigns tables (جشنواره)';
+
     require_once __DIR__ . '/lib/analytics-orders.php';
     analytics_orders_ensure_schema($pdo);
     $analyticsCounts = analytics_orders_refresh($pdo);

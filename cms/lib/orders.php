@@ -3740,6 +3740,13 @@ function orders_admin_apply_action(
 
     if ($next === 'paid') {
         try {
+            require_once __DIR__ . '/festivals.php';
+            festivals_ensure_schema($pdo);
+            festivals_record_paid_order($pdo, $orderId);
+        } catch (Throwable $festErr) {
+            error_log('[festivals] record paid order ' . $orderId . ': ' . $festErr->getMessage());
+        }
+        try {
             invoices_issue_final($pdo, $orderId);
             orders_admin_audit($pdo, $order, 'issue_final_invoice');
             $resultMessage = 'پرداخت تأیید و فاکتور نهایی صادر شد';

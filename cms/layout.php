@@ -87,6 +87,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
             'flash-deals.php' => 'پیشنهاد ویژه',
+            'festivals.php' => 'جشنواره',
         ];
     } elseif ($section === 'customers') {
         $subNav = [
