@@ -8,6 +8,11 @@ $idEarly = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $qEarly = trim((string) ($_GET['q'] ?? ''));
 $carEarly = isset($_GET['car_model_id']) ? (int) $_GET['car_model_id'] : 0;
 $factoryEarly = isset($_GET['factory_id']) ? (int) $_GET['factory_id'] : 0;
+if ($slugEarly !== '' || $idEarly > 0) {
+    require __DIR__ . '/product-series-detail.php';
+    return;
+}
+
 if (
     $slugEarly === ''
     && $idEarly <= 0
