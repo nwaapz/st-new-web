@@ -161,31 +161,135 @@ function products_series_member_ids(PDO $pdo, int $seriesId): array
     return array_values(array_filter($ids, static fn(int $id): bool => $id > 0));
 }
 
-function products_series_is_orderable(PDO $pdo, int $seriesId): bool
+function products_price_sheet_stock_qty(PDO $pdo, string $visualId): ?int
 {
-    products_ensure_stock_schema($pdo);
-    if ($seriesId <= 0) {
+    $visualId = trim($visualId);
+    if ($visualId === '') {
+        return null;
+    }
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT stock_qty FROM price_sheet_rows
+             WHERE visual_id = ? AND stock_qty IS NOT NULL
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $stmt->execute([$visualId]);
+        $raw = $stmt->fetchColumn();
+        if ($raw === false || $raw === null) {
+            return null;
+        }
+
+        return max(0, (int) $raw);
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function products_series_sku_is_orderable(PDO $pdo, string $visualId): bool
+{
+    $visualId = trim($visualId);
+    if ($visualId === '') {
         return false;
     }
     $stmt = $pdo->prepare(
-        'SELECT id FROM product_series WHERE id = ? AND published = 1 LIMIT 1'
+        'SELECT id, published, stock_qty FROM products WHERE visual_id = ? LIMIT 1'
     );
-    $stmt->execute([$seriesId]);
-    if (!$stmt->fetch()) {
-        return false;
+    $stmt->execute([$visualId]);
+    $row = $stmt->fetch();
+    if ($row) {
+        return (int) ($row['published'] ?? 0) === 1
+            && (int) ($row['stock_qty'] ?? 0) > 0;
     }
 
-    $memberIds = products_series_member_ids($pdo, $seriesId);
-    if ($memberIds === []) {
-        return false;
+    $sheetStock = products_price_sheet_stock_qty($pdo, $visualId);
+
+    return $sheetStock !== null && $sheetStock > 0;
+}
+
+/**
+ * @param list<int> $seriesIds
+ * @return array<int, bool>
+ */
+function products_series_orderable_map(PDO $pdo, array $seriesIds): array
+{
+    products_ensure_stock_schema($pdo);
+    $seriesIds = array_values(array_unique(array_filter(
+        $seriesIds,
+        static fn (int $id): bool => $id > 0
+    )));
+    if ($seriesIds === []) {
+        return [];
     }
-    foreach ($memberIds as $productId) {
-        if (!products_is_orderable($pdo, $productId)) {
-            return false;
+
+    /** @var array<int, bool> $result */
+    $result = [];
+    foreach ($seriesIds as $seriesId) {
+        $result[$seriesId] = false;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($seriesIds), '?'));
+    $publishedStmt = $pdo->prepare(
+        "SELECT id, visual_id FROM product_series
+         WHERE id IN ({$placeholders}) AND published = 1"
+    );
+    $publishedStmt->execute($seriesIds);
+    $publishedIds = [];
+    $visualBySeries = [];
+    foreach ($publishedStmt->fetchAll() ?: [] as $row) {
+        $seriesId = (int) ($row['id'] ?? 0);
+        if ($seriesId <= 0) {
+            continue;
         }
+        $publishedIds[] = $seriesId;
+        $visualBySeries[$seriesId] = trim((string) ($row['visual_id'] ?? ''));
+    }
+    if ($publishedIds === []) {
+        return $result;
     }
 
-    return true;
+    $memberPlaceholders = implode(',', array_fill(0, count($publishedIds), '?'));
+    $stockStmt = $pdo->prepare(
+        "SELECT psi.series_id,
+                COUNT(*) AS member_count,
+                SUM(CASE WHEN p.published = 1 AND p.stock_qty > 0 THEN 1 ELSE 0 END) AS orderable_count
+         FROM product_series_items psi
+         INNER JOIN products p ON p.id = psi.product_id
+         WHERE psi.series_id IN ({$memberPlaceholders})
+         GROUP BY psi.series_id"
+    );
+    $stockStmt->execute($publishedIds);
+    $seriesWithMembers = [];
+    foreach ($stockStmt->fetchAll() ?: [] as $stockRow) {
+        $seriesId = (int) ($stockRow['series_id'] ?? 0);
+        if ($seriesId <= 0) {
+            continue;
+        }
+        $memberCount = (int) ($stockRow['member_count'] ?? 0);
+        $orderableCount = (int) ($stockRow['orderable_count'] ?? 0);
+        $seriesWithMembers[$seriesId] = true;
+        $result[$seriesId] = $memberCount > 0 && $orderableCount === $memberCount;
+    }
+
+    foreach ($publishedIds as $seriesId) {
+        if (isset($seriesWithMembers[$seriesId])) {
+            continue;
+        }
+        $visualId = $visualBySeries[$seriesId] ?? '';
+        $result[$seriesId] = products_series_sku_is_orderable($pdo, $visualId);
+    }
+
+    return $result;
+}
+
+function products_series_is_orderable(PDO $pdo, int $seriesId): bool
+{
+    if ($seriesId <= 0) {
+        return false;
+    }
+    $map = products_series_orderable_map($pdo, [$seriesId]);
+
+    return $map[$seriesId] ?? false;
 }
 
 function products_resolve_series_id_from_order_item(PDO $pdo, array $item): int

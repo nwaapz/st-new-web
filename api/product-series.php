@@ -174,12 +174,17 @@ function product_series_api_simple_list(PDO $pdo, array $categoryIds, string $ba
     );
     $stmt->execute($params);
 
+    $rows = $stmt->fetchAll() ?: [];
+    $seriesIds = array_map(static fn (array $row): int => (int) $row['id'], $rows);
+    $orderableBySeries = products_series_orderable_map($pdo, $seriesIds);
+
     $items = [];
-    foreach ($stmt->fetchAll() ?: [] as $row) {
+    foreach ($rows as $row) {
+        $seriesId = (int) $row['id'];
         $item = product_series_api_row($row, []);
         $categoryName = trim((string) ($row['category_name'] ?? ''));
         $item['category_name'] = $categoryName !== '' ? $categoryName : null;
-        $item['orderable'] = false;
+        $item['orderable'] = $orderableBySeries[$seriesId] ?? false;
         $items[] = $item;
     }
 
@@ -568,25 +573,11 @@ function product_series_api_build_list(PDO $pdo, array $rows, bool $callForPrice
         }
     }
 
-    $orderableBySeries = [];
-    $stockRows = product_series_api_attempt('stock', static function () use ($pdo, $placeholders, $seriesIds): array {
-        $stockStmt = $pdo->prepare(
-            "SELECT psi.series_id,
-                    COUNT(*) AS member_count,
-                    SUM(CASE WHEN p.published = 1 AND p.stock_qty > 0 THEN 1 ELSE 0 END) AS orderable_count
-             FROM product_series_items psi
-             JOIN products p ON p.id = psi.product_id
-             WHERE psi.series_id IN ({$placeholders})
-             GROUP BY psi.series_id"
-        );
-        $stockStmt->execute($seriesIds);
-        return $stockStmt->fetchAll() ?: [];
-    }, []);
-    foreach ($stockRows as $stockRow) {
-        $memberCount = (int) $stockRow['member_count'];
-        $orderableCount = (int) $stockRow['orderable_count'];
-        $orderableBySeries[(int) $stockRow['series_id']] = $memberCount > 0 && $orderableCount === $memberCount;
-    }
+    $orderableBySeries = product_series_api_attempt(
+        'stock',
+        static fn (): array => products_series_orderable_map($pdo, $seriesIds),
+        []
+    );
 
     $items = [];
     foreach ($rows as $row) {

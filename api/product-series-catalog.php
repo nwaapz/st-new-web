@@ -6,6 +6,7 @@ declare(strict_types=1);
  * Kept separate from product-series.php so hosting/schema issues cannot break the catalog.
  */
 require_once __DIR__ . '/_common.php';
+require_once dirname(__DIR__) . '/cms/lib/product-stock.php';
 
 try {
     $pdo = cms_pdo();
@@ -93,6 +94,8 @@ try {
         }
     }
 
+    $orderableBySeries = products_series_orderable_map($pdo, $seriesIds);
+
     $callForPrice = cms_call_for_price_enabled();
     $callLabel = cms_call_for_price_label();
     $items = [];
@@ -134,7 +137,7 @@ try {
             'product_ids' => $productIds,
             'category_name' => $names !== [] ? implode(' · ', $names) : null,
             'category_names' => $names,
-            'orderable' => false,
+            'orderable' => $orderableBySeries[$sid] ?? false,
         ];
     }
 

@@ -808,6 +808,13 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
         }
     }
 
+    if ($stockQty !== null) {
+        price_sheet_sync_row_to_product($pdo, $visualId, ['stock_qty' => $stockQty]);
+        if (is_array($product) && (int) ($product['id'] ?? 0) > 0) {
+            $updatedProduct = true;
+        }
+    }
+
     if (!$updatedProduct && !$updatedSeries) {
         $entityHint = is_array($product) && is_array($series)
             ? 'both'
