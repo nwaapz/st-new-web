@@ -48,6 +48,15 @@ try {
     }
 
     $body = admin_auth_request_json();
+    if ($body === [] && $_POST !== []) {
+        $body = $_POST;
+        if (isset($body['tiers_json']) && is_string($body['tiers_json'])) {
+            $decoded = json_decode($body['tiers_json'], true);
+            if (is_array($decoded)) {
+                $body['tiers'] = $decoded;
+            }
+        }
+    }
     $action = trim((string) ($body['action'] ?? 'save'));
     if (in_array($action, ['pause', 'resume', 'end', 'archive', 'duplicate', 'delete'], true)) {
         $result = festivals_action(

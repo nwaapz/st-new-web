@@ -119,11 +119,12 @@ if ($editId >= 0) {
     echo '<input type="hidden" name="action" value="save">';
     echo '<input type="hidden" name="id" value="' . (int) $value('id', $editId > 0 ? (string) $editId : '0') . '">';
     echo '<input type="hidden" name="version" value="' . cms_h($value('version', '1')) . '">';
-    echo '<input type="hidden" name="tiers_json" id="tiers-json" value="' . cms_h(json_encode($tiersForJs, JSON_UNESCAPED_UNICODE)) . '">';
+    echo '<input type="hidden" name="intent" id="intent-field" value="' . cms_h($value('intent', 'draft')) . '">';
     echo '<label class="cms-field"><span class="cms-label">عنوان</span>';
     echo '<input class="cms-input" name="title" required value="' . cms_h($value('title')) . '"></label>';
     echo '<label class="cms-field"><span class="cms-label">توضیح (اختیاری)</span>';
     echo '<textarea class="cms-input" name="description" rows="3">' . cms_h($value('description')) . '</textarea></label>';
+    echo '<input type="hidden" name="tiers_json" id="tiers-json" value="' . cms_h(json_encode($tiersForJs, JSON_UNESCAPED_UNICODE)) . '">';
     echo '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem">';
     echo '<label class="cms-field"><span class="cms-label">شروع (شمسی)</span><input class="cms-input" name="start_date" value="' . cms_h($value('start_date')) . '" required></label>';
     echo '<label class="cms-field"><span class="cms-label">ساعت شروع</span><input class="cms-input" name="start_time" placeholder="09:00" value="' . cms_h($value('start_time')) . '" required></label>';
@@ -138,9 +139,9 @@ if ($editId >= 0) {
     echo '</tr></thead><tbody></tbody></table></div>';
     echo '<button class="cms-btn cms-btn--secondary" type="button" id="add-tier">افزودن پله</button>';
     echo '<div class="cms-btn-row" style="margin-top:1rem">';
-    echo '<button class="cms-btn cms-btn--secondary" type="submit" name="intent" value="draft">ذخیره پیش‌نویس</button>';
-    echo '<button class="cms-btn cms-btn--secondary" type="submit" name="intent" value="schedule">زمان‌بندی</button>';
-    echo '<button class="cms-btn" type="submit" name="intent" value="publish">انتشار</button>';
+    echo '<button class="cms-btn cms-btn--secondary" type="submit" data-intent="draft">ذخیره پیش‌نویس</button>';
+    echo '<button class="cms-btn cms-btn--secondary" type="submit" data-intent="schedule">زمان‌بندی</button>';
+    echo '<button class="cms-btn" type="submit" data-intent="publish">انتشار</button>';
     echo '</div></form>';
 
     if ($editId > 0 && is_array($campaign)) {
@@ -216,6 +217,14 @@ document.getElementById('add-tier').addEventListener('click', () => {
   rows.push({ threshold_toman: '', benefit_title: '', benefit_description: '' });
   sync();
 });
+const festivalForm = document.getElementById('festival-form');
+const intentField = document.getElementById('intent-field');
+festivalForm.querySelectorAll('button[type="submit"][data-intent]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    intentField.value = btn.getAttribute('data-intent') || 'draft';
+  });
+});
+festivalForm.addEventListener('submit', () => sync());
 sync();
 JS;
     echo '</script>';
