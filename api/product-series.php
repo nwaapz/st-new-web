@@ -49,20 +49,26 @@ function product_series_api_ensure_schema(PDO $pdo): void
     cms_series_ensure_categories_schema($pdo);
     $imagesTable = $pdo->query("SHOW TABLES LIKE 'product_series_images'")->fetchAll();
     if (count($imagesTable) === 0) {
-        $pdo->exec(
-            'CREATE TABLE product_series_images (
-              id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-              series_id INT UNSIGNED NOT NULL,
-              image VARCHAR(512) NOT NULL,
-              alt_text VARCHAR(255) NOT NULL DEFAULT \'\',
-              sort_order INT NOT NULL DEFAULT 0,
-              PRIMARY KEY (id),
-              KEY idx_series_images_series (series_id),
-              CONSTRAINT fk_series_image_series
-                FOREIGN KEY (series_id) REFERENCES product_series (id)
-                ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
-        );
+        try {
+            $pdo->exec(
+                'CREATE TABLE product_series_images (
+                  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                  series_id INT UNSIGNED NOT NULL,
+                  image VARCHAR(512) NOT NULL,
+                  alt_text VARCHAR(255) NOT NULL DEFAULT \'\',
+                  sort_order INT NOT NULL DEFAULT 0,
+                  PRIMARY KEY (id),
+                  KEY idx_series_images_series (series_id),
+                  CONSTRAINT fk_series_image_series
+                    FOREIGN KEY (series_id) REFERENCES product_series (id)
+                    ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+            );
+        } catch (Throwable $e) {
+            error_log('[product-series] create product_series_images: ' . $e->getMessage());
+            $ready = true;
+            return;
+        }
     }
     $imageCols = [];
     foreach ($pdo->query('SHOW COLUMNS FROM product_series_images')->fetchAll() ?: [] as $col) {
@@ -115,6 +121,12 @@ function product_series_api_attempt(string $label, callable $fn, mixed $fallback
  */
 function product_series_api_simple_list(PDO $pdo, array $categoryIds, string $banner): array
 {
+    try {
+        cms_series_ensure_categories_schema($pdo);
+    } catch (Throwable $e) {
+        error_log('[product-series] categories schema: ' . $e->getMessage());
+    }
+
     $where = ['ps.published = 1'];
     $params = [];
     if ($categoryIds !== []) {
@@ -155,6 +167,24 @@ function product_series_api_simple_list(PDO $pdo, array $categoryIds, string $ba
     }
 
     return $items;
+}
+
+/** Shop list when filters are category and/or banner only (matches CMS product_series_categories). */
+function product_series_api_respond_shop_list(
+    PDO $pdo,
+    array $categoryIds,
+    string $banner
+): void {
+    $callForPrice = cms_call_for_price_enabled();
+    $items = product_series_api_simple_list($pdo, $categoryIds, $banner);
+    if ($callForPrice) {
+        $label = cms_call_for_price_label();
+        foreach ($items as &$item) {
+            product_series_api_apply_price_mode($item, true, $label);
+        }
+        unset($item);
+    }
+    api_json(['items' => $items, 'call_for_price' => $callForPrice]);
 }
 
 function product_series_api_load_gallery(PDO $pdo, int $seriesId): array
@@ -591,10 +621,26 @@ function product_series_api_apply_price_mode(array &$item, bool $callForPrice, s
 
 try {
     $pdo = cms_pdo();
-    product_series_api_ensure_schema($pdo);
-    products_ensure_stock_schema($pdo);
-    cms_ensure_product_car_models_schema($pdo);
-    cms_ensure_product_categories_schema($pdo);
+    try {
+        product_series_api_ensure_schema($pdo);
+    } catch (Throwable $e) {
+        error_log('[product-series] ensure_schema: ' . $e->getMessage());
+    }
+    try {
+        products_ensure_stock_schema($pdo);
+    } catch (Throwable $e) {
+        error_log('[product-series] stock schema: ' . $e->getMessage());
+    }
+    try {
+        cms_ensure_product_car_models_schema($pdo);
+    } catch (Throwable $e) {
+        error_log('[product-series] car models schema: ' . $e->getMessage());
+    }
+    try {
+        cms_ensure_product_categories_schema($pdo);
+    } catch (Throwable $e) {
+        error_log('[product-series] product categories schema: ' . $e->getMessage());
+    }
 
     $slug = isset($_GET['slug']) ? trim((string) $_GET['slug']) : '';
     $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
@@ -689,6 +735,11 @@ try {
         api_error('Invalid banner filter', 400);
     }
 
+    // Shop catalog: kits use product_series_categories (not product_categories on single parts).
+    if ($searchQ === '' && $carModelId <= 0 && $factoryId <= 0) {
+        product_series_api_respond_shop_list($pdo, $categoryIds, $banner);
+    }
+
     $where = ['product_series.published = 1'];
     $narrow = [];
     $listParams = [];
@@ -763,5 +814,31 @@ try {
     api_json(['items' => $items, 'call_for_price' => $callForPrice]);
 } catch (Throwable $e) {
     error_log('[product-series] ' . $e->getMessage());
-    api_error('Product series unavailable', 503);
+    try {
+        $pdo = cms_pdo();
+        $categoryIds = [];
+        if (isset($_GET['category_id'])) {
+            $cid = (int) $_GET['category_id'];
+            if ($cid > 0) {
+                $categoryIds[] = $cid;
+            }
+        }
+        if (isset($_GET['category_ids'])) {
+            foreach (explode(',', (string) $_GET['category_ids']) as $part) {
+                $idPart = (int) trim($part);
+                if ($idPart > 0) {
+                    $categoryIds[] = $idPart;
+                }
+            }
+        }
+        $categoryIds = array_values(array_unique($categoryIds));
+        $banner = isset($_GET['banner']) ? trim((string) $_GET['banner']) : '';
+        if ($banner !== '' && !in_array($banner, ['none', 'new', 'off'], true)) {
+            $banner = '';
+        }
+        product_series_api_respond_shop_list($pdo, $categoryIds, $banner);
+    } catch (Throwable $fallbackError) {
+        error_log('[product-series] fallback: ' . $fallbackError->getMessage());
+        api_error('Product series unavailable', 503);
+    }
 }
