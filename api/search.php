@@ -8,6 +8,7 @@ require_once dirname(__DIR__) . '/cms/lib/car-model-factories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-series-categories.php';
+require_once dirname(__DIR__) . '/cms/lib/product-series.php';
 
 function search_add_place(array &$places, array &$seen, string $code, string $label): void
 {
@@ -105,24 +106,16 @@ try {
         cms_series_ensure_categories_schema($pdo);
         $seriesCategorySql = cms_series_category_names_sql('s');
         $rawQ = trim((string) ($_GET['q'] ?? ''));
-        [$visualSql, $visualParams] = search_visual_id_like_clause('s.visual_id', $rawQ);
+        [$seriesSearchSql, $seriesSearchParams] = cms_series_search_match_sql('s', $rawQ, $q);
         $stmt = $pdo->prepare(
             'SELECT s.id, s.name, s.slug, s.visual_id, ' . $seriesCategorySql . ' AS category_name
              FROM product_series s
              WHERE s.published = 1
-               AND (' . search_name_sql('s.name') . ' LIKE ?
-                    OR ' . search_name_sql('s.slug') . ' LIKE ?
-                    OR ' . $visualSql . '
-                    OR EXISTS (
-                      SELECT 1 FROM product_series_categories sc
-                      JOIN categories c ON c.id = sc.category_id
-                      WHERE sc.series_id = s.id
-                        AND ' . search_name_sql('c.name') . ' LIKE ?
-                    ))
+               AND ' . $seriesSearchSql . '
              ORDER BY s.sort_order ASC, s.name ASC
              LIMIT 5'
         );
-        $stmt->execute(array_merge([$like, $like], $visualParams, [$like]));
+        $stmt->execute($seriesSearchParams);
         foreach ($stmt->fetchAll() ?: [] as $row) {
             $series[] = [
                 'id' => (int) $row['id'],

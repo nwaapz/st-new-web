@@ -8,6 +8,7 @@ require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-series.php';
 require_once dirname(__DIR__) . '/cms/lib/product-series-categories.php';
 require_once dirname(__DIR__) . '/cms/lib/product-stock.php';
+require_once dirname(__DIR__) . '/cms/lib/shop-search-intent.php';
 
 function product_series_api_ensure_schema(PDO $pdo): void
 {
@@ -528,35 +529,57 @@ try {
         $categoryIds = array_values(array_unique($categoryIds));
     }
 
-    $q = search_normalize((string) ($_GET['q'] ?? ''));
+    $rawQ = trim((string) ($_GET['q'] ?? ''));
+    $searchRawQ = $rawQ;
+    $searchQ = search_normalize($rawQ);
+    if ($searchQ !== '') {
+        $intent = shop_search_parse_intent($pdo, $rawQ, [
+            'skip_car' => $carModelId > 0,
+            'skip_factory' => $factoryId > 0,
+            'skip_categories' => $categoryIds !== [],
+        ]);
+        if ($carModelId <= 0 && !empty($intent['car_model_id'])) {
+            $carModelId = (int) $intent['car_model_id'];
+        }
+        if ($factoryId <= 0 && !empty($intent['factory_id'])) {
+            $factoryId = (int) $intent['factory_id'];
+        }
+        if ($categoryIds === [] && !empty($intent['category_ids'])) {
+            $categoryIds = $intent['category_ids'];
+        }
+        $searchRawQ = trim((string) ($intent['remainder'] ?? ''));
+        $searchQ = search_normalize($searchRawQ);
+    }
+
     $banner = isset($_GET['banner']) ? trim((string) $_GET['banner']) : '';
     if ($banner !== '' && !in_array($banner, ['none', 'new', 'off'], true)) {
         api_error('Invalid banner filter', 400);
     }
 
-    $where = ['published = 1'];
+    $where = ['product_series.published = 1'];
     $listParams = [];
-    if ($q !== '') {
-        $rawQ = trim((string) ($_GET['q'] ?? ''));
-        $like = '%' . search_like_escape($q) . '%';
-        [$visualSql, $visualParams] = search_visual_id_like_clause('product_series.visual_id', $rawQ);
-        $where[] = '(' . search_name_sql('product_series.name') . ' LIKE ? OR '
-            . $visualSql . ' OR product_series.slug LIKE ?)';
-        array_push($listParams, $like, ...$visualParams);
-        array_push($listParams, $like);
+    if ($searchQ !== '') {
+        [$searchSql, $searchParams] = cms_series_search_match_sql('product_series', $searchRawQ, $searchQ);
+        $where[] = $searchSql;
+        array_push($listParams, ...$searchParams);
     }
-    if ($categoryIds !== []) {
-        $where[] = cms_series_category_in_filter_sql('product_series', count($categoryIds));
-        foreach ($categoryIds as $catId) {
-            $listParams[] = $catId;
+    if ($carModelId > 0 && $categoryIds !== []) {
+        $where[] = cms_series_car_and_category_shop_filter_sql('product_series', count($categoryIds));
+        cms_series_push_car_category_shop_params($listParams, $carModelId, $categoryIds);
+    } else {
+        if ($categoryIds !== []) {
+            $where[] = cms_series_category_shop_filter_sql('product_series', count($categoryIds));
+            cms_series_push_category_shop_params($listParams, $categoryIds);
         }
-    }
-    if ($carModelId > 0) {
-        $where[] = cms_series_car_model_filter_sql('product_series');
-        $listParams[] = $carModelId;
-    } elseif ($factoryId > 0) {
-        $where[] = cms_series_factory_filter_sql('product_series');
-        $listParams[] = $factoryId;
+        if ($carModelId > 0) {
+            $where[] = cms_series_car_model_shop_filter_sql('product_series');
+            $listParams[] = $carModelId;
+            $listParams[] = $carModelId;
+        } elseif ($factoryId > 0) {
+            $where[] = cms_series_factory_shop_filter_sql('product_series');
+            $listParams[] = $factoryId;
+            $listParams[] = $factoryId;
+        }
     }
     if ($banner !== '') {
         $where[] = 'product_series.banner = ?';
@@ -565,7 +588,7 @@ try {
 
     $listStmt = $pdo->prepare(
         "SELECT {$selectCols}
-         FROM product_series
+         FROM product_series product_series
          WHERE " . implode(' AND ', $where) . '
          ORDER BY sort_order ASC, name ASC'
     );
