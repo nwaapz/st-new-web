@@ -106,6 +106,57 @@ function product_series_api_attempt(string $label, callable $fn, mixed $fallback
     }
 }
 
+/**
+ * Published kits linked by product_series_categories.
+ * Used when the richer shop filter query cannot run.
+ *
+ * @param list<int> $categoryIds
+ * @return list<array<string, mixed>>
+ */
+function product_series_api_simple_list(PDO $pdo, array $categoryIds, string $banner): array
+{
+    $where = ['ps.published = 1'];
+    $params = [];
+    if ($categoryIds !== []) {
+        $placeholders = implode(',', array_fill(0, count($categoryIds), '?'));
+        $where[] = "EXISTS (
+            SELECT 1 FROM product_series_categories sc
+            WHERE sc.series_id = ps.id
+              AND sc.category_id IN ({$placeholders})
+        )";
+        foreach ($categoryIds as $categoryId) {
+            $params[] = (int) $categoryId;
+        }
+    }
+    if ($banner !== '') {
+        $where[] = 'ps.banner = ?';
+        $params[] = $banner;
+    }
+
+    $categoryNamesSql = cms_series_category_names_sql('ps');
+    $stmt = $pdo->prepare(
+        "SELECT ps.id, ps.name, ps.slug, ps.visual_id, ps.description, ps.price_text,
+                ps.pack_size, ps.banner, ps.image, ps.detail_lead_image,
+                ps.image_setup_override, ps.sort_order,
+                {$categoryNamesSql} AS category_name
+         FROM product_series ps
+         WHERE " . implode(' AND ', $where) . '
+         ORDER BY ps.sort_order ASC, ps.name ASC'
+    );
+    $stmt->execute($params);
+
+    $items = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $item = product_series_api_row($row, []);
+        $categoryName = trim((string) ($row['category_name'] ?? ''));
+        $item['category_name'] = $categoryName !== '' ? $categoryName : null;
+        $item['orderable'] = false;
+        $items[] = $item;
+    }
+
+    return $items;
+}
+
 function product_series_api_load_gallery(PDO $pdo, int $seriesId): array
 {
     product_series_api_ensure_schema($pdo);
@@ -680,26 +731,34 @@ try {
         $listParams[] = $banner;
     }
 
-    $listStmt = $pdo->prepare(
-        "SELECT {$selectCols}
-         FROM product_series product_series
-         WHERE " . implode(' AND ', $where) . '
-         ORDER BY sort_order ASC, name ASC'
-    );
-    $listStmt->execute($listParams);
-    $rows = $listStmt->fetchAll() ?: [];
-
     $callForPrice = cms_call_for_price_enabled();
     $callLabel = cms_call_for_price_label();
 
-    $items = product_series_api_attempt(
-        'list',
-        static fn () => product_series_api_build_list($pdo, $rows, $callForPrice, $callLabel),
-        array_map(
-            static fn (array $row): array => product_series_api_row($row, []),
-            $rows
-        )
-    );
+    try {
+        $listStmt = $pdo->prepare(
+            "SELECT {$selectCols}
+             FROM product_series product_series
+             WHERE " . implode(' AND ', $where) . '
+             ORDER BY sort_order ASC, name ASC'
+        );
+        $listStmt->execute($listParams);
+        $rows = $listStmt->fetchAll() ?: [];
+        $items = product_series_api_attempt(
+            'list',
+            static fn () => product_series_api_build_list($pdo, $rows, $callForPrice, $callLabel),
+            array_map(
+                static fn (array $row): array => product_series_api_row($row, []),
+                $rows
+            )
+        );
+    } catch (Throwable $e) {
+        error_log('[product-series] list query: ' . $e->getMessage());
+        $items = product_series_api_simple_list($pdo, $categoryIds, $banner);
+    }
+
+    if ($items === [] && $categoryIds !== []) {
+        $items = product_series_api_simple_list($pdo, $categoryIds, $banner);
+    }
 
     api_json(['items' => $items, 'call_for_price' => $callForPrice]);
 } catch (Throwable $e) {
