@@ -2,6 +2,23 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/_common.php';
+
+$slugEarly = isset($_GET['slug']) ? trim((string) $_GET['slug']) : '';
+$idEarly = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$qEarly = trim((string) ($_GET['q'] ?? ''));
+$carEarly = isset($_GET['car_model_id']) ? (int) $_GET['car_model_id'] : 0;
+$factoryEarly = isset($_GET['factory_id']) ? (int) $_GET['factory_id'] : 0;
+if (
+    $slugEarly === ''
+    && $idEarly <= 0
+    && $qEarly === ''
+    && $carEarly <= 0
+    && $factoryEarly <= 0
+) {
+    require __DIR__ . '/product-series-catalog.php';
+    return;
+}
+
 require_once dirname(__DIR__) . '/cms/lib/search-text.php';
 require_once dirname(__DIR__) . '/cms/lib/product-car-models.php';
 require_once dirname(__DIR__) . '/cms/lib/product-categories.php';
