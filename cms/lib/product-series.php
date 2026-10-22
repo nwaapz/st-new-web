@@ -136,9 +136,7 @@ function cms_series_car_model_shop_filter_sql(string $seriesAlias = 'ps'): strin
 
     return '(' . cms_series_car_model_filter_sql($seriesAlias) . '
 
-        OR (' . cms_series_no_explicit_car_models_sql($seriesAlias) . '
-
-            AND ' . cms_series_member_car_model_filter_sql($seriesAlias) . '))';
+        OR ' . cms_series_member_car_model_filter_sql($seriesAlias) . ')';
 
 }
 
@@ -150,9 +148,7 @@ function cms_series_factory_shop_filter_sql(string $seriesAlias = 'ps'): string
 
     return '(' . cms_series_factory_filter_sql($seriesAlias) . '
 
-        OR (' . cms_series_no_explicit_car_models_sql($seriesAlias) . '
-
-            AND ' . cms_series_member_factory_filter_sql($seriesAlias) . '))';
+        OR ' . cms_series_member_factory_filter_sql($seriesAlias) . ')';
 
 }
 
@@ -172,19 +168,17 @@ function cms_series_category_shop_filter_sql(string $seriesAlias, int $count): s
 
     return '(' . cms_series_category_in_filter_sql($seriesAlias, $count) . '
 
-        OR (' . cms_series_no_explicit_categories_sql($seriesAlias) . '
+        OR EXISTS (
 
-            AND EXISTS (
+            SELECT 1 FROM product_series_items psi_cat
 
-                SELECT 1 FROM product_series_items psi_cat
+            JOIN products p_cat ON p_cat.id = psi_cat.product_id AND p_cat.published = 1
 
-                JOIN products p_cat ON p_cat.id = psi_cat.product_id AND p_cat.published = 1
+            WHERE psi_cat.series_id = ' . $seriesAlias . '.id
 
-                WHERE psi_cat.series_id = ' . $seriesAlias . '.id
+              AND ' . cms_product_effective_category_in_filter_sql('p_cat', $count) . '
 
-                  AND ' . cms_product_effective_category_in_filter_sql('p_cat', $count) . '
-
-            )))';
+        ))';
 
 }
 
@@ -222,17 +216,9 @@ function cms_series_car_and_category_shop_filter_sql(string $seriesAlias, int $c
 
 
 
-    $explicitCars = 'EXISTS (SELECT 1 FROM product_series_car_models pscm_cc WHERE pscm_cc.series_id = ' . $seriesAlias . '.id)';
+    return '(' . cms_series_car_model_shop_filter_sql($seriesAlias) . '
 
-
-
-    return '((' . $explicitCars . ' AND ' . cms_series_car_model_filter_sql($seriesAlias) . ' AND '
-
-        . cms_series_category_shop_filter_sql($seriesAlias, $categoryCount) . ')
-
-        OR (' . cms_series_no_explicit_car_models_sql($seriesAlias) . '
-
-            AND ' . cms_series_member_car_category_pair_exists_sql($seriesAlias, $categoryCount) . '))';
+        AND ' . cms_series_category_shop_filter_sql($seriesAlias, $categoryCount) . ')';
 
 }
 
@@ -304,15 +290,37 @@ function cms_series_push_car_category_pair_params(array &$listParams, int $carMo
 
  */
 
-function cms_series_push_car_category_shop_params(array &$listParams, int $carModelId, array $categoryIds): void
+function cms_series_push_car_shop_params(array &$listParams, int $carModelId): void
 
 {
 
     $listParams[] = $carModelId;
 
-    cms_series_push_category_shop_params($listParams, $categoryIds);
+    $listParams[] = $carModelId;
 
-    cms_series_push_car_category_pair_params($listParams, $carModelId, $categoryIds);
+}
+
+
+
+function cms_series_push_factory_shop_params(array &$listParams, int $factoryId): void
+
+{
+
+    $listParams[] = $factoryId;
+
+    $listParams[] = $factoryId;
+
+}
+
+
+
+function cms_series_push_car_category_shop_params(array &$listParams, int $carModelId, array $categoryIds): void
+
+{
+
+    cms_series_push_car_shop_params($listParams, $carModelId);
+
+    cms_series_push_category_shop_params($listParams, $categoryIds);
 
 }
 

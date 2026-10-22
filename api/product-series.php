@@ -574,12 +574,10 @@ try {
         }
         if ($carModelId > 0) {
             $narrow[] = cms_series_car_model_shop_filter_sql('product_series');
-            $listParams[] = $carModelId;
-            $listParams[] = $carModelId;
+            cms_series_push_car_shop_params($listParams, $carModelId);
         } elseif ($factoryId > 0) {
             $narrow[] = cms_series_factory_shop_filter_sql('product_series');
-            $listParams[] = $factoryId;
-            $listParams[] = $factoryId;
+            cms_series_push_factory_shop_params($listParams, $factoryId);
         }
     }
     $typedQuery = trim((string) ($_GET['q_raw'] ?? ''));
