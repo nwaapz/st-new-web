@@ -438,6 +438,14 @@ function orders_ensure_schema(PDO $pdo): void
     require_once __DIR__ . '/flash-deals.php';
     flash_deals_ensure_schema($pdo);
 
+    if (is_file(__DIR__ . '/gsm-sms.php')) {
+        require_once __DIR__ . '/gsm-sms.php';
+        if (function_exists('gsm_sms_ensure_schema')) {
+            gsm_sms_ensure_schema($pdo);
+        }
+    }
+    orders_backfill_public_codes_from_sms_ref($pdo);
+
     cms_schema_guard_mark('orders', [__FILE__]);
     $ready = true;
 }
@@ -733,11 +741,12 @@ function orders_list_search_clause(string $searchQ): array
     $parts = [
         'o.phone LIKE ?',
         'o.public_code LIKE ?',
+        "COALESCE(o.sms_ref, '') LIKE ?",
         "COALESCE(o.branch_phone, '') LIKE ?",
         "COALESCE(o.sales_user_name, '') LIKE ?",
         'CAST(o.id AS CHAR) LIKE ?',
     ];
-    $params = [$like, $like, $like, $like, $like];
+    $params = [$like, $like, $like, $like, $like, $like];
     if (ctype_digit($searchQ)) {
         $parts[] = 'o.id = ?';
         $params[] = (int) $searchQ;
@@ -832,6 +841,11 @@ function orders_admin_list_where(
     ];
 }
 
+function orders_public_code_from_sms_ref(string $smsRef): string
+{
+    return 'ST-' . $smsRef;
+}
+
 function orders_generate_public_code(PDO $pdo): string
 {
     $prefix = 'ST-' . date('ymd') . '-';
@@ -844,6 +858,47 @@ function orders_generate_public_code(PDO $pdo): string
         }
     }
     return $prefix . strtoupper(substr(bin2hex(random_bytes(4)), 0, 6));
+}
+
+function orders_backfill_public_codes_from_sms_ref(PDO $pdo): void
+{
+    $cols = [];
+    foreach ($pdo->query('SHOW COLUMNS FROM orders')->fetchAll() ?: [] as $row) {
+        $cols[(string) ($row['Field'] ?? '')] = true;
+    }
+    if (!isset($cols['sms_ref']) || !isset($cols['public_code'])) {
+        return;
+    }
+
+    try {
+        $stmt = $pdo->query(
+            "SELECT id, sms_ref, public_code
+             FROM orders
+             WHERE sms_ref IS NOT NULL AND TRIM(sms_ref) <> ''"
+        );
+        $rows = $stmt ? ($stmt->fetchAll() ?: []) : [];
+        $taken = $pdo->prepare(
+            'SELECT id FROM orders WHERE public_code = ? AND id <> ? LIMIT 1'
+        );
+        $upd = $pdo->prepare('UPDATE orders SET public_code = ? WHERE id = ?');
+        foreach ($rows as $row) {
+            $ref = strtoupper(preg_replace('/[^A-Z0-9]/', '', (string) ($row['sms_ref'] ?? '')) ?? '');
+            if (strlen($ref) < 2 || strlen($ref) > 16) {
+                continue;
+            }
+            $target = orders_public_code_from_sms_ref($ref);
+            if ($target === (string) ($row['public_code'] ?? '')) {
+                continue;
+            }
+            $taken->execute([$target, (int) $row['id']]);
+            if ($taken->fetchColumn()) {
+                continue;
+            }
+            $upd->execute([$target, (int) $row['id']]);
+        }
+    } catch (Throwable $e) {
+        error_log('[orders_ensure_schema] public_code sms_ref backfill: ' . $e->getMessage());
+    }
 }
 
 function orders_item_unit_type(array $item): string
@@ -2610,7 +2665,9 @@ function orders_create_from_normalized(
 
     $pdo->beginTransaction();
     try {
-        $publicCode = orders_generate_public_code($pdo);
+        $publicCode = $smsRef !== ''
+            ? orders_public_code_from_sms_ref($smsRef)
+            : orders_generate_public_code($pdo);
         $ins = $pdo->prepare(
             'INSERT INTO orders (
                public_code, client_order_uuid, sms_ref, sms_channel, user_id, sales_user_id, sales_user_name, phone, customer_name, status,
