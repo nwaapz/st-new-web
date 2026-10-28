@@ -385,9 +385,11 @@ function order_cheques_sms_body(string $notifyType, string $publicCode, string $
 function order_cheques_add(PDO $pdo, array $order, array $input): array
 {
     order_cheques_ensure_schema($pdo);
-    if (function_exists('order_cheques_ensure_extended_columns')) {
+    if (is_file(__DIR__ . '/cheque-workflow.php')) {
         require_once __DIR__ . '/cheque-workflow.php';
-        order_cheques_ensure_extended_columns($pdo);
+        if (function_exists('order_cheques_ensure_extended_columns')) {
+            order_cheques_ensure_extended_columns($pdo);
+        }
     }
     $orderId = (int) ($order['id'] ?? 0);
     if ($orderId <= 0) {
@@ -446,6 +448,14 @@ function order_cheques_add(PDO $pdo, array $order, array $input): array
     $sms = order_cheques_sms_body('cheque_received', $publicCode, $dueOn, $serial);
     order_cheques_notify($pdo, $order, 'cheque_received', $sms, $sms, $chequeId > 0 ? $chequeId : null);
 
+    try {
+        require_once __DIR__ . '/festivals.php';
+        festivals_ensure_schema($pdo);
+        festivals_record_paid_order($pdo, $orderId);
+    } catch (Throwable $festErr) {
+        error_log('[festivals] record cheque order ' . $orderId . ': ' . $festErr->getMessage());
+    }
+
     return ['message' => 'چک ثبت شد و اطلاع‌رسانی ارسال شد'];
 }
 
@@ -455,9 +465,11 @@ function order_cheques_add(PDO $pdo, array $order, array $input): array
 function order_cheques_update(PDO $pdo, array $order, array $input): array
 {
     order_cheques_ensure_schema($pdo);
-    if (function_exists('order_cheques_ensure_extended_columns')) {
+    if (is_file(__DIR__ . '/cheque-workflow.php')) {
         require_once __DIR__ . '/cheque-workflow.php';
-        order_cheques_ensure_extended_columns($pdo);
+        if (function_exists('order_cheques_ensure_extended_columns')) {
+            order_cheques_ensure_extended_columns($pdo);
+        }
     }
     $orderId = (int) ($order['id'] ?? 0);
     $chequeId = (int) ($input['id'] ?? 0);

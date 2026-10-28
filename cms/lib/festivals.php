@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 /**
  * Festival campaigns (جشنواره): timed purchase-volume tiers per sales rep.
- * Progress accrues when an order is marked paid (see festivals_record_paid_order).
+ * Progress accrues when an order is marked paid, or when a cheque is registered
+ * as received for a cheque-method order (see festivals_record_paid_order).
  */
 
 require_once __DIR__ . '/invoices.php';
@@ -690,6 +691,38 @@ function festivals_progress_total(PDO $pdo, int $festivalId, int $salesUserId): 
     return $value !== false ? (int) $value : 0;
 }
 
+/**
+ * Paid cash/cheque orders, or cheque-method orders after office receipt of at least one cheque.
+ *
+ * @param array<string, mixed> $order
+ */
+function festivals_order_counts_for_progress(PDO $pdo, array $order): bool
+{
+    $status = (string) ($order['status'] ?? '');
+    if ($status === 'paid') {
+        return true;
+    }
+    if ($status !== 'payment_proof_sent') {
+        return false;
+    }
+    $method = strtolower(trim((string) ($order['payment_method'] ?? '')));
+    if ($method !== 'cheque') {
+        return false;
+    }
+    $orderId = (int) ($order['id'] ?? 0);
+    if ($orderId <= 0) {
+        return false;
+    }
+    if (!function_exists('order_cheques_ensure_schema')) {
+        require_once __DIR__ . '/order-cheques.php';
+    }
+    order_cheques_ensure_schema($pdo);
+    $count = $pdo->prepare('SELECT COUNT(*) FROM order_cheques WHERE order_id = ?');
+    $count->execute([$orderId]);
+
+    return (int) $count->fetchColumn() > 0;
+}
+
 function festivals_record_paid_order(PDO $pdo, int $orderId): void
 {
     festivals_ensure_schema($pdo);
@@ -697,10 +730,12 @@ function festivals_record_paid_order(PDO $pdo, int $orderId): void
         require_once __DIR__ . '/orders.php';
     }
 
-    $orderStmt = $pdo->prepare('SELECT id, sales_user_id, status FROM orders WHERE id = ? LIMIT 1');
+    $orderStmt = $pdo->prepare(
+        'SELECT id, sales_user_id, status, payment_method FROM orders WHERE id = ? LIMIT 1'
+    );
     $orderStmt->execute([$orderId]);
     $order = $orderStmt->fetch();
-    if (!$order || (string) ($order['status'] ?? '') !== 'paid') {
+    if (!$order || !festivals_order_counts_for_progress($pdo, $order)) {
         return;
     }
     $salesUserId = isset($order['sales_user_id']) ? (int) $order['sales_user_id'] : 0;
