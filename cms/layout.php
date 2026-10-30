@@ -107,6 +107,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'admin-users.php' => 'مدیران CMS',
             'admin-activity.php' => 'فعالیت مدیران',
             'system-logs.php' => 'گزارش رویدادهای سیستم',
+            'admin-mobile-app.php' => 'اپ ادمین',
             'sms-settings.php' => 'پیامک',
             'mechanic-services.php' => 'دوره سرویس‌ها',
             $fontLabHref => 'Font Lab',

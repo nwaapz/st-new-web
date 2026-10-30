@@ -54,6 +54,16 @@ cms_layout_start('تنظیمات پیشرفته', cms_current_username(), 'advan
 </div>
 
 <div class="cms-panel" style="margin-top:1.5rem">
+  <h2>اپ ادمین (Android)</h2>
+  <p class="cms-muted" style="margin:0 0 .75rem">
+    آپلود APK اپ پرتال ادمین — دانلود فقط از داخل CMS (بدون لینک عمومی در سایت).
+  </p>
+  <div class="cms-btn-row">
+    <a class="cms-btn" href="admin-mobile-app.php">اپ ادمین</a>
+  </div>
+</div>
+
+<div class="cms-panel" style="margin-top:1.5rem">
   <h2>مدیران CMS</h2>
   <p class="cms-muted" style="margin:0 0 .75rem">
     افزودن حساب‌های دیگر برای ورود به پنل و مشاهده اینکه چه کسی چه اقدامی انجام داده است.
