@@ -72,6 +72,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'about.php' => 'درباره ما',
             'contact.php' => 'تماس با ما',
             'footer.php' => 'پاورقی',
+            'client-app.php' => 'اپ فروش',
         ];
     } elseif ($section === 'shop') {
         $subNav = [

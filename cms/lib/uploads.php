@@ -434,3 +434,67 @@ function cms_store_uploaded_video(array $file, string $subdir = 'about/videos'):
 
     return '/uploads/' . $subdir . '/' . $name;
 }
+
+const CMS_CLIENT_APP_MAX_BYTES = 100 * 1024 * 1024;
+
+/**
+ * @param array{name?:string,tmp_name?:string,error?:int,size?:int} $file
+ */
+function cms_store_uploaded_apk(array $file, string $subdir = 'apps'): string
+{
+    $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($error !== UPLOAD_ERR_OK) {
+        throw new RuntimeException(cms_upload_error_message($error, 'file'));
+    }
+    if (!is_uploaded_file((string) ($file['tmp_name'] ?? ''))) {
+        throw new RuntimeException('فایل آپلود معتبر نیست');
+    }
+
+    $extGuess = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+    if ($extGuess !== 'apk') {
+        throw new RuntimeException('فقط فایل APK مجاز است');
+    }
+
+    $mime = '';
+    if (class_exists('finfo')) {
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = $finfo->file((string) $file['tmp_name']) ?: '';
+    }
+    if ($mime === '' && function_exists('mime_content_type')) {
+        $mime = (string) mime_content_type((string) $file['tmp_name']);
+    }
+    $allowedMimes = [
+        'application/vnd.android.package-archive',
+        'application/java-archive',
+        'application/zip',
+        'application/octet-stream',
+        'application/x-zip-compressed',
+    ];
+    if ($mime !== '' && !in_array($mime, $allowedMimes, true)) {
+        throw new RuntimeException('فقط فایل APK مجاز است (نوع تشخیص‌داده‌شده: ' . $mime . ')');
+    }
+    if ((int) ($file['size'] ?? 0) > CMS_CLIENT_APP_MAX_BYTES) {
+        throw new RuntimeException('حداکثر حجم اپ ۱۰۰ مگابایت است');
+    }
+
+    $uploadsRoot = cms_uploads_root();
+    $subdir = trim(str_replace(['\\', '..'], ['/', ''], $subdir), '/');
+    if ($subdir === '') {
+        $subdir = 'apps';
+    }
+    $uploadsDir = $uploadsRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $subdir);
+    if (!is_dir($uploadsDir) && !mkdir($uploadsDir, 0755, true) && !is_dir($uploadsDir)) {
+        throw new RuntimeException('ساخت پوشه uploads/' . $subdir . ' ممکن نیست');
+    }
+    if (!is_writable($uploadsDir)) {
+        throw new RuntimeException('پوشه uploads/' . $subdir . ' قابل نوشتن نیست');
+    }
+
+    $name = cms_unique_upload_name($uploadsDir, (string) ($file['name'] ?? 'app'), '.apk');
+    $dest = $uploadsDir . DIRECTORY_SEPARATOR . $name;
+    if (!move_uploaded_file((string) $file['tmp_name'], $dest)) {
+        throw new RuntimeException('ذخیره فایل اپ ناموفق بود');
+    }
+
+    return '/uploads/' . $subdir . '/' . $name;
+}

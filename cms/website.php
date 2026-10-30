@@ -79,5 +79,9 @@ cms_layout_start('نمایش وب', cms_current_username(), 'website');
     <h2>پاورقی</h2>
     <p class="cms-muted">متن‌ها، شبکه‌های اجتماعی، پیوندها و لوگوهای کارخانه</p>
   </a>
+  <a class="cms-panel cms-hub-card" href="client-app.php">
+    <h2>اپ فروش</h2>
+    <p class="cms-muted">آپلود APK برای دانلود در پاورقی سایت و پرتال نمایندگان</p>
+  </a>
 </div>
 <?php cms_layout_end(); ?>
