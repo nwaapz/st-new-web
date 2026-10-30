@@ -2023,6 +2023,23 @@ function orders_admin_serialize(array $order, array $items, array $events): arra
     $payload['can_mark_paid'] = $readiness['can'];
     $payload['mark_paid_block_reason'] = $readiness['reason'];
 
+    $hasFlashDeal = false;
+    $flashDealTitle = null;
+    foreach ($serializedItems as $line) {
+        if (empty($line['is_flash_deal'])) {
+            continue;
+        }
+        $hasFlashDeal = true;
+        if ($flashDealTitle === null) {
+            $title = isset($line['flash_deal_title']) ? trim((string) $line['flash_deal_title']) : '';
+            if ($title !== '') {
+                $flashDealTitle = $title;
+            }
+        }
+    }
+    $payload['has_flash_deal'] = $hasFlashDeal;
+    $payload['flash_deal_title'] = $flashDealTitle;
+
     return $payload;
 }
 
@@ -3043,6 +3060,11 @@ function orders_admin_list(
     $stmt->execute($params);
     $rows = $stmt->fetchAll() ?: [];
 
+    $summaries = orders_list_item_summaries(
+        $pdo,
+        array_map(static fn (array $row): int => (int) $row['id'], $rows)
+    );
+
     $submittedStmt = $pdo->prepare(
         "SELECT COUNT(*) FROM orders o WHERE {$scopeSql} AND o.status = 'submitted'"
     );
@@ -3084,6 +3106,7 @@ function orders_admin_list(
             'item_count' => (int) ($row['item_count'] ?? 0),
             'created_at' => (string) $row['created_at'],
             'updated_at' => (string) $row['updated_at'],
+            'has_flash_deal' => !empty($summaries[(int) $row['id']]['has_flash']),
         ];
     }
 

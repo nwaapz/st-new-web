@@ -93,7 +93,8 @@ try {
     $perPage = isset($_GET['per_page']) ? max(1, min($perPageMax, (int) $_GET['per_page'])) : 10;
     $usePaginated = isset($_GET['page']) || isset($_GET['per_page']);
 
-    $q = search_normalize((string) ($_GET['q'] ?? ''));
+    $rawSearchQ = trim((string) ($_GET['q'] ?? ''));
+    $q = search_normalize($rawSearchQ);
 
     $resolvedIntent = null;
 
@@ -236,17 +237,19 @@ try {
 
         $like = '%' . search_like_escape($q) . '%';
 
+        [$visualSql, $visualParams] = search_visual_id_like_clause('p.visual_id', $rawSearchQ);
+
         $modelNamesSqlForQ = cms_product_model_names_sql('p');
 
         $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR '
 
-            . search_name_sql('p.visual_id') . ' LIKE ? OR '
+            . $visualSql . ' OR '
 
             . cms_product_any_category_name_search_sql('p', search_name_sql('c_s.name') . ' LIKE ?') . ' OR '
 
             . $modelNamesSqlForQ . ' LIKE ?)';
 
-        array_push($params, $like, $like, $like, $like);
+        array_push($params, $like, ...$visualParams, $like, $like);
 
     }
 
