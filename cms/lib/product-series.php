@@ -344,6 +344,8 @@ function cms_series_search_match_sql(string $seriesAlias, string $rawQ, string $
 
     [$visualSql, $visualParams] = search_visual_id_like_clause($seriesAlias . '.visual_id', $rawQ);
 
+    [$memberVisualSql, $memberVisualParams] = search_visual_id_like_clause('p_srch.visual_id', $rawQ);
+
     $memberName = search_name_sql('p_srch.name');
 
     $memberCategory = cms_product_any_category_name_search_sql(
@@ -386,7 +388,7 @@ function cms_series_search_match_sql(string $seriesAlias, string $rawQ, string $
 
               AND (' . $memberName . ' LIKE ?
 
-                   OR ' . search_name_sql('p_srch.visual_id') . ' LIKE ?
+                   OR ' . $memberVisualSql . '
 
                    OR ' . $memberCategory . '
 
@@ -406,7 +408,9 @@ function cms_series_search_match_sql(string $seriesAlias, string $rawQ, string $
 
             $visualParams,
 
-            [$like, $like, $like, $like, $like, $like]
+            [$like, $like, $like, $like, $like],
+
+            $memberVisualParams,
 
         ),
 

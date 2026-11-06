@@ -147,7 +147,7 @@ function product_price_sync_fetch_delta(PDO $pdo, ?string $since): array
     $stmt->execute($params);
     $rows = $stmt->fetchAll() ?: [];
 
-    $callForPrice = cms_call_for_price_enabled();
+    $callForPrice = cms_client_app_call_for_price_enabled();
     $callLabel = cms_call_for_price_label();
 
     $items = [];

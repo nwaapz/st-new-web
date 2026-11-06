@@ -101,7 +101,7 @@ try {
 
     $orderableBySeries = products_series_orderable_map($pdo, $seriesIds);
 
-    $callForPrice = cms_call_for_price_enabled();
+    $callForPrice = cms_public_call_for_price_enabled();
     $callLabel = cms_call_for_price_label();
     $items = [];
     foreach ($rows as $row) {

@@ -63,7 +63,7 @@ try {
         'synced_at' => $log['synced_at'],
         'product_count' => $log['product_count'],
         'remaining_today' => 0,
-        'call_for_price' => cms_call_for_price_enabled(),
+        'call_for_price' => cms_client_app_call_for_price_enabled(),
         'products' => $products,
     ]);
 } catch (Throwable $e) {

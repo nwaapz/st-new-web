@@ -12,6 +12,7 @@ $pdo = cms_pdo();
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_price_mode'])) {
     $enabled = isset($_POST['call_for_price']) ? '1' : '0';
     try {
+        cms_client_app_call_for_price_pin_if_unset();
         cms_setting_set('call_for_price', $enabled);
         cms_audit_settings($pdo, 'فروشگاه — حالت قیمت');
         cms_flash($enabled === '1'
@@ -118,8 +119,9 @@ cms_layout_start('فروشگاه', cms_current_username(), 'shop');
 <form class="cms-panel" method="post" style="margin-bottom:1.25rem">
   <h2 style="margin-top:0">نمایش قیمت در سایت</h2>
   <p class="cms-muted" style="margin:.25rem 0 1rem">
-    اگر روشن باشد، همه قیمت‌های عمومی سایت به «<?= cms_h(cms_call_for_price_label()) ?>» تبدیل می‌شوند.
-    قیمت واقعی فقط در پنل مدیریت دیده می‌شود.
+    اگر روشن باشد، قیمت‌های فروشگاه وب‌سایت به «<?= cms_h(cms_call_for_price_label()) ?>» تبدیل می‌شوند.
+    اپ مشتری جدا است و از اپ ادمین، تب گزینه فروش، تنظیم می‌شود.
+    قیمت واقعی در پنل مدیریت دیده می‌شود.
   </p>
   <input type="hidden" name="save_price_mode" value="1">
   <label class="cms-check" style="margin-bottom:1rem">

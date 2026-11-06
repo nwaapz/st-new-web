@@ -19,10 +19,7 @@ try {
     }
 
     if ($method === 'GET') {
-        api_json([
-            'ok' => true,
-            'show_prices' => !cms_call_for_price_enabled(),
-        ]);
+        api_json(admin_shop_price_mode_payload());
     }
 
     if ($method !== 'POST') {
@@ -30,21 +27,34 @@ try {
     }
 
     $body = admin_auth_request_json();
-    if (!array_key_exists('show_prices', $body)) {
+    $changedClient = array_key_exists('show_prices', $body) && $body['show_prices'] !== null;
+    $changedWebsite = array_key_exists('show_website_prices', $body) && $body['show_website_prices'] !== null;
+    if (!$changedClient && !$changedWebsite) {
         api_error('show_prices الزامی است', 400);
     }
-    $showPrices = admin_shop_price_mode_bool($body['show_prices']);
-    cms_setting_set('call_for_price', $showPrices ? '0' : '1');
+
+    if ($changedWebsite) {
+        $showWebsitePrices = admin_shop_price_mode_bool($body['show_website_prices']);
+        cms_client_app_call_for_price_pin_if_unset();
+        cms_setting_set('call_for_price', $showWebsitePrices ? '0' : '1');
+    }
+    if ($changedClient) {
+        $showPrices = admin_shop_price_mode_bool($body['show_prices']);
+        cms_setting_set('client_app_call_for_price', $showPrices ? '0' : '1');
+    }
+
+    $auditLabel = $changedClient && $changedWebsite
+        ? 'اپ ادمین — نمایش قیمت مشتری و وب‌سایت'
+        : ($changedWebsite
+            ? 'اپ ادمین — نمایش قیمت وب‌سایت'
+            : 'اپ ادمین — نمایش قیمت اپ مشتری');
     try {
-        cms_audit_settings($pdo, 'اپ ادمین — نمایش قیمت مشتری');
+        cms_audit_settings($pdo, $auditLabel);
     } catch (Throwable $auditError) {
         error_log('[admin-shop-price-mode] audit ' . $auditError->getMessage());
     }
 
-    api_json([
-        'ok' => true,
-        'show_prices' => $showPrices,
-    ]);
+    api_json(admin_shop_price_mode_payload());
 } catch (RuntimeException $e) {
     api_error($e->getMessage(), 400);
 } catch (Throwable $e) {
@@ -56,6 +66,15 @@ try {
         'file' => basename($e->getFile()),
         'line' => $e->getLine(),
     ], 500);
+}
+
+function admin_shop_price_mode_payload(): array
+{
+    return [
+        'ok' => true,
+        'show_prices' => !cms_client_app_call_for_price_enabled(),
+        'show_website_prices' => !cms_call_for_price_enabled(),
+    ];
 }
 
 function admin_shop_price_mode_bool($value): bool

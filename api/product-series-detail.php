@@ -207,9 +207,9 @@ try {
     $priceText = isset($row['price_text']) && trim((string) $row['price_text']) !== ''
         ? (string) $row['price_text']
         : null;
-    $callForPrice = function_exists('cms_call_for_price_enabled')
-        ? cms_call_for_price_enabled()
-        : false;
+    $callForPrice = function_exists('cms_public_call_for_price_enabled')
+        ? cms_public_call_for_price_enabled()
+        : (function_exists('cms_call_for_price_enabled') ? cms_call_for_price_enabled() : false);
     if ($callForPrice && $priceText !== null && function_exists('cms_call_for_price_label')) {
         $label = cms_call_for_price_label();
         $priceText = $label;

@@ -260,6 +260,37 @@ function cms_call_for_price_enabled(): bool
     return cms_setting_get('call_for_price', '0') === '1';
 }
 
+function cms_client_app_call_for_price_enabled(): bool
+{
+    $stored = cms_setting_get('client_app_call_for_price', '');
+    if ($stored === '0' || $stored === '1') {
+        return $stored === '1';
+    }
+
+    return cms_call_for_price_enabled();
+}
+
+function cms_client_app_call_for_price_pin_if_unset(): void
+{
+    $stored = cms_setting_get('client_app_call_for_price', '');
+    if ($stored === '0' || $stored === '1') {
+        return;
+    }
+    cms_setting_set('client_app_call_for_price', cms_call_for_price_enabled() ? '1' : '0');
+}
+
+function cms_request_uses_client_app_prices(): bool
+{
+    return trim((string) ($_COOKIE['STARTECHSALESSESSID'] ?? '')) !== '';
+}
+
+function cms_public_call_for_price_enabled(): bool
+{
+    return cms_request_uses_client_app_prices()
+        ? cms_client_app_call_for_price_enabled()
+        : cms_call_for_price_enabled();
+}
+
 function cms_call_for_price_label(): string
 {
     return 'تماس برای قیمت';

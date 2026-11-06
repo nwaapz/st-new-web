@@ -1384,7 +1384,7 @@ function orders_client_serialize_item_price_text(array $order, array $item): ?st
     if (orders_client_pre_invoice_sent($order)) {
         return $stored;
     }
-    if (cms_call_for_price_enabled()) {
+    if (cms_public_call_for_price_enabled()) {
         return null;
     }
 
@@ -2277,7 +2277,7 @@ function orders_save_payment_upload(array $file): string
  * @param list<mixed> $rawItems
  * @return array<string, array<string, mixed>>
  */
-function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
+function orders_normalize_cart_items(PDO $pdo, array $rawItems, ?bool $hidePrices = null): array
 {
     require_once __DIR__ . '/flash-deals.php';
     require_once __DIR__ . '/car-model-factories.php';
@@ -2463,7 +2463,8 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems): array
             }
         }
 
-        if (cms_call_for_price_enabled()) {
+        $hideLinePrice = $hidePrices ?? cms_public_call_for_price_enabled();
+        if ($hideLinePrice) {
             $snapshot['price_text'] = null;
         }
 
@@ -2902,7 +2903,7 @@ function orders_admin_create_manual(PDO $pdo, array $body, ?array $adminUser): a
         throw new RuntimeException('اقلام سفارش الزامی است');
     }
 
-    $normalized = orders_normalize_cart_items($pdo, $rawItems);
+    $normalized = orders_normalize_cart_items($pdo, $rawItems, false);
     if ($normalized === []) {
         throw new RuntimeException('اقلام سفارش نامعتبر است');
     }

@@ -163,7 +163,7 @@ try {
     $ratingStmt->execute([$productId]);
     $rating = $ratingStmt->fetch() ?: ['rating_avg' => null, 'rating_count' => 0];
 
-    $callForPrice = cms_call_for_price_enabled();
+    $callForPrice = cms_public_call_for_price_enabled();
     if ($callForPrice) {
         $product['price_text'] = cms_call_for_price_label();
     }

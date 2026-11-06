@@ -93,7 +93,8 @@ try {
     $perPage = isset($_GET['per_page']) ? max(1, min($perPageMax, (int) $_GET['per_page'])) : 10;
     $usePaginated = isset($_GET['page']) || isset($_GET['per_page']);
 
-    $q = search_normalize((string) ($_GET['q'] ?? ''));
+    $rawSearchQ = trim((string) ($_GET['q'] ?? ''));
+    $q = search_normalize($rawSearchQ);
 
     $resolvedIntent = null;
 
@@ -152,7 +153,7 @@ try {
 
         if (!$source) {
 
-            api_json(['call_for_price' => cms_call_for_price_enabled(), 'items' => []]);
+            api_json(['call_for_price' => cms_public_call_for_price_enabled(), 'items' => []]);
 
         }
 
@@ -236,17 +237,19 @@ try {
 
         $like = '%' . search_like_escape($q) . '%';
 
+        [$visualSql, $visualParams] = search_visual_id_like_clause('p.visual_id', $rawSearchQ);
+
         $modelNamesSqlForQ = cms_product_model_names_sql('p');
 
         $where[] = '(' . search_name_sql('p.name') . ' LIKE ? OR '
 
-            . search_name_sql('p.visual_id') . ' LIKE ? OR '
+            . $visualSql . ' OR '
 
             . cms_product_any_category_name_search_sql('p', search_name_sql('c_s.name') . ' LIKE ?') . ' OR '
 
             . $modelNamesSqlForQ . ' LIKE ?)';
 
-        array_push($params, $like, $like, $like, $like);
+        array_push($params, $like, ...$visualParams, $like, $like);
 
     }
 
@@ -425,7 +428,7 @@ try {
 
 
 
-    $callForPrice = cms_call_for_price_enabled();
+    $callForPrice = cms_public_call_for_price_enabled();
 
     $callLabel = cms_call_for_price_label();
 

@@ -9,7 +9,7 @@ try {
     $intro = cms_page_intro_public('shop');
 
     api_json([
-        'call_for_price' => cms_call_for_price_enabled(),
+        'call_for_price' => cms_public_call_for_price_enabled(),
         'call_for_price_label' => cms_call_for_price_label(),
         'header_image' => $headerImage !== '' ? $headerImage : null,
         'title' => $intro['title'],

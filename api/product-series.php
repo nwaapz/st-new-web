@@ -202,7 +202,7 @@ function product_series_api_respond_shop_list(
     array $categoryIds,
     string $banner
 ): void {
-    $callForPrice = cms_call_for_price_enabled();
+    $callForPrice = cms_public_call_for_price_enabled();
     $items = product_series_api_simple_list($pdo, $categoryIds, $banner);
     if ($callForPrice) {
         $label = cms_call_for_price_label();
@@ -693,7 +693,7 @@ try {
             static fn () => product_series_api_enrich($pdo, $item, $seriesId, true),
             $item
         );
-        $callForPrice = cms_call_for_price_enabled();
+        $callForPrice = cms_public_call_for_price_enabled();
         product_series_api_apply_price_mode($item, $callForPrice, cms_call_for_price_label());
         $item['orderable'] = product_series_api_attempt(
             'detail stock',
@@ -795,7 +795,7 @@ try {
         $listParams[] = $banner;
     }
 
-    $callForPrice = cms_call_for_price_enabled();
+    $callForPrice = cms_public_call_for_price_enabled();
     $callLabel = cms_call_for_price_label();
 
     try {
