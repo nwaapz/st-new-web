@@ -27,20 +27,39 @@ try {
     }
 
     $body = admin_auth_request_json();
-    $changedClient = array_key_exists('show_prices', $body) && $body['show_prices'] !== null;
-    $changedWebsite = array_key_exists('show_website_prices', $body) && $body['show_website_prices'] !== null;
+
+    $changedClient = false;
+    $changedWebsite = false;
+    $showClientValue = false;
+    $showWebsiteValue = false;
+
+    if (array_key_exists('show_prices', $body) && $body['show_prices'] !== null) {
+        $target = isset($body['price_target']) ? trim((string) $body['price_target']) : 'client';
+        $value = admin_shop_price_mode_bool($body['show_prices']);
+        if ($target === 'website') {
+            $changedWebsite = true;
+            $showWebsiteValue = $value;
+        } else {
+            $changedClient = true;
+            $showClientValue = $value;
+        }
+    }
+
+    if (!$changedClient && !$changedWebsite && array_key_exists('show_website_prices', $body) && $body['show_website_prices'] !== null) {
+        $changedWebsite = true;
+        $showWebsiteValue = admin_shop_price_mode_bool($body['show_website_prices']);
+    }
+
     if (!$changedClient && !$changedWebsite) {
         api_error('show_prices الزامی است', 400);
     }
 
     if ($changedWebsite) {
-        $showWebsitePrices = admin_shop_price_mode_bool($body['show_website_prices']);
         cms_client_app_call_for_price_pin_if_unset();
-        cms_setting_set('call_for_price', $showWebsitePrices ? '0' : '1');
+        cms_setting_set('call_for_price', $showWebsiteValue ? '0' : '1');
     }
     if ($changedClient) {
-        $showPrices = admin_shop_price_mode_bool($body['show_prices']);
-        cms_setting_set('client_app_call_for_price', $showPrices ? '0' : '1');
+        cms_setting_set('client_app_call_for_price', $showClientValue ? '0' : '1');
     }
 
     $auditLabel = $changedClient && $changedWebsite
