@@ -349,6 +349,48 @@ function price_sheet_apply_catalog_meta_to_row(array &$sheetRow, ?array $catalog
  *
  * @param array<string,mixed> $row
  */
+function price_sheet_unpublish_catalog_by_visual_id(PDO $pdo, string $visualId): void
+{
+    $visualId = price_import_normalize_visual_id($visualId);
+    if ($visualId === '') {
+        return;
+    }
+
+    $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
+    $product = $entities['product'] ?? null;
+    $series = $entities['series'] ?? null;
+    require_once __DIR__ . '/product-price-sync.php';
+
+    if (is_array($product) && (int) ($product['id'] ?? 0) > 0) {
+        $productId = (int) $product['id'];
+        $pdo->prepare('UPDATE products SET published = 0 WHERE id = ?')->execute([$productId]);
+        product_price_sync_mark_product($pdo, $productId);
+    }
+
+    if (is_array($series) && (int) ($series['id'] ?? 0) > 0) {
+        $seriesId = (int) $series['id'];
+        $pdo->prepare('UPDATE product_series SET published = 0 WHERE id = ?')->execute([$seriesId]);
+        product_price_sync_mark_series($pdo, $seriesId);
+    }
+}
+
+function price_sheet_visual_id_for_sheet_row(PDO $pdo, int $rowId, int $categoryId): string
+{
+    if ($rowId <= 0 || $categoryId <= 0) {
+        return '';
+    }
+    $stmt = $pdo->prepare(
+        'SELECT visual_id FROM price_sheet_rows WHERE id = ? AND category_id = ? LIMIT 1'
+    );
+    $stmt->execute([$rowId, $categoryId]);
+    $raw = $stmt->fetchColumn();
+    if ($raw === false) {
+        return '';
+    }
+
+    return price_import_normalize_visual_id((string) $raw);
+}
+
 function price_sheet_push_row_to_catalog(PDO $pdo, array $row, int $line = 1): void
 {
     $result = price_sheet_apply_row_to_catalog($pdo, $row, $line);
@@ -1289,9 +1331,16 @@ function price_sheet_apply_posted_rows(
         $rowId = (int) ($input['id'] ?? 0);
         if (!empty($input['delete'])) {
             if ($rowId > 0) {
+                $visualId = price_sheet_visual_id_for_sheet_row($pdo, $rowId, $categoryId);
+                if ($visualId === '') {
+                    $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
+                }
                 $deleteStmt->execute([$rowId, $categoryId]);
                 if ($deleteStmt->rowCount() > 0) {
                     $deleted++;
+                    if ($visualId !== '') {
+                        price_sheet_unpublish_catalog_by_visual_id($pdo, $visualId);
+                    }
                 }
             }
             continue;
