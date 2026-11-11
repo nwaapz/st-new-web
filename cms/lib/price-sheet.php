@@ -2007,12 +2007,16 @@ function price_sheet_export_include_stock_from_query(array $query, bool $fromWar
 }
 
 /**
+ * One worksheet with every category table from the CMS page (Google Sheets import
+ * only reads the first tab of a multi-sheet xlsx).
+ *
  * @return list<array{name:string,rows:list<list<string>>}>
  */
 function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): array
 {
     $frames = price_sheet_list_frames($pdo);
     $header = [
+        'دسته',
         'کد کالا',
         'نام',
         'خودرو',
@@ -2025,14 +2029,14 @@ function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): 
         $header[] = 'موجودی انبار';
     }
 
-    $sheets = [];
+    $rows = [$header];
     foreach ($frames as $frame) {
         $frameRows = is_array($frame['rows'] ?? null) ? $frame['rows'] : [];
         if ($frameRows === []) {
             continue;
         }
 
-        $rows = [$header];
+        $categoryName = (string) ($frame['category_name'] ?? '');
         foreach ($frameRows as $row) {
             $packPrice = (string) ($row['pack_price_text'] ?? '');
             if ($packPrice === '—') {
@@ -2040,6 +2044,7 @@ function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): 
             }
 
             $line = [
+                $categoryName,
                 (string) ($row['visual_id'] ?? ''),
                 (string) ($row['name'] ?? ''),
                 (string) ($row['model_name'] ?? ''),
@@ -2054,14 +2059,18 @@ function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): 
 
             $rows[] = $line;
         }
-
-        $sheets[] = [
-            'name' => (string) ($frame['category_name'] ?? 'دسته'),
-            'rows' => $rows,
-        ];
     }
 
-    return $sheets;
+    if (count($rows) <= 1) {
+        return [];
+    }
+
+    return [
+        [
+            'name' => 'لیست قیمت',
+            'rows' => $rows,
+        ],
+    ];
 }
 
 function price_sheet_export_page_url(bool $fromWarehouse = false, bool $includeStock = false): string
@@ -2072,7 +2081,7 @@ function price_sheet_export_page_url(bool $fromWarehouse = false, bool $includeS
         $query .= '&include_stock=1';
     }
 
-    return $base . (str_contains($base, '?') ? '&' : '?') . $query;
+    return $base . (strpos($base, '?') !== false ? '&' : '?') . $query;
 }
 
 function price_sheet_send_xlsx_export(PDO $pdo, bool $fromWarehouse = false, bool $includeStock = false): void
