@@ -97,7 +97,7 @@ function sales_push_message_for_status(string $publicCode, string $notifyType, s
         case 'accepted':
             return [
                 'title' => 'تأیید انبار',
-                'body' => 'سفارش ' . $code . ' تأیید شد. پیش‌فاکتور آماده است.',
+                'body' => 'سفارش ' . $code . ' تأیید شد. پیش‌فاکتور آماده است. لطفاً مدارک پرداخت را ارسال کنید.',
             ];
         case 'rejected':
             return [

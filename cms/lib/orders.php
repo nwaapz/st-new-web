@@ -2827,7 +2827,87 @@ function orders_create_from_normalized(
         ]);
     }
 
+    orders_try_auto_sale($pdo, $orderId);
+
     return ['order_id' => $orderId, 'duplicate' => false];
+}
+
+function orders_auto_sale_enabled(): bool
+{
+    if (!function_exists('cms_setting_get')) {
+        return false;
+    }
+
+    return cms_setting_get('auto_sale_orders', '0') === '1';
+}
+
+function orders_try_auto_sale(PDO $pdo, int $orderId): void
+{
+    if ($orderId <= 0 || !orders_auto_sale_enabled()) {
+        return;
+    }
+
+    try {
+        $order = orders_get_by_id($pdo, $orderId);
+        if ($order === null) {
+            return;
+        }
+        $status = (string) ($order['status'] ?? '');
+        if ($status !== 'submitted') {
+            return;
+        }
+
+        require_once __DIR__ . '/invoices.php';
+        $items = orders_active_order_items(orders_fetch_items($pdo, $orderId));
+        if ($items === []) {
+            throw new RuntimeException('سفارش بدون قلم فعال است');
+        }
+
+        $prices = [];
+        foreach ($items as $item) {
+            $itemId = (int) ($item['id'] ?? 0);
+            if ($itemId <= 0) {
+                throw new RuntimeException('قلم نامعتبر است');
+            }
+            $catalog = orders_admin_lookup_catalog_price($pdo, $item);
+            if ($catalog === null || trim((string) $catalog) === '') {
+                throw new RuntimeException('قیمت کاتالوگ برای قلم #' . $itemId . ' موجود نیست');
+            }
+            try {
+                $normalized = invoices_normalize_price_text((string) $catalog);
+            } catch (InvalidArgumentException $e) {
+                throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
+            }
+            if ($normalized === null || $normalized === '') {
+                throw new RuntimeException('قیمت کاتالوگ قلم #' . $itemId . ' نامعتبر است');
+            }
+            $prices[(string) $itemId] = $normalized;
+        }
+
+        orders_admin_apply_action(
+            $pdo,
+            $orderId,
+            'accept',
+            'فروش خودکار — قیمت کاتالوگ',
+            $prices
+        );
+    } catch (Throwable $e) {
+        error_log('[orders_try_auto_sale] order ' . $orderId . ': ' . $e->getMessage());
+        if (function_exists('cms_app_log') || is_file(__DIR__ . '/application-logs.php')) {
+            require_once __DIR__ . '/application-logs.php';
+            cms_app_log([
+                'source_app' => 'backend',
+                'severity' => 'WARNING',
+                'category' => 'order',
+                'event_code' => 'auto_sale_skipped',
+                'summary' => 'فروش خودکار انجام نشد؛ سفارش در وضعیت ثبت‌شده ماند',
+                'related_order_id' => $orderId,
+                'metadata' => [
+                    'error' => $e->getMessage(),
+                ],
+            ]);
+        }
+    }
 }
 
 /**
