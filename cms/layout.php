@@ -113,7 +113,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=30">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=31">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';
@@ -136,7 +136,12 @@ function cms_layout_start(string $title, string $username = '', string $section 
     }
     echo '</nav>';
 
+    echo '<div class="cms-nav__actions">';
+    if ($script === 'price-sheet.php') {
+        echo '<button type="submit" class="cms-btn cms-btn--primary" form="price-sheet-form">ذخیره</button>';
+    }
     echo '<a class="cms-btn cms-btn--ghost" href="logout.php">خروج</a>';
+    echo '</div>';
     echo '</header>';
 
     $subNavAliases = [

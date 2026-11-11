@@ -115,6 +115,13 @@ a:visited {
   flex: 1;
 }
 
+.cms-nav__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
 .cms-root-tab {
   display: inline-block;
   padding: 0.5rem 1.05rem;

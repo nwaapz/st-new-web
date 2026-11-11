@@ -352,17 +352,176 @@ function price_sheet_apply_catalog_meta_to_row(array &$sheetRow, ?array $catalog
 function price_sheet_push_row_to_catalog(PDO $pdo, array $row, int $line = 1): void
 {
     $result = price_sheet_apply_row_to_catalog($pdo, $row, $line);
-    if (!empty($result['updated'])) {
+    if (!empty($result['updated']) || !empty($result['created'])) {
         return;
     }
     $reason = trim((string) ($result['reason'] ?? ''));
-    if ($reason === '') {
+    if ($reason === '' || $reason === 'تغییری برای انتشار یافت نشد') {
         return;
     }
     $visualId = (string) ($result['visual_id'] ?? '');
     throw new RuntimeException(
         $visualId !== '' ? $reason . ' (کد ' . $visualId . ')' : $reason
     );
+}
+
+function price_sheet_default_car_model_id(PDO $pdo): int
+{
+    try {
+        $row = $pdo->query(
+            'SELECT id FROM car_models ORDER BY sort_order ASC, id ASC LIMIT 1'
+        )->fetch(PDO::FETCH_ASSOC);
+        return (int) ($row['id'] ?? 0);
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+function price_sheet_ensure_product_shop_links(PDO $pdo, int $productId, int $categoryId): void
+{
+    if ($productId <= 0) {
+        return;
+    }
+    cms_ensure_product_categories_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
+
+    $existingCats = cms_product_load_category_ids($pdo, $productId);
+    if ($existingCats === []) {
+        if ($categoryId <= 0) {
+            throw new RuntimeException('دسته محصول برای نمایش در فروشگاه الزامی است');
+        }
+        cms_product_save_category_ids($pdo, $productId, [$categoryId]);
+        $existingCats = [$categoryId];
+    } elseif ($categoryId > 0 && !in_array($categoryId, $existingCats, true) && count($existingCats) < 2) {
+        $existingCats[] = $categoryId;
+        cms_product_save_category_ids($pdo, $productId, $existingCats);
+    }
+
+    $existingCars = cms_product_load_car_model_ids($pdo, $productId);
+    if ($existingCars !== []) {
+        return;
+    }
+    $carModelId = price_sheet_default_car_model_id($pdo);
+    if ($carModelId <= 0) {
+        throw new RuntimeException('حداقل یک مدل خودرو در سیستم لازم است');
+    }
+    $catForCar = $categoryId > 0 ? $categoryId : (int) ($existingCats[0] ?? 0);
+    cms_product_save_car_model_ids(
+        $pdo,
+        $productId,
+        [$carModelId],
+        $catForCar > 0 ? [$carModelId => $catForCar] : []
+    );
+}
+
+function price_sheet_ensure_series_shop_links(PDO $pdo, int $seriesId, int $categoryId): void
+{
+    if ($seriesId <= 0 || $categoryId <= 0) {
+        return;
+    }
+    cms_series_ensure_categories_schema($pdo);
+    $existing = cms_series_load_category_ids($pdo, $seriesId);
+    if ($existing === []) {
+        cms_series_save_category_ids($pdo, $seriesId, [$categoryId]);
+    }
+}
+
+/**
+ * @param array<string,mixed> $row
+ */
+function price_sheet_create_catalog_product(PDO $pdo, array $row): int
+{
+    $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
+    $name = trim((string) ($row['name'] ?? ''));
+    $priceText = trim((string) ($row['price_text'] ?? ''));
+    $categoryId = (int) ($row['category_id'] ?? 0);
+    $warrantyText = price_sheet_clean_cell_value((string) ($row['warranty_text'] ?? ''));
+    $packSize = isset($row['pack_size']) && $row['pack_size'] !== null
+        ? (int) $row['pack_size']
+        : null;
+    if ($packSize !== null && $packSize <= 0) {
+        $packSize = null;
+    }
+    $stockQty = array_key_exists('stock_qty', $row) && $row['stock_qty'] !== null
+        ? products_normalize_stock_qty($row['stock_qty'], 0)
+        : PRODUCTS_STOCK_DEFAULT;
+
+    if ($visualId === '') {
+        throw new RuntimeException('کد کالا خالی است');
+    }
+    if ($name === '') {
+        throw new RuntimeException('نام محصول برای کد ' . $visualId . ' الزامی است');
+    }
+    if ($priceText === '') {
+        throw new RuntimeException('قیمت محصول الزامی است');
+    }
+    if ($categoryId <= 0) {
+        throw new RuntimeException('دسته محصول برای ایجاد الزامی است');
+    }
+
+    $carModelId = price_sheet_default_car_model_id($pdo);
+    if ($carModelId <= 0) {
+        throw new RuntimeException('حداقل یک مدل خودرو در سیستم لازم است');
+    }
+
+    products_ensure_stock_schema($pdo);
+    $slug = price_import_unique_slug($pdo, $name);
+    $description = price_import_description_with_warranty(null, $warrantyText);
+
+    $cols = [];
+    foreach ($pdo->query('SHOW COLUMNS FROM products')->fetchAll() ?: [] as $col) {
+        $cols[(string) ($col['Field'] ?? '')] = true;
+    }
+
+    $insert = [
+        'name' => $name,
+        'slug' => $slug,
+        'visual_id' => $visualId,
+        'description' => $description,
+        'price_text' => $priceText,
+        'pack_size' => $packSize,
+        'banner' => 'none',
+        'published' => 1,
+        'sort_order' => 0,
+        'stock_qty' => $stockQty,
+        'category_id' => $categoryId,
+        'car_model_id' => $carModelId,
+    ];
+    $insertCols = [];
+    $placeholders = [];
+    $values = [];
+    foreach ($insert as $column => $value) {
+        if (!isset($cols[$column])) {
+            continue;
+        }
+        $insertCols[] = '`' . $column . '`';
+        $placeholders[] = '?';
+        $values[] = $value;
+    }
+    if ($insertCols === []) {
+        throw new RuntimeException('ایجاد محصول ناموفق بود');
+    }
+
+    $sql = 'INSERT INTO products (' . implode(', ', $insertCols) . ') VALUES (' . implode(', ', $placeholders) . ')';
+    try {
+        $pdo->prepare($sql)->execute($values);
+    } catch (PDOException $e) {
+        throw new RuntimeException('ایجاد محصول ناموفق بود');
+    }
+    $productId = (int) $pdo->lastInsertId();
+    if ($productId <= 0) {
+        throw new RuntimeException('ایجاد محصول ناموفق بود');
+    }
+
+    cms_ensure_product_categories_schema($pdo);
+    cms_ensure_product_car_models_schema($pdo);
+    cms_product_save_category_ids($pdo, $productId, [$categoryId]);
+    cms_product_save_car_model_ids($pdo, $productId, [$carModelId], [$carModelId => $categoryId]);
+
+    require_once __DIR__ . '/product-price-sync.php';
+    product_price_sync_mark_product($pdo, $productId);
+
+    return $productId;
 }
 
 function price_sheet_resolve_catalog_category_id(PDO $pdo, string $visualId): ?int
@@ -724,12 +883,31 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
     }
 
     products_ensure_stock_schema($pdo);
+    $categoryId = (int) ($row['category_id'] ?? 0);
     $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
     $product = $entities['product'] ?? null;
     $series = $entities['series'] ?? null;
 
     if (!$product && !$series) {
-        $result['reason'] = 'محصول یا سری کیت با این کد در سایت یافت نشد';
+        if ($name === '') {
+            $result['reason'] = 'نام محصول برای ایجاد الزامی است';
+            return $result;
+        }
+        $createdId = price_sheet_create_catalog_product($pdo, [
+            'visual_id' => $visualId,
+            'name' => $name,
+            'price_text' => $priceText,
+            'pack_size' => $newPackSize,
+            'warranty_text' => $warrantyText,
+            'stock_qty' => $stockQty,
+            'category_id' => $categoryId,
+        ]);
+        $result['updated'] = true;
+        $result['created'] = true;
+        $result['entity'] = 'product';
+        $result['name'] = $name;
+        $result['pack_size'] = $newPackSize;
+        $result['product_id'] = $createdId;
         return $result;
     }
 
@@ -746,66 +924,53 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
 
     if (is_array($product)) {
         $productId = (int) ($product['id'] ?? 0);
-        $existingPrice = trim((string) ($product['price_text'] ?? ''));
-        $existingPackSize = price_import_db_pack_size($product);
         $existingName = trim((string) ($product['name'] ?? ''));
         $existingDescription = (string) ($product['description'] ?? '');
         $existingStock = products_stock_qty($pdo, $productId);
         $newDescription = price_import_description_with_warranty($existingDescription, $warrantyText);
-        $descriptionChanged = (string) ($newDescription ?? '') !== $existingDescription;
-        $nameChanged = $name !== '' && $name !== $existingName;
-        $stockChanged = $stockQty !== null && $stockQty !== $existingStock;
-        $priceChanged = $existingPrice !== $priceText || $existingPackSize !== $newPackSize;
 
-        if ($priceChanged || $nameChanged || $descriptionChanged || $stockChanged) {
-            $stmt = $pdo->prepare(
-                'UPDATE products
-                 SET price_text = ?, pack_size = ?, name = ?, description = ?, stock_qty = ?
-                 WHERE id = ?'
-            );
-            $stmt->execute([
-                $priceText,
-                $newPackSize,
-                $name !== '' ? $name : $existingName,
-                $newDescription,
-                $stockQty !== null ? $stockQty : $existingStock,
-                $productId,
-            ]);
-            require_once __DIR__ . '/product-price-sync.php';
-            product_price_sync_mark_product($pdo, $productId);
-            $updatedProduct = true;
-        }
+        $stmt = $pdo->prepare(
+            'UPDATE products
+             SET price_text = ?, pack_size = ?, name = ?, description = ?, stock_qty = ?, published = 1
+             WHERE id = ?'
+        );
+        $stmt->execute([
+            $priceText,
+            $newPackSize,
+            $name !== '' ? $name : $existingName,
+            $newDescription,
+            $stockQty !== null ? $stockQty : $existingStock,
+            $productId,
+        ]);
+        require_once __DIR__ . '/product-price-sync.php';
+        product_price_sync_mark_product($pdo, $productId);
+        price_sheet_ensure_product_shop_links($pdo, $productId, $categoryId);
+        $updatedProduct = true;
     }
 
     if (is_array($series)) {
         $seriesId = (int) ($series['id'] ?? 0);
-        $existingPrice = trim((string) ($series['price_text'] ?? ''));
-        $existingPackSize = price_import_db_pack_size($series);
         $seriesRow = $pdo->prepare('SELECT name, description, model_name FROM product_series WHERE id = ? LIMIT 1');
         $seriesRow->execute([$seriesId]);
         $seriesExisting = $seriesRow->fetch(PDO::FETCH_ASSOC) ?: [];
         $existingSeriesName = trim((string) ($seriesExisting['name'] ?? ''));
         $existingSeriesDescription = (string) ($seriesExisting['description'] ?? '');
         $newSeriesDescription = price_import_description_with_warranty($existingSeriesDescription, $warrantyText);
-        $seriesNameChanged = $name !== '' && $name !== $existingSeriesName;
-        $seriesDescriptionChanged = (string) ($newSeriesDescription ?? '') !== $existingSeriesDescription;
-        $seriesPriceChanged = $existingPrice !== $priceText || $existingPackSize !== $newPackSize;
 
-        if ($seriesPriceChanged || $seriesNameChanged || $seriesDescriptionChanged) {
-            $stmt = $pdo->prepare(
-                'UPDATE product_series SET price_text = ?, pack_size = ?, name = ?, description = ? WHERE id = ?'
-            );
-            $stmt->execute([
-                $priceText,
-                $newPackSize,
-                $name !== '' ? $name : $existingSeriesName,
-                $newSeriesDescription,
-                $seriesId,
-            ]);
-            require_once __DIR__ . '/product-price-sync.php';
-            product_price_sync_mark_series($pdo, $seriesId);
-            $updatedSeries = true;
-        }
+        $stmt = $pdo->prepare(
+            'UPDATE product_series SET price_text = ?, pack_size = ?, name = ?, description = ?, published = 1 WHERE id = ?'
+        );
+        $stmt->execute([
+            $priceText,
+            $newPackSize,
+            $name !== '' ? $name : $existingSeriesName,
+            $newSeriesDescription,
+            $seriesId,
+        ]);
+        require_once __DIR__ . '/product-price-sync.php';
+        product_price_sync_mark_series($pdo, $seriesId);
+        price_sheet_ensure_series_shop_links($pdo, $seriesId, $categoryId);
+        $updatedSeries = true;
     }
 
     if ($stockQty !== null) {
@@ -1178,6 +1343,7 @@ function price_sheet_apply_posted_rows(
             'pack_size' => $packSize,
             'warranty_text' => $warrantyText,
             'stock_qty' => $stockQty,
+            'category_id' => $targetCategoryId,
         ], $saved + 1);
         $saved++;
         $sortOrder++;
@@ -1482,6 +1648,7 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
             'pack_size' => $packSize,
             'warranty_text' => $warrantyText,
             'stock_qty' => $stockQty,
+            'category_id' => $rowCategoryId,
         ], $imported + 1);
         $imported++;
         $sortByCategory[$rowCategoryId]++;

@@ -195,15 +195,6 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   <div class="cms-card cms-price-sheet__toolbar" style="margin-bottom:1rem">
     <div class="cms-btn-row" style="flex-wrap:wrap;gap:.5rem;align-items:center">
       <form method="post" style="display:inline">
-        <input type="hidden" name="action" value="publish_all">
-        <?php if ($fromWarehouse): ?>
-          <input type="hidden" name="from_warehouse" value="1">
-        <?php endif; ?>
-        <button class="cms-btn cms-btn--primary" type="submit" <?= $status['draft_rows'] <= 0 ? 'disabled' : '' ?>>
-          انتشار همه
-        </button>
-      </form>
-      <form method="post" style="display:inline">
         <input type="hidden" name="action" value="sync_categories">
         <?php if ($fromWarehouse): ?>
           <input type="hidden" name="from_warehouse" value="1">
@@ -287,7 +278,6 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 
       <div class="cms-btn-row" style="justify-content:space-between;align-items:center;margin-bottom:.75rem">
         <p class="cms-muted" style="margin:0">همه دسته‌ها — همان چیدمان پورتال نمایندگان</p>
-        <button class="cms-btn cms-btn--primary" type="submit">ذخیره پیش‌نویس</button>
       </div>
 
       <?php foreach ($frames as $frame): ?>
@@ -300,15 +290,6 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           <header class="cms-price-sheet__frame-head">
             <h2><?= cms_h($categoryName) ?></h2>
             <span><?= cms_h(cms_to_persian_digits((string) count($frameRows))) ?> محصول</span>
-            <button
-              class="cms-btn cms-btn--ghost cms-price-sheet__publish-cat"
-              type="submit"
-              form="price-sheet-publish-<?= $categoryId ?>"
-              style="font-size:.78rem;padding:.2rem .55rem;margin-inline-start:auto"
-              <?= $frameRows === [] ? 'disabled' : '' ?>
-            >
-              انتشار این دسته
-            </button>
           </header>
           <div class="cms-price-sheet__scroll">
             <table class="cms-price-sheet__table">
@@ -388,22 +369,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           </div>
         </article>
       <?php endforeach; ?>
-
-      <div class="cms-form__actions" style="margin-top:1rem">
-        <button class="cms-btn cms-btn--primary" type="submit">ذخیره پیش‌نویس</button>
-      </div>
     </form>
-
-    <?php foreach ($frames as $frame): ?>
-      <?php $categoryId = (int) $frame['category_id']; ?>
-      <form method="post" id="price-sheet-publish-<?= $categoryId ?>" hidden>
-        <input type="hidden" name="action" value="publish_category">
-        <input type="hidden" name="category_id" value="<?= $categoryId ?>">
-        <?php if ($fromWarehouse): ?>
-          <input type="hidden" name="from_warehouse" value="1">
-        <?php endif; ?>
-      </form>
-    <?php endforeach; ?>
   <?php endif; ?>
 
   <?php if (!$fromWarehouse): ?>
