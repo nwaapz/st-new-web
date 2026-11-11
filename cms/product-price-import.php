@@ -393,7 +393,7 @@ cms_layout_start('ورود قیمت', cms_current_username(), 'shop');
 <p class="cms-muted"><?= cms_h(price_import_xlsx_support_hint()) ?></p>
 <p class="cms-muted">
   برای ویرایش روزانه قیمت‌ها (پیش‌نویس + انتشار) از
-  <a href="price-sheet.php"><strong>لیست قیمت</strong></a> استفاده کنید.
+  <a href="price-sheet.php?from=warehouse"><strong>لیست قیمت</strong></a> استفاده کنید.
   این صفحه فقط برای <strong>ایجاد محصول جدید</strong> و به‌روزرسانی فوری قیمت از Excel است.
 </p>
 
