@@ -358,7 +358,20 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                         <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][stock_qty]" value="<?= cms_h($stockValue) ?>" dir="ltr" inputmode="numeric">
                       <?php endif; ?>
                     </td>
-                    <td class="cms-price-sheet__delete"><input type="checkbox" name="frames[<?= $categoryId ?>][<?= $index ?>][delete]" value="1"></td>
+                    <td class="cms-price-sheet__delete">
+                      <div class="cms-price-sheet__delete-tools">
+                        <input type="checkbox" name="frames[<?= $categoryId ?>][<?= $index ?>][delete]" value="1">
+                        <button type="button" class="cms-price-sheet__trash" data-delete-row aria-label="حذف ردیف" title="حذف">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                            <path d="M10 11v6"></path>
+                            <path d="M14 11v6"></path>
+                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 <?php endforeach; ?>
               </tbody>
@@ -631,6 +644,31 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     }
     if (packInput) packInput.addEventListener('input', function () { updatePackPrice(row, true); });
     bindStockAdjuster(row);
+    bindDeleteRow(row);
+  }
+
+  function setRowDeleteState(row, checked) {
+    if (checked) {
+      row.classList.add('cms-price-sheet__row--delete');
+    } else {
+      row.classList.remove('cms-price-sheet__row--delete');
+    }
+  }
+
+  function bindDeleteRow(row) {
+    var box = row.querySelector('input[name*="[delete]"]');
+    var trash = row.querySelector('[data-delete-row]');
+    if (!box) return;
+    setRowDeleteState(row, box.checked);
+    if (trash) {
+      trash.addEventListener('click', function () {
+        box.checked = true;
+        setRowDeleteState(row, true);
+      });
+    }
+    box.addEventListener('change', function () {
+      setRowDeleteState(row, box.checked);
+    });
   }
 
   document.querySelectorAll('.cms-price-sheet__rows tr').forEach(function (row) {
@@ -684,7 +722,17 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           '<input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][pack_price_text]" value="" dir="ltr" data-pack-price-input>' +
         '</td>' +
         stockCellHtml(categoryId, index) +
-        '<td class="cms-price-sheet__delete"><input type="checkbox" name="frames[' + categoryId + '][' + index + '][delete]" value="1"></td>';
+        '<td class="cms-price-sheet__delete"><div class="cms-price-sheet__delete-tools">' +
+          '<input type="checkbox" name="frames[' + categoryId + '][' + index + '][delete]" value="1">' +
+          '<button type="button" class="cms-price-sheet__trash" data-delete-row aria-label="حذف ردیف" title="حذف">' +
+            '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+              '<polyline points="3 6 5 6 21 6"></polyline>' +
+              '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>' +
+              '<path d="M10 11v6"></path>' +
+              '<path d="M14 11v6"></path>' +
+              '<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>' +
+            '</svg>' +
+          '</button></div></td>';
       tbody.appendChild(tr);
       bindRow(tr);
       var firstInput = tr.querySelector('input[name*="[visual_id]"]');

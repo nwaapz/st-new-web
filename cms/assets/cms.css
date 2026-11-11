@@ -3008,7 +3008,38 @@ a.cms-kpi:hover {
 }
 
 .cms-price-sheet__delete {
-  width: 3rem;
+  width: 4.75rem;
+}
+
+.cms-price-sheet__delete-tools {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+}
+
+.cms-price-sheet__trash {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px solid rgba(255, 120, 120, 0.28);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: #ffb4ab;
+  cursor: pointer;
+}
+
+.cms-price-sheet__trash:hover {
+  color: #fff;
+  border-color: rgba(227, 6, 19, 0.65);
+  background: rgba(227, 6, 19, 0.22);
+}
+
+.cms-price-sheet__row--delete {
+  opacity: 0.45;
 }
 
 .cms-price-sheet__input {
