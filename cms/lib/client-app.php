@@ -66,15 +66,17 @@ function client_app_save(string $path, string $version): void
     cms_setting_set(client_app_version_setting_key(), trim($version));
 }
 
-/** @return array{apk: ?string, version: ?string, filename: ?string} */
+/** @return array{apk: ?string, version: ?string, filename: ?string, pwa: string} */
 function client_app_public_payload(): array
 {
+    $pwa = '/test2/sales/';
     $path = client_app_stored_path();
     if ($path === '' || client_app_absolute_path($path) === null) {
         return [
             'apk' => null,
             'version' => null,
             'filename' => null,
+            'pwa' => $pwa,
         ];
     }
     $version = client_app_stored_version();
@@ -83,5 +85,6 @@ function client_app_public_payload(): array
         'apk' => $path,
         'version' => $version !== '' ? $version : null,
         'filename' => basename($path),
+        'pwa' => $pwa,
     ];
 }

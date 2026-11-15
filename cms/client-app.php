@@ -65,6 +65,13 @@ cms_layout_start('اپ فروش', cms_current_username(), 'website');
   فایل APK اپ فروش را آپلود کنید تا دکمه دانلود در پاورقی سایت و پرتال نمایندگان نمایش داده شود.
   اگر فایلی ذخیره نشده باشد، دکمه دانلود پنهان می‌ماند.
 </p>
+<p class="cms-muted">
+  نسخه وب (PWA) فروشندگان:
+  <a href="../sales/" target="_blank" rel="noopener">/test2/sales/</a>
+  — نمایندگان می‌توانند از مرورگر نصب کنند. پوش وب نیازمند فایل
+  <code dir="ltr">deploy/firebase-web.json</code>
+  (apiKey, appId, messagingSenderId, vapidKey) است.
+</p>
 
 <form class="cms-panel" method="post" enctype="multipart/form-data">
   <h2 style="margin-top:0">فایل Android</h2>

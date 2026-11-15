@@ -1,6 +1,12 @@
 # User files stay on the server
 uploads/
 
+# Sales PWA toolchain
+sales-pwa/node_modules/
+
+# Local Android apps — never commit or push
+mobile-app/
+
 # Junk
 .DS_Store
 Thumbs.db

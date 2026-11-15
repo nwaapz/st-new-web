@@ -11,6 +11,9 @@
 </IfModule>
 
 <IfModule mod_headers.c>
+  <FilesMatch "^(sw\.js|workbox-.*\.js)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
   <FilesMatch "\.(woff2|woff|ttf|otf)$">
     Header set Access-Control-Allow-Origin "*"
     Header set Cache-Control "public, max-age=31536000, immutable"
@@ -23,6 +26,16 @@
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
+
+  # Sales PWA (Vite SPA under /sales/)
+  RewriteCond %{REQUEST_URI} ^/test2/sales/
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^sales/.*$ sales/index.html [L]
+
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^sales/.*$ sales/index.html [L]
 
   # Product series detail shell (client reads slug from URL).
   RewriteCond %{REQUEST_FILENAME} !-f
