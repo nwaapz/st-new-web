@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppState';
+import { SiteLogo } from './SiteLogo';
 
 export function OfflineBanner({ show }: { show: boolean }) {
   if (!show) return null;
@@ -13,7 +14,7 @@ export function Header() {
   const count = cart.reduce((n, l) => n + l.quantity, 0);
   return (
     <header className="header">
-      <img className="logo" src="/test2/images/logo.png" alt="StarTech" />
+      <SiteLogo />
       <div className="dots">
         <span className={`dot ${internet ? 'on' : 'off'}`}>
           <i /> اینترنت

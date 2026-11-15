@@ -33,7 +33,23 @@ img { max-width: 100%; display: block; }
   display: flex; align-items: center; gap: 8px;
   padding: 0 10px;
 }
-.header img.logo { height: 28px; width: auto; }
+.logo-wrap {
+  background: #111;
+  border-radius: 8px;
+  padding: 4px 8px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.header img.logo,
+.logo-wrap img.logo {
+  height: 26px;
+  width: auto;
+  max-width: 130px;
+  object-fit: contain;
+  display: block;
+}
 .header .grow { flex: 1; }
 .dots { display: flex; gap: 8px; font-size: 11px; font-weight: 700; }
 .dot { display: flex; align-items: center; gap: 4px; }

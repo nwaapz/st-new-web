@@ -19,4 +19,5 @@ export const CacheKeys = {
   factories: () => 'factories',
   categories: () => 'categories',
   carModels: () => 'car_models',
+  siteLogo: () => 'site_logo',
 };

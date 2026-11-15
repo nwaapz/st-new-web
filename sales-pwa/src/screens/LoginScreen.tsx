@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { SiteLogo } from '../components/SiteLogo';
 import { useApp } from '../state/AppState';
 
 export function LoginScreen() {
@@ -13,7 +14,9 @@ export function LoginScreen() {
   return (
     <div className="app-shell">
       <div className="app-body no-footer" style={{ paddingTop: 48 }}>
-        <img src="/test2/images/logo.png" alt="" style={{ height: 40, margin: '0 auto 16px' }} />
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+          <SiteLogo />
+        </div>
         <h1 className="h1" style={{ textAlign: 'center' }}>ورود</h1>
         {err ? <div className="warn">{err}</div> : null}
         <input className="input" placeholder="نام کاربری" value={username} onChange={(e) => setUsername(e.target.value)} dir="ltr" />

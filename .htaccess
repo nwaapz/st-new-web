@@ -2,6 +2,7 @@
 
 # Ensure web fonts load correctly under Apache/XAMPP
 <IfModule mod_mime.c>
+  AddType application/manifest+json .webmanifest
   AddType font/woff2 .woff2
   AddType font/woff .woff
   AddType application/font-woff2 .woff2
