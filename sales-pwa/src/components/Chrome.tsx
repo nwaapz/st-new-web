@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../state/AppState';
+import { InstallApp } from './InstallApp';
 import { SiteLogo } from './SiteLogo';
 
 export function OfflineBanner({ show }: { show: boolean }) {
@@ -60,7 +61,10 @@ export function Shell({ children, footer = true }: { children: ReactNode; footer
   return (
     <div className="app-shell">
       <Header />
-      <div className={`app-body ${footer ? '' : 'no-footer'}`}>{children}</div>
+      <div className={`app-body ${footer ? '' : 'no-footer'}`}>
+        <InstallApp />
+        {children}
+      </div>
       {footer ? <Footer /> : null}
     </div>
   );

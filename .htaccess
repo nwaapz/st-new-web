@@ -28,6 +28,9 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
+  # Never rewrite the PWA worker, manifest, or built assets into index.html.
+  RewriteRule ^sales/(sw\.js|manifest\.json|manifest\.webmanifest|icons/.+|assets/.+)$ - [L]
+
   # Sales PWA (Vite SPA under /sales/)
   RewriteCond %{REQUEST_URI} ^/test2/sales/
   RewriteCond %{REQUEST_FILENAME} !-f

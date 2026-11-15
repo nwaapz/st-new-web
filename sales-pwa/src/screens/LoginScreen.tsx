@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { InstallApp } from '../components/InstallApp';
 import { SiteLogo } from '../components/SiteLogo';
 import { useApp } from '../state/AppState';
 
@@ -17,6 +18,7 @@ export function LoginScreen() {
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
           <SiteLogo />
         </div>
+        <InstallApp />
         <h1 className="h1" style={{ textAlign: 'center' }}>ورود</h1>
         {err ? <div className="warn">{err}</div> : null}
         <input className="input" placeholder="نام کاربری" value={username} onChange={(e) => setUsername(e.target.value)} dir="ltr" />

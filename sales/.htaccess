@@ -1,11 +1,16 @@
+Options -MultiViews
+
 <IfModule mod_mime.c>
+  AddType application/javascript .js
+  AddType application/manifest+json .json
   AddType application/manifest+json .webmanifest
 </IfModule>
 <IfModule mod_headers.c>
-  <FilesMatch "^(sw\.js)$">
+  <FilesMatch "^sw\.js$">
     Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Content-Type "application/javascript; charset=utf-8"
   </FilesMatch>
-  <FilesMatch "\.webmanifest$">
+  <FilesMatch "^manifest\.json$">
     Header set Cache-Control "no-cache"
     Header set Content-Type "application/manifest+json; charset=utf-8"
   </FilesMatch>
@@ -13,6 +18,10 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /test2/sales/
+  RewriteRule ^sw\.js$ - [L]
+  RewriteRule ^manifest\.json$ - [L]
+  RewriteRule ^icons/ - [L]
+  RewriteRule ^assets/ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule . index.html [L]
