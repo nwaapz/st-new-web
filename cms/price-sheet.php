@@ -225,7 +225,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         <ol id="price-sheet-save-log" class="cms-price-sheet__save-log"></ol>
       </div>
       <div class="cms-btn-row" id="price-sheet-save-actions" hidden>
-        <button type="button" class="cms-btn cms-btn--primary" id="price-sheet-save-dismiss">بستن و اصلاح</button>
+        <button type="button" class="cms-btn cms-btn--primary" id="price-sheet-save-dismiss">Close</button>
       </div>
     </div>
   </div>
@@ -802,6 +802,8 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   var saveModalDismiss = document.getElementById('price-sheet-save-dismiss');
   var saveInFlight = false;
   var saveFailed = false;
+  var saveSucceeded = false;
+  var saveRedirectUrl = '';
   var saveWaitTimer = null;
   var saveWaitStarted = 0;
 
@@ -835,7 +837,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 
   function setSaveNow(text) {
     if (saveNowEl) saveNowEl.textContent = text;
-    if (saveModalTitle && !saveFailed) saveModalTitle.textContent = text;
+    if (saveModalTitle && !saveFailed && !saveSucceeded) saveModalTitle.textContent = text;
   }
 
   function appendSaveLog(text) {
@@ -870,20 +872,33 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   function openSaveModal() {
     if (!saveModal) return;
     saveFailed = false;
+    saveSucceeded = false;
+    saveRedirectUrl = '';
     saveModal.hidden = false;
     document.body.style.overflow = 'hidden';
     if (saveModalActions) saveModalActions.hidden = true;
     if (saveLogEl) saveLogEl.textContent = '';
-    if (saveModalTitle) saveModalTitle.textContent = 'در حال ذخیره';
+    if (saveModalTitle) {
+      saveModalTitle.classList.remove('cms-ok');
+      saveModalTitle.textContent = 'در حال ذخیره';
+    }
+    if (saveNowEl) saveNowEl.classList.remove('cms-ok');
     setSaveNow('در حال خواندن فرم');
   }
 
   function failSave(message) {
     stopSaveWaitTimer();
     saveFailed = true;
+    saveSucceeded = false;
     setSaveBusy(false);
-    if (saveModalTitle) saveModalTitle.textContent = 'ذخیره انجام نشد';
-    if (saveNowEl) saveNowEl.textContent = message;
+    if (saveModalTitle) {
+      saveModalTitle.classList.remove('cms-ok');
+      saveModalTitle.textContent = 'ذخیره انجام نشد';
+    }
+    if (saveNowEl) {
+      saveNowEl.classList.remove('cms-ok');
+      saveNowEl.textContent = message;
+    }
     appendSaveLog(message);
     if (saveModalActions) saveModalActions.hidden = false;
     if (saveErrorEl) {
@@ -892,24 +907,61 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     }
   }
 
+  function succeedSave(data) {
+    stopSaveWaitTimer();
+    saveFailed = false;
+    saveSucceeded = true;
+    saveRedirectUrl = (data && data.redirect) ? data.redirect : window.location.href;
+    setSaveBusy(false);
+    appendSaveLog(
+      ((data && data.message) ? data.message : 'ذخیره شد') +
+      (data && typeof data.deleted === 'number' && data.deleted > 0
+        ? ' — حذف: ' + faNum(data.deleted)
+        : '')
+    );
+    if (saveModalTitle) {
+      saveModalTitle.textContent = 'save successful';
+      saveModalTitle.classList.add('cms-ok');
+    }
+    if (saveNowEl) {
+      saveNowEl.textContent = 'save successful';
+      saveNowEl.classList.add('cms-ok');
+    }
+    if (saveModalActions) saveModalActions.hidden = false;
+  }
+
   function hideSaveModal() {
     stopSaveWaitTimer();
     if (!saveModal) return;
     saveModal.hidden = true;
     saveFailed = false;
+    saveSucceeded = false;
+    saveRedirectUrl = '';
     document.body.style.overflow = '';
+    if (saveModalTitle) saveModalTitle.classList.remove('cms-ok');
+    if (saveNowEl) saveNowEl.classList.remove('cms-ok');
+  }
+
+  function finishSaveDialog() {
+    if (saveInFlight) return;
+    if (!saveFailed && !saveSucceeded) return;
+    var shouldReload = saveSucceeded;
+    var redirect = saveRedirectUrl || window.location.href;
+    hideSaveModal();
+    if (shouldReload) {
+      window.location.assign(redirect);
+    }
   }
 
   if (saveModalDismiss) {
     saveModalDismiss.addEventListener('click', function () {
-      if (!saveFailed) return;
-      hideSaveModal();
+      finishSaveDialog();
     });
   }
 
   document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && saveFailed) {
-      hideSaveModal();
+    if (event.key === 'Escape') {
+      finishSaveDialog();
     }
   });
 
@@ -977,15 +1029,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         if (!data.ok) {
           throw new Error(data.error || ('HTTP ' + res.status));
         }
-        appendSaveLog(
-          (data.message || 'ذخیره شد') +
-          (typeof data.deleted === 'number' && data.deleted > 0
-            ? ' — حذف: ' + faNum(data.deleted)
-            : '')
-        );
-        setSaveNow('در حال بارگذاری مجدد صفحه');
-        appendSaveLog('رفتن به ' + (data.redirect || window.location.pathname));
-        window.location.assign(data.redirect || window.location.href);
+        succeedSave(data);
       }).catch(function (err) {
         failSave(err && err.message ? err.message : String(err || 'خطای ناشناخته'));
       });
