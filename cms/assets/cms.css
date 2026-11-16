@@ -3115,6 +3115,27 @@ a.cms-kpi:hover {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28);
 }
 
+.cms-price-sheet__save-log {
+  margin: 0;
+  padding-right: 1.15rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  max-height: min(46vh, 18rem);
+  overflow: auto;
+}
+
+.cms-price-sheet__save-log li {
+  margin: 0 0 0.4rem;
+}
+
+.cms-price-sheet__save-log time {
+  color: var(--cms-text-muted);
+  margin-left: 0.45rem;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 .cms-log-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));

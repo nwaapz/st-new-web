@@ -8,6 +8,27 @@ require_once __DIR__ . '/lib/price-sheet.php';
 
 cms_require_login();
 cms_session_start();
+
+function price_sheet_wants_json(): bool
+{
+    if ((string) ($_POST['ajax'] ?? '') === '1') {
+        return true;
+    }
+
+    $accept = (string) ($_SERVER['HTTP_ACCEPT'] ?? '');
+
+    return str_contains($accept, 'application/json');
+}
+
+function price_sheet_json_exit(array $payload, int $status = 200): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $pdo = cms_pdo();
 cms_ensure_product_categories_schema($pdo);
 price_sheet_ensure_schema($pdo);
@@ -76,10 +97,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'summary' => cms_current_username() . ' — ذخیره پیش‌نویس لیست قیمت (' . $result['saved'] . ' ردیف)',
                 'detail' => $result,
             ]);
-            cms_flash(sprintf(
+            $savedMessage = sprintf(
                 'پیش‌نویس ذخیره شد — %s ردیف',
                 cms_to_persian_digits((string) $result['saved'])
-            ));
+            );
+            if (price_sheet_wants_json()) {
+                price_sheet_json_exit([
+                    'ok' => true,
+                    'saved' => (int) $result['saved'],
+                    'deleted' => (int) ($result['deleted'] ?? 0),
+                    'message' => $savedMessage,
+                    'redirect' => price_sheet_page_url($postFromWarehouse),
+                ]);
+            }
+            cms_flash($savedMessage);
             cms_redirect(price_sheet_page_url($postFromWarehouse));
         }
 
@@ -165,6 +196,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_redirect(price_sheet_page_url($postFromWarehouse));
         }
     } catch (Throwable $e) {
+        if ($action === 'save_draft_all' && price_sheet_wants_json()) {
+            price_sheet_json_exit([
+                'ok' => false,
+                'error' => $e->getMessage(),
+            ], 400);
+        }
         cms_flash($e->getMessage(), 'error');
         cms_redirect(price_sheet_page_url($postFromWarehouse));
     }
@@ -183,7 +220,10 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       <div class="cms-confirm-modal__head">
         <strong id="price-sheet-save-title">در حال ذخیره</strong>
       </div>
-      <div id="price-sheet-save-body"></div>
+      <div id="price-sheet-save-body">
+        <p id="price-sheet-save-now" style="margin:0 0 .75rem;font-weight:700"></p>
+        <ol id="price-sheet-save-log" class="cms-price-sheet__save-log"></ol>
+      </div>
       <div class="cms-btn-row" id="price-sheet-save-actions" hidden>
         <button type="button" class="cms-btn cms-btn--primary" id="price-sheet-save-dismiss">بستن و اصلاح</button>
       </div>
@@ -756,12 +796,14 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   var saveErrorEl = document.getElementById('price-sheet-save-error');
   var saveModal = document.getElementById('price-sheet-save-modal');
   var saveModalTitle = document.getElementById('price-sheet-save-title');
-  var saveModalBody = document.getElementById('price-sheet-save-body');
+  var saveNowEl = document.getElementById('price-sheet-save-now');
+  var saveLogEl = document.getElementById('price-sheet-save-log');
   var saveModalActions = document.getElementById('price-sheet-save-actions');
   var saveModalDismiss = document.getElementById('price-sheet-save-dismiss');
   var saveInFlight = false;
   var saveFailed = false;
-  var saveFailureText = 'اتصال به سرور برقرار نشد، یا سرور پاسخ موفق نداد. ذخیره پیش‌نویس انجام نشده است.';
+  var saveWaitTimer = null;
+  var saveWaitStarted = 0;
 
   function saveButtons() {
     return document.querySelectorAll('button[form="price-sheet-form"], #price-sheet-form button[type="submit"]');
@@ -774,47 +816,84 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     });
   }
 
-  function showSaveNetworkError() {
-    if (!saveErrorEl) return;
-    saveErrorEl.hidden = false;
-    saveErrorEl.textContent = 'اتصال به سرور برقرار نشد — تغییرات روی صفحه مانده‌اند؛ دوباره ذخیره کنید';
+  function faNum(value) {
+    return String(value).replace(/\d/g, function (d) { return persianDigits[d] || d; });
   }
 
-  function setSaveModal(mode) {
-    if (!saveModal || !saveModalTitle || !saveModalBody) return;
-    saveFailed = mode === 'failed';
+  function clockNow() {
+    try {
+      return new Date().toLocaleTimeString('fa-IR', { hour12: false });
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function formatBytes(n) {
+    if (n < 1024) return faNum(n) + ' بایت';
+    return faNum((n / 1024).toFixed(1)) + ' کیلوبایت';
+  }
+
+  function setSaveNow(text) {
+    if (saveNowEl) saveNowEl.textContent = text;
+    if (saveModalTitle && !saveFailed) saveModalTitle.textContent = text;
+  }
+
+  function appendSaveLog(text) {
+    if (!saveLogEl) return;
+    var li = document.createElement('li');
+    var time = document.createElement('time');
+    time.textContent = clockNow();
+    li.appendChild(time);
+    li.appendChild(document.createTextNode(text));
+    saveLogEl.appendChild(li);
+    try { li.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+  }
+
+  function stopSaveWaitTimer() {
+    if (saveWaitTimer) {
+      clearInterval(saveWaitTimer);
+      saveWaitTimer = null;
+    }
+  }
+
+  function startSaveWaitTimer() {
+    stopSaveWaitTimer();
+    saveWaitStarted = Date.now();
+    function tick() {
+      var sec = Math.max(0, Math.floor((Date.now() - saveWaitStarted) / 1000));
+      setSaveNow('منتظر پاسخ سرور… ' + faNum(sec) + ' ثانیه');
+    }
+    tick();
+    saveWaitTimer = setInterval(tick, 500);
+  }
+
+  function openSaveModal() {
+    if (!saveModal) return;
+    saveFailed = false;
     saveModal.hidden = false;
     document.body.style.overflow = 'hidden';
-    if (saveModalActions) saveModalActions.hidden = mode !== 'failed';
-    if (mode === 'saving') {
-      saveModalTitle.textContent = 'در حال ذخیره پیش‌نویس';
-      saveModalBody.innerHTML =
-        '<p>این پنجره تا وقتی ذخیره تمام نشده باز می‌ماند و بقیه صفحه قفل است. دکمه ذخیره دوباره فشرده نمی‌شود و ردیف‌ها وسط ارسال عوض نمی‌شوند.</p>' +
-        '<p>الان این مراحل انجام می‌شود:</p>' +
-        '<ol>' +
-          '<li>همه ردیف‌های همین فرم خوانده می‌شوند: کد کالا، نام، گارانتی، تعداد در کارتن، قیمت واحد، قیمت بسته، موجودی انبار، و ردیف‌هایی که برای حذف علامت خورده‌اند.</li>' +
-          '<li>همین مقدارها، بدون ترک این صفحه، برای سرور فرستاده می‌شوند.</li>' +
-          '<li>سرور پیش‌نویس را می‌نویسد. قیمت واحد همان لحظه روی فروشگاه آنلاین و اپ مشتری اعمال می‌شود. موجودی هم روی محصولی که همان کد کالا را دارد به‌روز می‌شود.</li>' +
-          '<li>اگر پاسخ موفق برسد، صفحه یک‌بار از نو بارگذاری می‌شود تا شناسه ردیف‌های تازه و پیام نتیجه سرور دیده شود.</li>' +
-        '</ol>' +
-        '<p class="cms-muted">تا این پنجره باز است صفحه را نبندید و رفرش نکنید. اگر ارتباط قطع شود، تغییرها روی همین صفحه می‌مانند و اینجا اعلام می‌شود.</p>';
-      return;
+    if (saveModalActions) saveModalActions.hidden = true;
+    if (saveLogEl) saveLogEl.textContent = '';
+    if (saveModalTitle) saveModalTitle.textContent = 'در حال ذخیره';
+    setSaveNow('در حال خواندن فرم');
+  }
+
+  function failSave(message) {
+    stopSaveWaitTimer();
+    saveFailed = true;
+    setSaveBusy(false);
+    if (saveModalTitle) saveModalTitle.textContent = 'ذخیره انجام نشد';
+    if (saveNowEl) saveNowEl.textContent = message;
+    appendSaveLog(message);
+    if (saveModalActions) saveModalActions.hidden = false;
+    if (saveErrorEl) {
+      saveErrorEl.hidden = false;
+      saveErrorEl.textContent = message;
     }
-    if (mode === 'saved') {
-      saveModalTitle.textContent = 'ذخیره شد';
-      saveModalBody.innerHTML =
-        '<p>پاسخ موفق از سرور رسید. پیش‌نویس نوشته شده است.</p>' +
-        '<p>صفحه در حال بارگذاری دوباره است تا ردیف‌های ذخیره‌شده، شناسه‌های جدید و پیام نتیجه سرور نشان داده شود. این پنجره را نبندید.</p>';
-      return;
-    }
-    saveModalTitle.textContent = 'ذخیره انجام نشد';
-    saveModalBody.innerHTML =
-      '<p class="cms-confirm-modal__warn">' + saveFailureText + '</p>' +
-      '<p>تغییرهایی که در جدول می‌بینید پاک نشده‌اند و هنوز فقط روی همین صفحه هستند. فروشگاه، اپ مشتری و موجودی انبار با این ویرایش‌ها عوض نشده‌اند.</p>' +
-      '<p>این پنجره را ببندید. وقتی اتصال برگشت، دوباره «ذخیره» را بزنید. تا ذخیره موفق نشود، همان مقدارهای روی صفحه نگه داشته می‌شوند.</p>';
   }
 
   function hideSaveModal() {
+    stopSaveWaitTimer();
     if (!saveModal) return;
     saveModal.hidden = true;
     saveFailed = false;
@@ -843,26 +922,72 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         saveErrorEl.hidden = true;
         saveErrorEl.textContent = '';
       }
-      setSaveModal('saving');
-      // Do not use form.action: the hidden input name="action" shadows that property.
-      var body = new URLSearchParams(new FormData(form));
+      openSaveModal();
+
+      var rowCount = form.querySelectorAll('.cms-price-sheet__rows tr').length;
+      var categoryCount = form.querySelectorAll('.cms-price-sheet__frame').length;
+      var deleteCount = form.querySelectorAll('input[name*="[delete]"]:checked').length;
+      appendSaveLog(
+        'فرم خوانده شد: ' + faNum(rowCount) + ' ردیف در ' + faNum(categoryCount) + ' دسته' +
+        (deleteCount > 0 ? ' — ' + faNum(deleteCount) + ' ردیف برای حذف' : '')
+      );
+
+      var params = new URLSearchParams(new FormData(form));
+      params.set('ajax', '1');
+      var payload = params.toString();
+      appendSaveLog('بدنه درخواست آماده شد: ' + formatBytes(payload.length));
+      setSaveNow('در حال ارسال به سرور');
+      appendSaveLog('POST به ' + window.location.pathname);
+
+      startSaveWaitTimer();
       fetch(window.location.href, {
         method: 'POST',
-        body: body,
+        body: payload,
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
         redirect: 'follow'
       }).then(function (res) {
-        var redirected = res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400);
-        if (!res.ok && !redirected) {
-          throw new Error('save-failed');
+        stopSaveWaitTimer();
+        var waitSec = Math.max(0, Math.floor((Date.now() - saveWaitStarted) / 1000));
+        appendSaveLog('پاسخ HTTP ' + faNum(res.status) + ' بعد از ' + faNum(waitSec) + ' ثانیه');
+        setSaveNow('در حال خواندن پاسخ سرور');
+        return res.text().then(function (raw) {
+          return { res: res, raw: raw };
+        });
+      }).then(function (payloadRes) {
+        var res = payloadRes.res;
+        var raw = payloadRes.raw || '';
+        var data = null;
+        try {
+          data = raw ? JSON.parse(raw) : null;
+        } catch (e) {
+          data = null;
         }
-        setSaveModal('saved');
-        window.location.assign(redirected ? window.location.href : res.url);
-      }).catch(function () {
-        setSaveBusy(false);
-        showSaveNetworkError();
-        setSaveModal('failed');
+        if (!data) {
+          throw new Error(
+            res.ok
+              ? 'پاسخ سرور JSON نبود'
+              : 'HTTP ' + res.status + (raw ? ' — ' + raw.replace(/\s+/g, ' ').slice(0, 120) : '')
+          );
+        }
+        if (!data.ok) {
+          throw new Error(data.error || ('HTTP ' + res.status));
+        }
+        appendSaveLog(
+          (data.message || 'ذخیره شد') +
+          (typeof data.deleted === 'number' && data.deleted > 0
+            ? ' — حذف: ' + faNum(data.deleted)
+            : '')
+        );
+        setSaveNow('در حال بارگذاری مجدد صفحه');
+        appendSaveLog('رفتن به ' + (data.redirect || window.location.pathname));
+        window.location.assign(data.redirect || window.location.href);
+      }).catch(function (err) {
+        failSave(err && err.message ? err.message : String(err || 'خطای ناشناخته'));
       });
     });
   }
