@@ -178,6 +178,7 @@ $frames = price_sheet_list_frames($pdo);
 cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 ?>
 <div class="price-sheet-page cms-price-sheet<?= $fromWarehouse ? ' cms-price-sheet--warehouse' : '' ?>">
+  <p id="price-sheet-save-error" class="cms-error" hidden></p>
   <header class="cms-price-sheet__intro">
     <h1 style="margin:0">لیست قیمت<?= $fromWarehouse ? ' — انبار' : '' ?></h1>
     <p class="cms-muted">
@@ -739,6 +740,54 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       if (firstInput) firstInput.focus();
     });
   });
+
+  var form = document.getElementById('price-sheet-form');
+  var saveErrorEl = document.getElementById('price-sheet-save-error');
+  var saveInFlight = false;
+
+  function saveButtons() {
+    return document.querySelectorAll('button[form="price-sheet-form"], #price-sheet-form button[type="submit"]');
+  }
+
+  function setSaveBusy(busy) {
+    saveInFlight = busy;
+    saveButtons().forEach(function (btn) {
+      btn.disabled = busy;
+    });
+  }
+
+  function showSaveNetworkError() {
+    if (!saveErrorEl) return;
+    saveErrorEl.hidden = false;
+    saveErrorEl.textContent = 'اتصال به سرور برقرار نشد — تغییرات روی صفحه مانده‌اند؛ دوباره ذخیره کنید';
+    try { saveErrorEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+  }
+
+  if (form) {
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (saveInFlight) return;
+      setSaveBusy(true);
+      if (saveErrorEl) {
+        saveErrorEl.hidden = true;
+        saveErrorEl.textContent = '';
+      }
+      fetch(form.action || window.location.href, {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        redirect: 'follow'
+      }).then(function (res) {
+        if (!res.ok) {
+          throw new Error('save-failed');
+        }
+        window.location.assign(res.url);
+      }).catch(function () {
+        setSaveBusy(false);
+        showSaveNetworkError();
+      });
+    });
+  }
 })();
 </script>
 <?php
