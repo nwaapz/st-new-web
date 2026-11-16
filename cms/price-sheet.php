@@ -178,6 +178,17 @@ $frames = price_sheet_list_frames($pdo);
 cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 ?>
 <div class="price-sheet-page cms-price-sheet<?= $fromWarehouse ? ' cms-price-sheet--warehouse' : '' ?>">
+  <div id="price-sheet-save-modal" class="cms-confirm-modal" hidden>
+    <div class="cms-confirm-modal__panel" role="dialog" aria-modal="true" aria-labelledby="price-sheet-save-title" style="width:min(640px,100%)">
+      <div class="cms-confirm-modal__head">
+        <strong id="price-sheet-save-title">در حال ذخیره</strong>
+      </div>
+      <div id="price-sheet-save-body"></div>
+      <div class="cms-btn-row" id="price-sheet-save-actions" hidden>
+        <button type="button" class="cms-btn cms-btn--primary" id="price-sheet-save-dismiss">بستن و اصلاح</button>
+      </div>
+    </div>
+  </div>
   <p id="price-sheet-save-error" class="cms-error" hidden></p>
   <header class="cms-price-sheet__intro">
     <h1 style="margin:0">لیست قیمت<?= $fromWarehouse ? ' — انبار' : '' ?></h1>
@@ -743,7 +754,14 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 
   var form = document.getElementById('price-sheet-form');
   var saveErrorEl = document.getElementById('price-sheet-save-error');
+  var saveModal = document.getElementById('price-sheet-save-modal');
+  var saveModalTitle = document.getElementById('price-sheet-save-title');
+  var saveModalBody = document.getElementById('price-sheet-save-body');
+  var saveModalActions = document.getElementById('price-sheet-save-actions');
+  var saveModalDismiss = document.getElementById('price-sheet-save-dismiss');
   var saveInFlight = false;
+  var saveFailed = false;
+  var saveFailureText = 'اتصال به سرور برقرار نشد، یا سرور پاسخ موفق نداد. ذخیره پیش‌نویس انجام نشده است.';
 
   function saveButtons() {
     return document.querySelectorAll('button[form="price-sheet-form"], #price-sheet-form button[type="submit"]');
@@ -760,8 +778,61 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     if (!saveErrorEl) return;
     saveErrorEl.hidden = false;
     saveErrorEl.textContent = 'اتصال به سرور برقرار نشد — تغییرات روی صفحه مانده‌اند؛ دوباره ذخیره کنید';
-    try { saveErrorEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
   }
+
+  function setSaveModal(mode) {
+    if (!saveModal || !saveModalTitle || !saveModalBody) return;
+    saveFailed = mode === 'failed';
+    saveModal.hidden = false;
+    document.body.style.overflow = 'hidden';
+    if (saveModalActions) saveModalActions.hidden = mode !== 'failed';
+    if (mode === 'saving') {
+      saveModalTitle.textContent = 'در حال ذخیره پیش‌نویس';
+      saveModalBody.innerHTML =
+        '<p>این پنجره تا وقتی ذخیره تمام نشده باز می‌ماند و بقیه صفحه قفل است. دکمه ذخیره دوباره فشرده نمی‌شود و ردیف‌ها وسط ارسال عوض نمی‌شوند.</p>' +
+        '<p>الان این مراحل انجام می‌شود:</p>' +
+        '<ol>' +
+          '<li>همه ردیف‌های همین فرم خوانده می‌شوند: کد کالا، نام، گارانتی، تعداد در کارتن، قیمت واحد، قیمت بسته، موجودی انبار، و ردیف‌هایی که برای حذف علامت خورده‌اند.</li>' +
+          '<li>همین مقدارها، بدون ترک این صفحه، برای سرور فرستاده می‌شوند.</li>' +
+          '<li>سرور پیش‌نویس را می‌نویسد. قیمت واحد همان لحظه روی فروشگاه آنلاین و اپ مشتری اعمال می‌شود. موجودی هم روی محصولی که همان کد کالا را دارد به‌روز می‌شود.</li>' +
+          '<li>اگر پاسخ موفق برسد، صفحه یک‌بار از نو بارگذاری می‌شود تا شناسه ردیف‌های تازه و پیام نتیجه سرور دیده شود.</li>' +
+        '</ol>' +
+        '<p class="cms-muted">تا این پنجره باز است صفحه را نبندید و رفرش نکنید. اگر ارتباط قطع شود، تغییرها روی همین صفحه می‌مانند و اینجا اعلام می‌شود.</p>';
+      return;
+    }
+    if (mode === 'saved') {
+      saveModalTitle.textContent = 'ذخیره شد';
+      saveModalBody.innerHTML =
+        '<p>پاسخ موفق از سرور رسید. پیش‌نویس نوشته شده است.</p>' +
+        '<p>صفحه در حال بارگذاری دوباره است تا ردیف‌های ذخیره‌شده، شناسه‌های جدید و پیام نتیجه سرور نشان داده شود. این پنجره را نبندید.</p>';
+      return;
+    }
+    saveModalTitle.textContent = 'ذخیره انجام نشد';
+    saveModalBody.innerHTML =
+      '<p class="cms-confirm-modal__warn">' + saveFailureText + '</p>' +
+      '<p>تغییرهایی که در جدول می‌بینید پاک نشده‌اند و هنوز فقط روی همین صفحه هستند. فروشگاه، اپ مشتری و موجودی انبار با این ویرایش‌ها عوض نشده‌اند.</p>' +
+      '<p>این پنجره را ببندید. وقتی اتصال برگشت، دوباره «ذخیره» را بزنید. تا ذخیره موفق نشود، همان مقدارهای روی صفحه نگه داشته می‌شوند.</p>';
+  }
+
+  function hideSaveModal() {
+    if (!saveModal) return;
+    saveModal.hidden = true;
+    saveFailed = false;
+    document.body.style.overflow = '';
+  }
+
+  if (saveModalDismiss) {
+    saveModalDismiss.addEventListener('click', function () {
+      if (!saveFailed) return;
+      hideSaveModal();
+    });
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && saveFailed) {
+      hideSaveModal();
+    }
+  });
 
   if (form) {
     form.addEventListener('submit', function (event) {
@@ -772,6 +843,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         saveErrorEl.hidden = true;
         saveErrorEl.textContent = '';
       }
+      setSaveModal('saving');
       // Do not use form.action: the hidden input name="action" shadows that property.
       var body = new URLSearchParams(new FormData(form));
       fetch(window.location.href, {
@@ -785,10 +857,12 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         if (!res.ok && !redirected) {
           throw new Error('save-failed');
         }
+        setSaveModal('saved');
         window.location.assign(redirected ? window.location.href : res.url);
       }).catch(function () {
         setSaveBusy(false);
         showSaveNetworkError();
+        setSaveModal('failed');
       });
     });
   }
