@@ -772,16 +772,20 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
         saveErrorEl.hidden = true;
         saveErrorEl.textContent = '';
       }
-      fetch(form.action || window.location.href, {
+      // Do not use form.action: the hidden input name="action" shadows that property.
+      var body = new URLSearchParams(new FormData(form));
+      fetch(window.location.href, {
         method: 'POST',
-        body: new FormData(form),
+        body: body,
         credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
         redirect: 'follow'
       }).then(function (res) {
-        if (!res.ok) {
+        var redirected = res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400);
+        if (!res.ok && !redirected) {
           throw new Error('save-failed');
         }
-        window.location.assign(res.url);
+        window.location.assign(redirected ? window.location.href : res.url);
       }).catch(function () {
         setSaveBusy(false);
         showSaveNetworkError();
