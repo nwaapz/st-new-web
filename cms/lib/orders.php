@@ -596,6 +596,65 @@ function orders_ongoing_mode_labels(): array
     ];
 }
 
+/**
+ * Same five-stage pipeline as the sales/admin apps.
+ *
+ * @return list<array{key:string,label:string}>
+ */
+function orders_pipeline_steps(): array
+{
+    return [
+        ['key' => 'submitted', 'label' => 'ثبت سفارش'],
+        ['key' => 'accepted', 'label' => 'بررسی انبار'],
+        ['key' => 'paid', 'label' => 'پرداخت'],
+        ['key' => 'shipped', 'label' => 'ارسال'],
+        ['key' => 'received', 'label' => 'دریافت'],
+    ];
+}
+
+function orders_pipeline_index(string $status): ?int
+{
+    $map = [
+        'submitted' => 0,
+        'accepted' => 1,
+        'payment_proof_sent' => 1,
+        'paid' => 2,
+        'shipped' => 3,
+        'not_received' => 3,
+        'returned_to_origin' => 3,
+        'lost' => 3,
+        'received' => 4,
+    ];
+
+    return $map[$status] ?? null;
+}
+
+/**
+ * @return list<array{key:string,label:string,state:'done'|'now'|'pending'}>
+ */
+function orders_pipeline_view(string $status): array
+{
+    $idx = orders_pipeline_index($status);
+    $out = [];
+    foreach (orders_pipeline_steps() as $i => $step) {
+        $state = 'pending';
+        if ($idx !== null) {
+            if ($i < $idx) {
+                $state = 'done';
+            } elseif ($i === $idx) {
+                $state = 'now';
+            }
+        }
+        $out[] = [
+            'key' => $step['key'],
+            'label' => $step['label'],
+            'state' => $state,
+        ];
+    }
+
+    return $out;
+}
+
 function orders_normalize_ongoing_mode(string $mode): string
 {
     $mode = trim($mode);
@@ -1948,6 +2007,82 @@ function orders_admin_enrich_items(PDO $pdo, array $items): array
     }
 
     return $enriched;
+}
+
+/**
+ * Default unit-price field for CMS admin: saved line, else flash promo, else catalog.
+ *
+ * @param array<string, mixed> $item
+ * @return array{value:string, used_default:bool, catalog_label:?string}
+ */
+function orders_admin_unit_price_input(array $item): array
+{
+    if (!function_exists('invoices_parse_toman_amount')) {
+        require_once __DIR__ . '/invoices.php';
+    }
+
+    $parse = static function (?string $raw): ?int {
+        $raw = trim((string) $raw);
+        if ($raw === '') {
+            return null;
+        }
+        try {
+            return invoices_parse_toman_amount($raw);
+        } catch (Throwable $e) {
+            return null;
+        }
+    };
+
+    $catalogRaw = isset($item['catalog_price_text']) ? trim((string) $item['catalog_price_text']) : '';
+    $catalogParsed = $parse($catalogRaw);
+    $catalogLabel = null;
+    if ($catalogParsed !== null) {
+        $catalogLabel = invoices_format_toman($catalogParsed);
+    } elseif ($catalogRaw !== '') {
+        $catalogLabel = $catalogRaw;
+    }
+
+    $savedRaw = isset($item['price_text']) ? trim((string) $item['price_text']) : '';
+    if ($savedRaw !== '') {
+        $savedParsed = $parse($savedRaw);
+        return [
+            'value' => $savedParsed !== null ? (string) $savedParsed : $savedRaw,
+            'used_default' => false,
+            'catalog_label' => $catalogLabel,
+        ];
+    }
+
+    $promo = isset($item['promo_unit_price']) && $item['promo_unit_price'] !== null && $item['promo_unit_price'] !== ''
+        ? (int) $item['promo_unit_price']
+        : 0;
+    if (!empty($item['flash_deal_id']) && $promo > 0) {
+        return [
+            'value' => (string) $promo,
+            'used_default' => true,
+            'catalog_label' => $catalogLabel,
+        ];
+    }
+
+    if ($catalogParsed !== null) {
+        return [
+            'value' => (string) $catalogParsed,
+            'used_default' => true,
+            'catalog_label' => $catalogLabel,
+        ];
+    }
+    if ($catalogRaw !== '') {
+        return [
+            'value' => $catalogRaw,
+            'used_default' => true,
+            'catalog_label' => $catalogLabel,
+        ];
+    }
+
+    return [
+        'value' => '',
+        'used_default' => false,
+        'catalog_label' => null,
+    ];
 }
 
 /**

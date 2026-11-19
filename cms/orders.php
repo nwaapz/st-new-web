@@ -139,7 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $returnScope = 'customers';
     }
     $returnTab = trim((string) ($_POST['return_tab'] ?? ''));
-    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'history'];
+    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'chat', 'history'];
     if (!in_array($returnTab, $allowedTabs, true)) {
         $returnTab = '';
     }
@@ -163,7 +163,7 @@ if ($viewId > 0) {
         $orderIsBranch = !empty($viewOrder['branch_id']);
         $scope = $orderIsBranch ? 'branches' : 'customers';
         $isBranchScope = $orderIsBranch;
-        $viewItems = orders_fetch_items($pdo, $viewId);
+        $viewItems = orders_admin_enrich_items($pdo, orders_fetch_items($pdo, $viewId));
         $viewEvents = orders_fetch_events($pdo, $viewId);
         require_once __DIR__ . '/lib/order-cheques.php';
         $viewCheques = order_cheques_fetch($pdo, $viewId);
@@ -222,7 +222,7 @@ if ($viewOrder) {
         $defaultDetailTab = 'invoices';
     }
     $tabParam = isset($_GET['tab']) ? trim((string) $_GET['tab']) : '';
-    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'history'];
+    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'chat', 'history'];
     if (in_array($tabParam, $allowedTabs, true)) {
         $defaultDetailTab = $tabParam;
     }
@@ -323,9 +323,10 @@ if ($viewOrder) {
             <?php else: ?>
               <th>موبایل</th>
             <?php endif; ?>
-            <th>وضعیت</th>
+            <th>مراحل</th>
             <th>اقلام</th>
             <th>تاریخ</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -333,6 +334,8 @@ if ($viewOrder) {
           <?php
             $rowArchived = orders_is_archived((string) $item['status']);
             $rowHref = $ordersListQs($scope, $statusFilter, $searchQ, $page, (int) $item['id'], $ongoingMode);
+            $chatHref = $rowHref . '&tab=chat';
+            $pipe = orders_pipeline_view((string) $item['status']);
           ?>
           <tr class="cms-orders-row<?= $rowArchived ? ' cms-row--archived' : '' ?><?= $viewId === (int) $item['id'] ? ' is-open' : '' ?>"
               data-href="<?= cms_h($rowHref) ?>"
@@ -349,13 +352,23 @@ if ($viewOrder) {
               <td dir="ltr"><?= cms_h((string) $item['phone']) ?></td>
             <?php endif; ?>
             <td>
-              <?= cms_h($statusLabels[(string) $item['status']] ?? (string) $item['status']) ?>
+              <ol class="cms-order-pipe cms-order-pipe--compact" aria-label="<?= cms_h($statusLabels[(string) $item['status']] ?? (string) $item['status']) ?>">
+                <?php foreach ($pipe as $step): ?>
+                  <li class="cms-order-pipe__step is-<?= cms_h($step['state']) ?>" title="<?= cms_h($step['label']) ?>">
+                    <span class="cms-order-pipe__dot"></span>
+                    <span class="cms-order-pipe__label"><?= cms_h($step['label']) ?></span>
+                  </li>
+                <?php endforeach; ?>
+              </ol>
               <?php if ($rowArchived): ?>
                 <span class="cms-client-msg__badge" style="margin-right:6px;background:rgba(154,144,132,.85)">بسته</span>
               <?php endif; ?>
             </td>
             <td><?= (int) $item['item_count'] ?></td>
             <td dir="ltr"><?= cms_h((string) $item['created_at']) ?></td>
+            <td>
+              <a class="cms-btn cms-btn--ghost cms-orders-chat-link" href="<?= cms_h($chatHref) ?>">گفتگو</a>
+            </td>
           </tr>
         <?php endforeach; ?>
         </tbody>
@@ -383,8 +396,12 @@ if ($viewOrder) {
       var href = row.getAttribute('data-href');
       if (href) window.location.href = href;
     }
-    row.addEventListener('click', go);
+    row.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('a')) return;
+      go();
+    });
     row.addEventListener('keydown', function (e) {
+      if (e.target && e.target.closest && e.target.closest('a')) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         go();
@@ -466,6 +483,7 @@ if ($viewOrder) {
         }
     }
     $orderCode = (string) $viewOrder['public_code'];
+    $viewPipe = orders_pipeline_view($cur);
     $draftMessage = $cur === 'payment_proof_sent' && $payWarn !== '' ? $payWarn : '';
     $statusTone = orders_is_archived($cur) ? 'danger' : (orders_is_finished($cur) ? 'ok' : (orders_is_parcel_open($cur) ? 'warn' : 'info'));
     $chatOpen = orders_chat_send_allowed($cur);
@@ -511,6 +529,14 @@ if ($viewOrder) {
               <?= cms_h($statusLabels[$cur] ?? $cur) ?>
             </span>
           </div>
+          <ol class="cms-order-pipe" aria-label="مراحل سفارش">
+            <?php foreach ($viewPipe as $step): ?>
+              <li class="cms-order-pipe__step is-<?= cms_h($step['state']) ?>">
+                <span class="cms-order-pipe__dot"></span>
+                <span class="cms-order-pipe__label"><?= cms_h($step['label']) ?></span>
+              </li>
+            <?php endforeach; ?>
+          </ol>
           <dl class="cms-order-meta">
             <div><dt>تاریخ</dt><dd dir="ltr"><?= cms_h((string) $viewOrder['created_at']) ?></dd></div>
             <div><dt>موبایل</dt><dd dir="ltr"><?= cms_h((string) ($viewOrder['branch_phone'] ?: $viewOrder['phone'])) ?></dd></div>
@@ -522,7 +548,10 @@ if ($viewOrder) {
             <div><dt>اقلام</dt><dd><?= count($viewItems) ?> خط</dd></div>
           </dl>
         </div>
-        <a class="cms-btn cms-btn--secondary" id="cms-order-modal-close" href="<?= cms_h($listCloseHref) ?>">بستن</a>
+        <div class="cms-order-modal__head-actions">
+          <button type="button" class="cms-btn" data-open-tab="chat">گفتگوی سفارش</button>
+          <a class="cms-btn cms-btn--secondary" id="cms-order-modal-close" href="<?= cms_h($listCloseHref) ?>">بستن</a>
+        </div>
       </header>
 
       <div class="cms-order-modal__body">
@@ -636,7 +665,7 @@ if ($viewOrder) {
               <?php if ($viewItems === []): ?>
                 <p class="cms-empty">قلمی ثبت نشده.</p>
               <?php else: ?>
-                <?php $itemTotals = invoices_totals_from_items($viewItems); ?>
+                <?php $itemTotals = invoices_display_totals_from_items($viewItems); ?>
                 <form method="post" class="cms-invoice-form" id="order-prices-form">
                   <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
                   <?php $returnHiddens(); ?>
@@ -656,15 +685,8 @@ if ($viewOrder) {
                     <?php foreach ($viewItems as $idx => $line): ?>
                       <?php
                         $lineMeta = $itemTotals['lines'][$idx] ?? null;
-                        $unitVal = '';
-                        try {
-                            $parsedUnit = invoices_parse_toman_amount(
-                                isset($line['price_text']) ? (string) $line['price_text'] : null
-                            );
-                            $unitVal = $parsedUnit !== null ? (string) $parsedUnit : '';
-                        } catch (Throwable $e) {
-                            $unitVal = trim((string) ($line['price_text'] ?? ''));
-                        }
+                        $priceInput = orders_admin_unit_price_input($line);
+                        $unitVal = $priceInput['value'];
                       ?>
                       <tr>
                         <td>
@@ -697,6 +719,35 @@ if ($viewOrder) {
                               autocomplete="off"
                               <?= $cur === 'submitted' ? 'required' : '' ?>
                             >
+                            <?php
+                              $catalogHint = $priceInput['catalog_label'];
+                              $showCatalogHint = false;
+                              if ($catalogHint !== null && $catalogHint !== '') {
+                                  $unitParsedHint = null;
+                                  if ($unitVal !== '') {
+                                      try {
+                                          $unitParsedHint = invoices_parse_toman_amount($unitVal);
+                                      } catch (Throwable $e) {
+                                          $unitParsedHint = null;
+                                      }
+                                  }
+                                  $catalogParsedHint = null;
+                                  try {
+                                      $catalogParsedHint = invoices_parse_toman_amount($catalogHint);
+                                  } catch (Throwable $e) {
+                                      $catalogParsedHint = null;
+                                  }
+                                  $differs = $unitParsedHint === null
+                                      || $catalogParsedHint === null
+                                      || $unitParsedHint !== $catalogParsedHint;
+                                  $showCatalogHint = $priceInput['used_default'] || $differs;
+                              }
+                            ?>
+                            <?php if ($showCatalogHint): ?>
+                              <div class="cms-muted" style="font-size:.75rem;margin-top:.25rem">
+                                لیست قیمت: <?= cms_h($catalogHint) ?>
+                              </div>
+                            <?php endif; ?>
                           <?php else: ?>
                             <?= cms_h((string) ($lineMeta['unit_label'] ?? ($line['price_text'] ?? '—'))) ?>
                           <?php endif; ?>
@@ -1300,6 +1351,16 @@ if ($viewOrder) {
     }
     tabs.forEach(function (t) {
       t.addEventListener('click', function () { activate(t.getAttribute('data-tab') || 'actions'); });
+    });
+    document.querySelectorAll('[data-open-tab]').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        activate(el.getAttribute('data-open-tab') || 'chat');
+        var panel = root.querySelector('[data-panel="chat"]');
+        if (panel && panel.scrollIntoView) {
+          panel.scrollIntoView({ block: 'nearest' });
+        }
+      });
     });
     activate(def);
   })();

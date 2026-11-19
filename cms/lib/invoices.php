@@ -160,9 +160,16 @@ function invoices_display_totals_from_items(array $items): array
         $row = $item;
         $saved = trim((string) ($item['price_text'] ?? ''));
         if ($saved === '') {
-            $catalog = trim((string) ($item['catalog_price_text'] ?? ''));
-            if ($catalog !== '') {
-                $row['price_text'] = $catalog;
+            $promo = isset($item['promo_unit_price']) && $item['promo_unit_price'] !== null && $item['promo_unit_price'] !== ''
+                ? (int) $item['promo_unit_price']
+                : 0;
+            if (!empty($item['flash_deal_id']) && $promo > 0) {
+                $row['price_text'] = (string) $promo;
+            } else {
+                $catalog = trim((string) ($item['catalog_price_text'] ?? ''));
+                if ($catalog !== '') {
+                    $row['price_text'] = $catalog;
+                }
             }
         }
         $displayItems[] = $row;

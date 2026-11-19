@@ -176,7 +176,7 @@ if ($editId >= 0) {
     echo '<label class="cms-field"><span class="cms-label">عنوان</span>';
     echo '<input class="cms-input" name="title" required value="' . cms_h($value('title')) . '"></label>';
     echo '<label class="cms-field"><span class="cms-label">توضیح (اختیاری)</span>';
-    echo '<textarea class="cms-input" name="description" rows="3">' . cms_h($value('description')) . '</textarea></label>';
+    echo '<textarea class="cms-input cms-textarea cms-festival-desc" name="description" rows="8">' . cms_h($value('description')) . '</textarea></label>';
     cms_image_field('banner_image', 'بنر (اختیاری)', $bannerValue);
     echo '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem">';
     echo '<label class="cms-field"><span class="cms-label">شروع (شمسی)</span><input class="cms-input cms-jalali-date" name="start_date" placeholder="1404/07/23" autocomplete="off" value="' . cms_h($value('start_date')) . '" required></label>';
@@ -186,15 +186,15 @@ if ($editId >= 0) {
     echo '<label class="cms-field"><span class="cms-label">اولویت نمایش</span><input class="cms-input" type="number" name="display_priority" value="' . cms_h($value('display_priority', '0')) . '"></label>';
     echo '</div>';
     echo '<h2>محصولات</h2>';
-    echo '<div class="cms-btn-row">';
-    echo '<input class="cms-input" id="product-q" placeholder="نام یا کد کالا" style="max-width:280px">';
+    echo '<p class="cms-muted">جستجو با کد نمایش کالا (visual ID) — مثلاً ۱۲۳۴ یا ST-1234. Enter فقط جستجو می‌کند، فرم ذخیره نمی‌شود.</p>';
+    echo '<div class="cms-btn-row" style="flex-wrap:wrap;align-items:flex-end">';
+    echo '<label class="cms-field" style="margin:0;flex:1;min-width:16rem"><span class="cms-label">کد نمایش یا نام</span>';
+    echo '<input class="cms-input" id="product-q" type="search" placeholder="کد نمایش کالا" autocomplete="off" dir="ltr"></label>';
     echo '<button class="cms-btn cms-btn--secondary" type="button" id="product-search">جستجو</button>';
     echo '</div>';
-    echo '<div id="product-results" class="cms-muted"></div>';
-    echo '<div style="overflow:auto"><table class="cms-table" id="product-table"><thead><tr>';
-    echo '<th>محصول</th><th>قیمت عادی</th><th>قیمت ویژه</th><th>تخفیف</th><th>سقف سفارش</th><th>سقف مشتری</th><th>سقف کمپین</th><th>اولویت</th><th></th>';
-    echo '</tr></thead><tbody></tbody></table></div>';
-    echo '<h2>پیش‌نمایش کارت مشتری</h2><div id="offer-preview" style="display:flex;flex-wrap:wrap;gap:.75rem"></div>';
+    echo '<div id="product-results" class="cms-flash-deal-results cms-muted"></div>';
+    echo '<div id="product-list" class="cms-festival-tiers"></div>';
+    echo '<h2>پیش‌نمایش کارت مشتری</h2><div id="offer-preview" class="cms-flash-deal-preview"></div>';
     echo '<div class="cms-btn-row" style="margin-top:1rem">';
     echo '<button class="cms-btn cms-btn--secondary" type="submit" name="intent" value="draft">ذخیره پیش‌نویس</button>';
     echo '<button class="cms-btn cms-btn--secondary" type="submit" name="intent" value="schedule">زمان‌بندی</button>';
@@ -228,9 +228,13 @@ if ($editId >= 0) {
     echo 'const initialProducts = ' . json_encode($productsForJs, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) . ';';
     echo <<<'JS'
 const rows = Array.isArray(initialProducts) ? initialProducts.map(p => ({...p})) : [];
-const tbody = document.querySelector('#product-table tbody');
+const list = document.getElementById('product-list');
 const preview = document.getElementById('offer-preview');
 const hidden = document.getElementById('products-json');
+const searchInput = document.getElementById('product-q');
+const searchBtn = document.getElementById('product-search');
+const resultsBox = document.getElementById('product-results');
+
 function toman(n) {
   const v = Number(n || 0);
   return v.toLocaleString('fa-IR') + ' تومان';
@@ -243,7 +247,7 @@ function discountOf(regular, promo) {
   const pct = Math.round((amount * 10000) / r) / 100;
   return pct.toLocaleString('fa-IR') + '٪ (' + toman(amount) + ')';
 }
-function sync() {
+function writeJson() {
   hidden.value = JSON.stringify(rows.map(p => ({
     product_id: Number(p.product_id),
     promo_unit_price: Number(p.promo_unit_price || 0),
@@ -252,84 +256,225 @@ function sync() {
     campaign_qty_limit: p.campaign_qty_limit || '',
     display_priority: Number(p.display_priority || 0),
   })));
-  tbody.innerHTML = '';
-  preview.innerHTML = '';
-  rows.forEach((p, index) => {
-    const tr = document.createElement('tr');
-    const limit = (key) => `<input class="cms-input" data-i="${index}" data-k="${key}" value="${p[key] ?? ''}" style="width:5.5rem">`;
-    tr.innerHTML = `<td>${p.name || ''} <span class="cms-muted">${p.visual_id || ''}</span></td>`
-      + `<td>${p.regular_price_text || toman(p.regular_unit_price)}</td>`
-      + `<td><input class="cms-input" data-i="${index}" data-k="promo_unit_price" value="${p.promo_unit_price || ''}" style="width:8rem"></td>`
-      + `<td>${discountOf(p.regular_unit_price, p.promo_unit_price)}</td>`
-      + `<td>${limit('per_order_qty_limit')}</td>`
-      + `<td>${limit('per_customer_qty_limit')}</td>`
-      + `<td>${limit('campaign_qty_limit')}</td>`
-      + `<td><input class="cms-input" data-i="${index}" data-k="display_priority" value="${p.display_priority || 0}" style="width:4rem"></td>`
-      + `<td><button type="button" data-remove="${index}">حذف</button></td>`;
-    tbody.appendChild(tr);
+}
+function makeField(labelText, control) {
+  const wrap = document.createElement('label');
+  wrap.className = 'cms-field';
+  const span = document.createElement('span');
+  span.className = 'cms-label';
+  span.textContent = labelText;
+  wrap.appendChild(span);
+  wrap.appendChild(control);
+  return wrap;
+}
+function bindValue(control, index, key, after) {
+  control.addEventListener('input', () => {
+    rows[index][key] = control.value;
+    writeJson();
+    if (after) after();
+  });
+}
+function renderPreview() {
+  preview.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('p');
+    empty.className = 'cms-muted';
+    empty.textContent = 'محصولی انتخاب نشده است.';
+    preview.appendChild(empty);
+    return;
+  }
+  rows.forEach((p) => {
     const card = document.createElement('div');
-    card.style.cssText = 'width:220px;border:1px solid var(--cms-border,#333);padding:.75rem;border-radius:12px';
-    card.innerHTML = `<strong>${p.name || ''}</strong><div class="cms-muted" style="text-decoration:line-through">${p.regular_price_text || toman(p.regular_unit_price)}</div><div>${toman(p.promo_unit_price)}</div><div>${discountOf(p.regular_unit_price, p.promo_unit_price)}</div>`;
+    card.className = 'cms-flash-deal-preview__card';
+    const name = document.createElement('strong');
+    name.textContent = p.name || '';
+    const code = document.createElement('div');
+    code.className = 'cms-muted';
+    code.dir = 'ltr';
+    code.textContent = p.visual_id || '';
+    const oldP = document.createElement('div');
+    oldP.className = 'cms-muted';
+    oldP.style.textDecoration = 'line-through';
+    oldP.textContent = p.regular_price_text || toman(p.regular_unit_price);
+    const newP = document.createElement('div');
+    newP.textContent = toman(p.promo_unit_price);
+    const disc = document.createElement('div');
+    disc.textContent = discountOf(p.regular_unit_price, p.promo_unit_price);
+    card.appendChild(name);
+    card.appendChild(code);
+    card.appendChild(oldP);
+    card.appendChild(newP);
+    card.appendChild(disc);
     preview.appendChild(card);
   });
-  if (!rows.length) {
-    preview.innerHTML = '<p class="cms-muted">محصولی انتخاب نشده است.</p>';
-  }
 }
-tbody.addEventListener('input', (event) => {
-  const el = event.target;
-  if (!el.dataset || el.dataset.i == null) return;
-  const row = rows[Number(el.dataset.i)];
-  row[el.dataset.k] = el.value;
-  sync();
-});
-tbody.addEventListener('click', (event) => {
-  const btn = event.target.closest('[data-remove]');
-  if (!btn) return;
-  rows.splice(Number(btn.dataset.remove), 1);
-  sync();
-});
-document.getElementById('product-search').addEventListener('click', async () => {
-  const q = document.getElementById('product-q').value.trim();
-  const box = document.getElementById('product-results');
-  if (!q) { box.textContent = 'نام یا کد را وارد کنید'; return; }
-  box.textContent = 'در حال جستجو...';
+function renderProducts() {
+  list.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('p');
+    empty.className = 'cms-muted';
+    empty.textContent = 'محصولی در این پیشنهاد نیست. با کد نمایش جستجو کنید و اضافه کنید.';
+    list.appendChild(empty);
+    writeJson();
+    renderPreview();
+    return;
+  }
+  rows.forEach((p, index) => {
+    const card = document.createElement('article');
+    card.className = 'cms-festival-tier';
+    const head = document.createElement('div');
+    head.className = 'cms-festival-tier__head';
+    const title = document.createElement('div');
+    const nameEl = document.createElement('strong');
+    nameEl.textContent = p.name || 'محصول';
+    const codeEl = document.createElement('div');
+    codeEl.className = 'cms-muted';
+    codeEl.dir = 'ltr';
+    codeEl.textContent = p.visual_id ? String(p.visual_id) : 'بدون کد نمایش';
+    title.appendChild(nameEl);
+    title.appendChild(codeEl);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'cms-btn cms-btn--secondary';
+    remove.textContent = 'حذف';
+    remove.addEventListener('click', () => {
+      rows.splice(index, 1);
+      renderProducts();
+    });
+    head.appendChild(title);
+    head.appendChild(remove);
+
+    const regular = document.createElement('p');
+    regular.className = 'cms-muted';
+    regular.textContent = 'قیمت عادی: ' + (p.regular_price_text || toman(p.regular_unit_price));
+
+    const promo = document.createElement('input');
+    promo.className = 'cms-input';
+    promo.inputMode = 'numeric';
+    promo.placeholder = 'قیمت ویژه (تومان)';
+    promo.value = p.promo_unit_price != null && p.promo_unit_price !== '' ? String(p.promo_unit_price) : '';
+
+    const disc = document.createElement('p');
+    disc.className = 'cms-muted';
+    disc.textContent = 'تخفیف: ' + discountOf(p.regular_unit_price, p.promo_unit_price);
+    bindValue(promo, index, 'promo_unit_price', () => {
+      disc.textContent = 'تخفیف: ' + discountOf(p.regular_unit_price, p.promo_unit_price);
+      renderPreview();
+    });
+
+    const orderLim = document.createElement('input');
+    orderLim.className = 'cms-input';
+    orderLim.inputMode = 'numeric';
+    orderLim.value = p.per_order_qty_limit != null ? String(p.per_order_qty_limit) : '';
+    bindValue(orderLim, index, 'per_order_qty_limit');
+
+    const custLim = document.createElement('input');
+    custLim.className = 'cms-input';
+    custLim.inputMode = 'numeric';
+    custLim.value = p.per_customer_qty_limit != null ? String(p.per_customer_qty_limit) : '';
+    bindValue(custLim, index, 'per_customer_qty_limit');
+
+    const campLim = document.createElement('input');
+    campLim.className = 'cms-input';
+    campLim.inputMode = 'numeric';
+    campLim.value = p.campaign_qty_limit != null ? String(p.campaign_qty_limit) : '';
+    bindValue(campLim, index, 'campaign_qty_limit');
+
+    const prio = document.createElement('input');
+    prio.className = 'cms-input';
+    prio.type = 'number';
+    prio.value = p.display_priority != null ? String(p.display_priority) : '0';
+    bindValue(prio, index, 'display_priority');
+
+    card.appendChild(head);
+    card.appendChild(regular);
+    card.appendChild(makeField('قیمت ویژه (تومان)', promo));
+    card.appendChild(disc);
+    const limits = document.createElement('div');
+    limits.className = 'cms-flash-deal-limits';
+    limits.appendChild(makeField('سقف در هر سفارش', orderLim));
+    limits.appendChild(makeField('سقف هر مشتری', custLim));
+    limits.appendChild(makeField('سقف کمپین', campLim));
+    limits.appendChild(makeField('اولویت نمایش', prio));
+    card.appendChild(limits);
+    list.appendChild(card);
+  });
+  writeJson();
+  renderPreview();
+}
+
+function addProduct(p) {
+  if (rows.some(row => Number(row.product_id) === Number(p.product_id))) return;
+  const regular = Number(p.regular_unit_price || 0);
+  rows.push({
+    product_id: p.product_id,
+    name: p.name,
+    visual_id: p.visual_id,
+    image: p.image,
+    regular_unit_price: regular > 0 ? regular : p.regular_unit_price,
+    regular_price_text: p.regular_price_text,
+    promo_unit_price: regular > 0 ? regular : '',
+    per_order_qty_limit: '',
+    per_customer_qty_limit: '',
+    campaign_qty_limit: '',
+    display_priority: 0,
+  });
+  renderProducts();
+  const lastPromo = list.querySelector('.cms-festival-tier:last-child input.cms-input');
+  if (lastPromo) lastPromo.focus();
+}
+
+async function runSearch() {
+  const q = searchInput.value.trim();
+  if (!q) {
+    resultsBox.textContent = 'کد نمایش کالا را وارد کنید';
+    return;
+  }
+  resultsBox.textContent = 'در حال جستجو...';
   try {
     const res = await fetch('flash-deals.php?product_q=' + encodeURIComponent(q), { credentials: 'same-origin' });
     const data = await res.json();
-    box.innerHTML = '';
-    (data.products || []).forEach((p) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'cms-btn cms-btn--ghost';
-      b.style.margin = '.25rem';
-      b.textContent = p.name + (p.visual_id ? ' — ' + p.visual_id : '');
-      b.addEventListener('click', () => {
-        if (rows.some(row => Number(row.product_id) === Number(p.product_id))) return;
-        rows.push({
-          product_id: p.product_id,
-          name: p.name,
-          visual_id: p.visual_id,
-          image: p.image,
-          regular_unit_price: p.regular_unit_price,
-          regular_price_text: p.regular_price_text,
-          promo_unit_price: '',
-          per_order_qty_limit: '',
-          per_customer_qty_limit: '',
-          campaign_qty_limit: '',
-          display_priority: 0,
-        });
-        sync();
+    const products = data && data.products ? data.products : [];
+    resultsBox.replaceChildren();
+    if (!products.length) {
+      resultsBox.textContent = 'محصولی با این کد نمایش پیدا نشد';
+      return;
+    }
+    products.forEach((p) => {
+      const row = document.createElement('div');
+      row.className = 'cms-flash-deal-results__row';
+      const label = document.createElement('span');
+      label.dir = 'ltr';
+      label.textContent = (p.visual_id ? String(p.visual_id) + ' — ' : '') + (p.name || '');
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'cms-btn cms-btn--secondary';
+      const already = rows.some(r => Number(r.product_id) === Number(p.product_id));
+      add.textContent = already ? 'اضافه شده' : 'افزودن';
+      add.disabled = already;
+      add.addEventListener('click', () => {
+        addProduct(p);
+        add.textContent = 'اضافه شده';
+        add.disabled = true;
       });
-      box.appendChild(b);
+      row.appendChild(label);
+      row.appendChild(add);
+      resultsBox.appendChild(row);
     });
-    if (!(data.products || []).length) box.textContent = 'محصولی پیدا نشد';
   } catch (e) {
-    box.textContent = 'جستجو ناموفق بود';
+    resultsBox.textContent = 'جستجو ناموفق بود';
+  }
+}
+
+searchBtn.addEventListener('click', () => { void runSearch(); });
+searchInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    void runSearch();
   }
 });
-document.getElementById('flash-deal-form').addEventListener('submit', () => sync());
-sync();
+document.getElementById('flash-deal-form').addEventListener('submit', () => writeJson());
+renderProducts();
 JS;
     echo '</script>';
     echo '<script src="assets/cms-jalali-datepicker.js?v=1"></script>';
