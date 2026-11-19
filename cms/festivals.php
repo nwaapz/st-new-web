@@ -247,7 +247,7 @@ if ($editId >= 0) {
     echo '<label class="cms-field"><span class="cms-label">عنوان</span>';
     echo '<input class="cms-input" name="title" required value="' . cms_h($value('title')) . '"></label>';
     echo '<label class="cms-field"><span class="cms-label">توضیح (اختیاری)</span>';
-    echo '<textarea class="cms-input" name="description" rows="3">' . cms_h($value('description')) . '</textarea></label>';
+    echo '<textarea class="cms-input cms-textarea cms-festival-desc" name="description" rows="8">' . cms_h($value('description')) . '</textarea></label>';
     echo '<input type="hidden" name="tiers_json" id="tiers-json" value="' . cms_h(json_encode($tiersForJs, JSON_UNESCAPED_UNICODE)) . '">';
     echo '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem">';
     echo '<label class="cms-field"><span class="cms-label">شروع (شمسی)</span><input class="cms-input cms-jalali-date" name="start_date" placeholder="1404/07/23" autocomplete="off" value="' . cms_h($value('start_date')) . '" required></label>';
@@ -258,9 +258,7 @@ if ($editId >= 0) {
     echo '</div>';
     echo '<h2>پله‌های حجم خرید</h2>';
     echo '<p class="cms-muted">آستانه‌ها باید صعودی باشند (مثلاً ۵۰۰ میلیون، ۱ میلیارد تومان).</p>';
-    echo '<div style="overflow:auto"><table class="cms-table" id="tier-table"><thead><tr>';
-    echo '<th>آستانه (تومان)</th><th>عنوان جایزه</th><th>توضیح</th><th></th>';
-    echo '</tr></thead><tbody></tbody></table></div>';
+    echo '<div id="tier-list" class="cms-festival-tiers"></div>';
     echo '<button class="cms-btn cms-btn--secondary" type="button" id="add-tier">افزودن پله</button>';
     echo '<div class="cms-btn-row" style="margin-top:1rem">';
     echo '<button class="cms-btn cms-btn--secondary" type="submit" data-intent="draft">ذخیره پیش‌نویس</button>';
@@ -313,41 +311,99 @@ if ($editId >= 0) {
     echo 'const initialTiers = ' . json_encode($tiersForJs, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) . ';';
     echo <<<'JS'
 const rows = Array.isArray(initialTiers) ? initialTiers.map(t => ({...t})) : [];
-const tbody = document.querySelector('#tier-table tbody');
+const list = document.getElementById('tier-list');
 const hidden = document.getElementById('tiers-json');
-function sync() {
+
+function writeJson() {
   hidden.value = JSON.stringify(rows.map((t, i) => ({
     threshold_toman: t.threshold_toman || '',
     benefit_title: t.benefit_title || '',
     benefit_description: t.benefit_description || '',
     sort_order: i,
   })));
-  tbody.innerHTML = '';
-  rows.forEach((t, index) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><input class="cms-input" data-i="${index}" data-k="threshold_toman" value="${t.threshold_toman ?? ''}"></td>
-      <td><input class="cms-input" data-i="${index}" data-k="benefit_title" value="${t.benefit_title ?? ''}"></td>
-      <td><input class="cms-input" data-i="${index}" data-k="benefit_description" value="${t.benefit_description ?? ''}"></td>
-      <td><button type="button" class="cms-btn cms-btn--secondary" data-remove="${index}">حذف</button></td>`;
-    tbody.appendChild(tr);
+}
+
+function makeField(labelText, control) {
+  const wrap = document.createElement('label');
+  wrap.className = 'cms-field';
+  const span = document.createElement('span');
+  span.className = 'cms-label';
+  span.textContent = labelText;
+  wrap.appendChild(span);
+  wrap.appendChild(control);
+  return wrap;
+}
+
+function bindValue(control, index, key) {
+  control.addEventListener('input', () => {
+    rows[index][key] = control.value;
+    writeJson();
   });
 }
-tbody.addEventListener('input', (e) => {
-  const el = e.target;
-  if (!el.dataset.i) return;
-  rows[Number(el.dataset.i)][el.dataset.k] = el.value;
-  sync();
-});
-tbody.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-remove]');
-  if (!btn) return;
-  rows.splice(Number(btn.dataset.remove), 1);
-  sync();
-});
+
+function render() {
+  list.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('p');
+    empty.className = 'cms-muted';
+    empty.textContent = 'هنوز پله‌ای نیست. «افزودن پله» را بزنید.';
+    list.appendChild(empty);
+    writeJson();
+    return;
+  }
+  rows.forEach((t, index) => {
+    const card = document.createElement('article');
+    card.className = 'cms-festival-tier';
+
+    const head = document.createElement('div');
+    head.className = 'cms-festival-tier__head';
+    const title = document.createElement('strong');
+    title.textContent = 'پله ' + String(index + 1);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'cms-btn cms-btn--secondary';
+    remove.textContent = 'حذف';
+    remove.addEventListener('click', () => {
+      rows.splice(index, 1);
+      render();
+    });
+    head.appendChild(title);
+    head.appendChild(remove);
+
+    const amount = document.createElement('input');
+    amount.className = 'cms-input';
+    amount.inputMode = 'numeric';
+    amount.placeholder = 'مثلاً 500000000';
+    amount.value = t.threshold_toman != null ? String(t.threshold_toman) : '';
+    bindValue(amount, index, 'threshold_toman');
+
+    const prize = document.createElement('input');
+    prize.className = 'cms-input';
+    prize.placeholder = 'عنوان جایزه';
+    prize.value = t.benefit_title != null ? String(t.benefit_title) : '';
+    bindValue(prize, index, 'benefit_title');
+
+    const desc = document.createElement('textarea');
+    desc.className = 'cms-input cms-textarea cms-festival-tier__desc';
+    desc.rows = 5;
+    desc.placeholder = 'توضیح جایزه';
+    desc.value = t.benefit_description != null ? String(t.benefit_description) : '';
+    bindValue(desc, index, 'benefit_description');
+
+    card.appendChild(head);
+    card.appendChild(makeField('آستانه (تومان)', amount));
+    card.appendChild(makeField('عنوان جایزه', prize));
+    card.appendChild(makeField('توضیح جایزه', desc));
+    list.appendChild(card);
+  });
+  writeJson();
+}
+
 document.getElementById('add-tier').addEventListener('click', () => {
   rows.push({ threshold_toman: '', benefit_title: '', benefit_description: '' });
-  sync();
+  render();
+  const last = list.querySelector('.cms-festival-tier:last-child input.cms-input');
+  if (last) last.focus();
 });
 const festivalForm = document.getElementById('festival-form');
 const intentField = document.getElementById('intent-field');
@@ -356,8 +412,8 @@ festivalForm.querySelectorAll('button[type="submit"][data-intent]').forEach((btn
     intentField.value = btn.getAttribute('data-intent') || 'draft';
   });
 });
-festivalForm.addEventListener('submit', () => sync());
-sync();
+festivalForm.addEventListener('submit', () => writeJson());
+render();
 JS;
     echo '</script>';
     echo '<script src="assets/cms-jalali-datepicker.js?v=1"></script>';
