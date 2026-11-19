@@ -10,7 +10,7 @@ admin_auth_prepare_cors();
 try {
     $pdo = cms_pdo();
     festivals_ensure_schema($pdo);
-    admin_auth_require_user($pdo);
+    $admin = admin_auth_require_user($pdo);
 
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
     if ($method === 'OPTIONS') {
@@ -26,7 +26,15 @@ try {
             if ($campaign === null) {
                 api_error('جشنواره یافت نشد', 404);
             }
-            $campaign['participants'] = festivals_admin_participants($pdo, $id, 50);
+            $participantList = festivals_admin_participants($pdo, $id, [
+                'page' => max(1, (int) ($_GET['participant_page'] ?? 1)),
+                'page_size' => min(50, max(1, (int) ($_GET['participant_page_size'] ?? 50))),
+                'q' => trim((string) ($_GET['participant_q'] ?? '')),
+            ]);
+            $campaign['participants'] = $participantList['items'];
+            $campaign['participants_total'] = $participantList['total'];
+            $campaign['participants_page'] = $participantList['page'];
+            $campaign['participants_total_pages'] = $participantList['total_pages'];
             api_json(['ok' => true, 'campaign' => $campaign]);
         }
         $page = max(1, (int) ($_GET['page'] ?? 1));
@@ -58,6 +66,17 @@ try {
         }
     }
     $action = trim((string) ($body['action'] ?? 'save'));
+    if (in_array($action, ['mark_gift', 'unmark_gift'], true)) {
+        $participant = festivals_mark_tier_gift(
+            $pdo,
+            (int) ($body['id'] ?? $body['festival_id'] ?? 0),
+            (int) ($body['sales_user_id'] ?? 0),
+            (int) ($body['tier_id'] ?? 0),
+            $action === 'mark_gift',
+            (int) ($admin['id'] ?? 0)
+        );
+        api_json(['ok' => true, 'participant' => $participant]);
+    }
     if (in_array($action, ['pause', 'resume', 'end', 'archive', 'duplicate', 'delete'], true)) {
         $result = festivals_action(
             $pdo,

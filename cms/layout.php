@@ -89,6 +89,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
         $subNav = [
             'customers.php' => 'خلاصه',
             'orders.php' => 'سفارش‌ها',
+            'cheques.php' => 'چک‌ها',
             'price-sheet.php?from=warehouse' => 'لیست قیمت',
             'messages.php' => 'پیام‌ها',
             'branch-messages.php' => 'پیام نمایندگان',

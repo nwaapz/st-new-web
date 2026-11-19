@@ -128,6 +128,22 @@ function festivals_ensure_schema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS festival_tier_gifts (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          festival_id INT UNSIGNED NOT NULL,
+          sales_user_id INT UNSIGNED NOT NULL,
+          tier_id INT UNSIGNED NOT NULL,
+          delivered_at DATETIME NOT NULL,
+          delivered_by INT UNSIGNED NULL,
+          PRIMARY KEY (id),
+          UNIQUE KEY uq_festival_tier_gift (festival_id, sales_user_id, tier_id),
+          KEY idx_ftg_festival_user (festival_id, sales_user_id),
+          CONSTRAINT fk_ftg_festival FOREIGN KEY (festival_id) REFERENCES festival_campaigns (id) ON DELETE CASCADE,
+          CONSTRAINT fk_ftg_tier FOREIGN KEY (tier_id) REFERENCES festival_tiers (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
     $ready = true;
 }
 
@@ -525,19 +541,52 @@ function festivals_save(PDO $pdo, array $body): array
             $id = (int) $pdo->lastInsertId();
         }
 
-        $pdo->prepare('DELETE FROM festival_tiers WHERE festival_id = ?')->execute([$id]);
+        $existingTiers = festivals_fetch_tiers($pdo, $id);
+        $existingByThreshold = [];
+        foreach ($existingTiers as $existingTier) {
+            $existingByThreshold[(int) $existingTier['threshold_toman']] = (int) $existingTier['id'];
+        }
+        $keepIds = [];
+        $tierUpd = $pdo->prepare(
+            'UPDATE festival_tiers
+             SET benefit_title = ?, benefit_description = ?, sort_order = ?
+             WHERE id = ? AND festival_id = ?'
+        );
         $tierIns = $pdo->prepare(
             'INSERT INTO festival_tiers (festival_id, threshold_toman, benefit_title, benefit_description, sort_order)
              VALUES (?, ?, ?, ?, ?)'
         );
         foreach ($tiers as $tier) {
-            $tierIns->execute([
-                $id,
-                $tier['threshold_toman'],
-                $tier['benefit_title'],
-                $tier['benefit_description'] !== '' ? $tier['benefit_description'] : null,
-                $tier['sort_order'],
-            ]);
+            $threshold = (int) $tier['threshold_toman'];
+            $desc = $tier['benefit_description'] !== '' ? $tier['benefit_description'] : null;
+            if (isset($existingByThreshold[$threshold])) {
+                $tierId = $existingByThreshold[$threshold];
+                $tierUpd->execute([
+                    $tier['benefit_title'],
+                    $desc,
+                    $tier['sort_order'],
+                    $tierId,
+                    $id,
+                ]);
+                $keepIds[] = $tierId;
+            } else {
+                $tierIns->execute([
+                    $id,
+                    $threshold,
+                    $tier['benefit_title'],
+                    $desc,
+                    $tier['sort_order'],
+                ]);
+                $keepIds[] = (int) $pdo->lastInsertId();
+            }
+        }
+        if ($keepIds === []) {
+            $pdo->prepare('DELETE FROM festival_tiers WHERE festival_id = ?')->execute([$id]);
+        } else {
+            $in = implode(',', array_map('intval', $keepIds));
+            $pdo->prepare(
+                "DELETE FROM festival_tiers WHERE festival_id = ? AND id NOT IN ({$in})"
+            )->execute([$id]);
         }
         $pdo->commit();
     } catch (Throwable $e) {
@@ -841,34 +890,236 @@ function festivals_sales_snapshot(PDO $pdo, int $salesUserId): array
 }
 
 /**
- * @return list<array<string, mixed>>
+ * @param list<array<string, mixed>> $tiers
+ * @param array<int, array{delivered_at:string,delivered_by:?int}> $giftsByTier
+ * @return array<string, mixed>
  */
-function festivals_admin_participants(PDO $pdo, int $festivalId, int $limit = 50): array
-{
-    $stmt = $pdo->prepare(
-        'SELECT sales_user_id, total_toman, updated_at
-         FROM festival_sales_progress
-         WHERE festival_id = ?
-         ORDER BY total_toman DESC, updated_at DESC
-         LIMIT ' . max(1, min(200, $limit))
-    );
-    $stmt->execute([$festivalId]);
-    $out = [];
-    foreach ($stmt->fetchAll() ?: [] as $row) {
-        $salesUserId = (int) $row['sales_user_id'];
-        $name = null;
-        if (function_exists('sales_users_display_name_for_id')) {
-            require_once __DIR__ . '/sales-users.php';
-            $name = sales_users_display_name_for_id($pdo, $salesUserId);
+function festivals_participant_progress_row(
+    int $salesUserId,
+    ?string $name,
+    int $totalToman,
+    string $updatedAt,
+    array $tiers,
+    array $giftsByTier
+): array {
+    $tierStates = [];
+    $highest = null;
+    foreach ($tiers as $tier) {
+        $tierId = (int) ($tier['id'] ?? 0);
+        $threshold = (int) ($tier['threshold_toman'] ?? 0);
+        $unlocked = $totalToman >= $threshold && $threshold > 0;
+        $gift = $giftsByTier[$tierId] ?? null;
+        $deliveredAt = is_array($gift) ? (string) ($gift['delivered_at'] ?? '') : '';
+        $state = [
+            'tier_id' => $tierId,
+            'threshold_toman' => $threshold,
+            'threshold_text' => (string) ($tier['threshold_text'] ?? invoices_format_toman($threshold)),
+            'benefit_title' => (string) ($tier['benefit_title'] ?? ''),
+            'unlocked' => $unlocked,
+            'delivered' => $deliveredAt !== '',
+            'delivered_at' => $deliveredAt !== '' ? $deliveredAt : null,
+            'delivered_at_jalali' => $deliveredAt !== '' ? cms_jalali_format_datetime($deliveredAt) : null,
+            'delivered_by' => is_array($gift) ? ($gift['delivered_by'] ?? null) : null,
+        ];
+        $tierStates[] = $state;
+        if ($unlocked) {
+            $highest = $tier;
         }
-        $out[] = [
-            'sales_user_id' => $salesUserId,
-            'sales_user_name' => $name,
-            'total_toman' => (int) $row['total_toman'],
-            'total_text' => invoices_format_toman((int) $row['total_toman']),
-            'updated_at' => (string) $row['updated_at'],
+    }
+    $next = festivals_next_tier($totalToman, $tiers);
+
+    return [
+        'sales_user_id' => $salesUserId,
+        'sales_user_name' => $name,
+        'total_toman' => $totalToman,
+        'total_text' => invoices_format_toman($totalToman),
+        'updated_at' => $updatedAt,
+        'updated_at_jalali' => cms_jalali_format_datetime($updatedAt),
+        'highest_tier_title' => $highest !== null ? (string) ($highest['benefit_title'] ?? '') : null,
+        'highest_tier_id' => $highest !== null ? (int) ($highest['id'] ?? 0) : null,
+        'next_tier' => $next['next'],
+        'remaining_to_next_toman' => $next['remaining'],
+        'remaining_to_next_text' => $next['remaining'] > 0 ? invoices_format_toman($next['remaining']) : null,
+        'tiers' => $tierStates,
+    ];
+}
+
+/**
+ * @param array{page?:int,page_size?:int,q?:string} $opts
+ * @return array{items:list<array<string,mixed>>,total:int,page:int,total_pages:int,page_size:int}
+ */
+function festivals_admin_participants(PDO $pdo, int $festivalId, array $opts = []): array
+{
+    festivals_ensure_schema($pdo);
+    require_once __DIR__ . '/sales-users.php';
+    sales_users_ensure_schema($pdo);
+
+    $page = max(1, (int) ($opts['page'] ?? 1));
+    $pageSize = min(50, max(1, (int) ($opts['page_size'] ?? 50)));
+    $q = trim((string) ($opts['q'] ?? ''));
+    $tiers = festivals_fetch_tiers($pdo, $festivalId);
+
+    $where = ['p.festival_id = ?'];
+    $params = [$festivalId];
+    if ($q !== '') {
+        $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
+        $where[] = '(su.display_name LIKE ? OR su.username LIKE ? OR CAST(p.sales_user_id AS CHAR) = ?)';
+        $params[] = $like;
+        $params[] = $like;
+        $params[] = $q;
+    }
+    $whereSql = implode(' AND ', $where);
+
+    $count = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM festival_sales_progress p
+         LEFT JOIN sales_users su ON su.id = p.sales_user_id
+         WHERE {$whereSql}"
+    );
+    $count->execute($params);
+    $total = (int) $count->fetchColumn();
+    $pages = max(1, (int) ceil($total / $pageSize));
+    if ($page > $pages) {
+        $page = $pages;
+    }
+    $offset = ($page - 1) * $pageSize;
+
+    $stmt = $pdo->prepare(
+        "SELECT p.sales_user_id, p.total_toman, p.updated_at, su.display_name, su.username
+         FROM festival_sales_progress p
+         LEFT JOIN sales_users su ON su.id = p.sales_user_id
+         WHERE {$whereSql}
+         ORDER BY p.total_toman DESC, p.updated_at DESC, p.sales_user_id ASC
+         LIMIT {$pageSize} OFFSET {$offset}"
+    );
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll() ?: [];
+    $userIds = [];
+    foreach ($rows as $row) {
+        $userIds[] = (int) $row['sales_user_id'];
+    }
+
+    $giftsByUser = [];
+    if ($userIds !== []) {
+        $in = implode(',', array_map('intval', $userIds));
+        $giftStmt = $pdo->prepare(
+            "SELECT sales_user_id, tier_id, delivered_at, delivered_by
+             FROM festival_tier_gifts
+             WHERE festival_id = ? AND sales_user_id IN ({$in})"
+        );
+        $giftStmt->execute([$festivalId]);
+        foreach ($giftStmt->fetchAll() ?: [] as $gift) {
+            $uid = (int) $gift['sales_user_id'];
+            $tid = (int) $gift['tier_id'];
+            $giftsByUser[$uid][$tid] = [
+                'delivered_at' => (string) $gift['delivered_at'],
+                'delivered_by' => $gift['delivered_by'] !== null ? (int) $gift['delivered_by'] : null,
+            ];
+        }
+    }
+
+    $items = [];
+    foreach ($rows as $row) {
+        $salesUserId = (int) $row['sales_user_id'];
+        $name = trim((string) ($row['display_name'] ?? ''));
+        if ($name === '') {
+            $name = trim((string) ($row['username'] ?? ''));
+        }
+        $items[] = festivals_participant_progress_row(
+            $salesUserId,
+            $name !== '' ? $name : null,
+            (int) $row['total_toman'],
+            (string) $row['updated_at'],
+            $tiers,
+            $giftsByUser[$salesUserId] ?? []
+        );
+    }
+
+    return [
+        'items' => $items,
+        'total' => $total,
+        'page' => $page,
+        'total_pages' => $pages,
+        'page_size' => $pageSize,
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function festivals_mark_tier_gift(
+    PDO $pdo,
+    int $festivalId,
+    int $salesUserId,
+    int $tierId,
+    bool $delivered,
+    int $adminId
+): array {
+    festivals_ensure_schema($pdo);
+    if ($festivalId <= 0 || $salesUserId <= 0 || $tierId <= 0) {
+        throw new InvalidArgumentException('شناسه نامعتبر است');
+    }
+
+    $tierStmt = $pdo->prepare(
+        'SELECT id, threshold_toman, benefit_title FROM festival_tiers WHERE id = ? AND festival_id = ? LIMIT 1'
+    );
+    $tierStmt->execute([$tierId, $festivalId]);
+    $tier = $tierStmt->fetch();
+    if (!$tier) {
+        throw new InvalidArgumentException('پله جشنواره یافت نشد');
+    }
+
+    $total = festivals_progress_total($pdo, $festivalId, $salesUserId);
+    $threshold = (int) $tier['threshold_toman'];
+    if ($delivered && $total < $threshold) {
+        throw new InvalidArgumentException('این نماینده هنوز به این پله نرسیده است');
+    }
+
+    if ($delivered) {
+        $now = festivals_now_utc()->format('Y-m-d H:i:s');
+        $ins = $pdo->prepare(
+            'INSERT INTO festival_tier_gifts (festival_id, sales_user_id, tier_id, delivered_at, delivered_by)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE delivered_at = VALUES(delivered_at), delivered_by = VALUES(delivered_by)'
+        );
+        $ins->execute([$festivalId, $salesUserId, $tierId, $now, $adminId > 0 ? $adminId : null]);
+    } else {
+        $del = $pdo->prepare(
+            'DELETE FROM festival_tier_gifts
+             WHERE festival_id = ? AND sales_user_id = ? AND tier_id = ?'
+        );
+        $del->execute([$festivalId, $salesUserId, $tierId]);
+    }
+
+    $gifts = [];
+    $giftStmt = $pdo->prepare(
+        'SELECT tier_id, delivered_at, delivered_by
+         FROM festival_tier_gifts
+         WHERE festival_id = ? AND sales_user_id = ?'
+    );
+    $giftStmt->execute([$festivalId, $salesUserId]);
+    foreach ($giftStmt->fetchAll() ?: [] as $gift) {
+        $gifts[(int) $gift['tier_id']] = [
+            'delivered_at' => (string) $gift['delivered_at'],
+            'delivered_by' => $gift['delivered_by'] !== null ? (int) $gift['delivered_by'] : null,
         ];
     }
 
-    return $out;
+    require_once __DIR__ . '/sales-users.php';
+    $progressStmt = $pdo->prepare(
+        'SELECT total_toman, updated_at FROM festival_sales_progress
+         WHERE festival_id = ? AND sales_user_id = ? LIMIT 1'
+    );
+    $progressStmt->execute([$festivalId, $salesUserId]);
+    $progress = $progressStmt->fetch() ?: ['total_toman' => $total, 'updated_at' => ''];
+    $name = sales_users_display_name_for_id($pdo, $salesUserId);
+
+    return festivals_participant_progress_row(
+        $salesUserId,
+        $name,
+        (int) ($progress['total_toman'] ?? $total),
+        (string) ($progress['updated_at'] ?? ''),
+        festivals_fetch_tiers($pdo, $festivalId),
+        $gifts
+    );
 }

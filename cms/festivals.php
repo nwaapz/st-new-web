@@ -10,12 +10,36 @@ $pdo = cms_pdo();
 festivals_ensure_schema($pdo);
 
 $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : -1;
+$participantsId = isset($_GET['participants']) ? (int) $_GET['participants'] : 0;
 $errors = [];
 $form = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = trim((string) ($_POST['action'] ?? 'save'));
     try {
+        if (in_array($action, ['mark_gift', 'unmark_gift'], true)) {
+            $festivalId = (int) ($_POST['festival_id'] ?? 0);
+            festivals_mark_tier_gift(
+                $pdo,
+                $festivalId,
+                (int) ($_POST['sales_user_id'] ?? 0),
+                (int) ($_POST['tier_id'] ?? 0),
+                $action === 'mark_gift',
+                cms_current_admin_id()
+            );
+            cms_flash($action === 'mark_gift' ? 'تحویل جایزه ثبت شد' : 'ثبت تحویل جایزه برداشته شد');
+            $qs = ['participants' => (string) $festivalId];
+            $backPage = max(1, (int) ($_POST['page'] ?? 1));
+            $backQ = trim((string) ($_POST['q'] ?? ''));
+            if ($backPage > 1) {
+                $qs['page'] = (string) $backPage;
+            }
+            if ($backQ !== '') {
+                $qs['q'] = $backQ;
+            }
+            cms_redirect('festivals.php?' . http_build_query($qs));
+        }
+
         if (in_array($action, ['pause', 'resume', 'end', 'archive', 'duplicate', 'delete'], true)) {
             festivals_action(
                 $pdo,
@@ -70,6 +94,106 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 cms_layout_start('جشنواره', cms_current_username(), 'shop');
+
+if ($participantsId > 0) {
+    $campaign = festivals_get($pdo, $participantsId);
+    if ($campaign === null) {
+        echo '<p class="cms-flash cms-flash--error">جشنواره یافت نشد.</p>';
+        echo '<p><a class="cms-btn cms-btn--ghost" href="festivals.php">بازگشت</a></p>';
+        cms_layout_end();
+        exit;
+    }
+    $q = trim((string) ($_GET['q'] ?? ''));
+    $page = max(1, (int) ($_GET['page'] ?? 1));
+    $list = festivals_admin_participants($pdo, $participantsId, [
+        'page' => $page,
+        'page_size' => 50,
+        'q' => $q,
+    ]);
+    $tiers = is_array($campaign['tiers'] ?? null) ? $campaign['tiers'] : [];
+    echo '<div class="cms-btn-row" style="margin-bottom:1rem">';
+    echo '<a class="cms-btn cms-btn--ghost" href="festivals.php">فهرست جشنواره‌ها</a>';
+    echo '<a class="cms-btn cms-btn--ghost" href="festivals.php?edit=' . $participantsId . '">ویرایش جشنواره</a>';
+    echo '<h1 style="margin:0">نمایندگان — ' . cms_h((string) $campaign['title']) . '</h1>';
+    echo '</div>';
+    echo '<p class="cms-muted">وضعیت: ' . cms_h((string) $campaign['status_label'])
+        . ' — حجم خرید پرداخت‌شده هر نماینده، پله‌های بازشده، و تحویل جایزه.</p>';
+    echo '<form method="get" class="cms-btn-row" style="margin-bottom:1rem;flex-wrap:wrap">';
+    echo '<input type="hidden" name="participants" value="' . $participantsId . '">';
+    echo '<input class="cms-input" name="q" placeholder="نام یا نام کاربری" value="' . cms_h($q) . '">';
+    echo '<button class="cms-btn" type="submit">جستجو</button>';
+    echo '</form>';
+    echo '<p class="cms-muted">' . cms_h(cms_to_persian_digits((string) $list['total'])) . ' نماینده</p>';
+    if ($list['items'] === []) {
+        echo '<p class="cms-muted">هنوز نماینده‌ای در این جشنواره حجم خرید ندارد.</p>';
+    } else {
+        echo '<div style="overflow:auto"><table class="cms-table"><thead><tr>';
+        echo '<th>نماینده</th><th>حجم خرید</th><th>آخرین پله</th><th>تا پله بعد</th>';
+        foreach ($tiers as $tier) {
+            echo '<th>' . cms_h((string) $tier['benefit_title'])
+                . '<div class="cms-muted">' . cms_h((string) $tier['threshold_text']) . '</div></th>';
+        }
+        echo '</tr></thead><tbody>';
+        foreach ($list['items'] as $row) {
+            echo '<tr>';
+            $displayName = trim((string) ($row['sales_user_name'] ?? ''));
+            echo '<td>' . cms_h($displayName !== '' ? $displayName : ('#' . (int) $row['sales_user_id'])) . '</td>';
+            echo '<td>' . cms_h((string) $row['total_text']) . '</td>';
+            echo '<td>' . cms_h((string) ($row['highest_tier_title'] ?? '—')) . '</td>';
+            echo '<td>' . cms_h((string) ($row['remaining_to_next_text'] ?? 'تمام پله‌ها')) . '</td>';
+            $tierStates = is_array($row['tiers'] ?? null) ? $row['tiers'] : [];
+            foreach ($tierStates as $state) {
+                echo '<td>';
+                if (empty($state['unlocked'])) {
+                    echo '<span class="cms-muted">هنوز نرسیده</span>';
+                } elseif (!empty($state['delivered'])) {
+                    echo '<div>تحویل شد</div>';
+                    if (!empty($state['delivered_at_jalali'])) {
+                        echo '<div class="cms-muted">' . cms_h((string) $state['delivered_at_jalali']) . '</div>';
+                    }
+                    echo '<form method="post" style="margin-top:.35rem">';
+                    echo '<input type="hidden" name="action" value="unmark_gift">';
+                    echo '<input type="hidden" name="festival_id" value="' . $participantsId . '">';
+                    echo '<input type="hidden" name="sales_user_id" value="' . (int) $row['sales_user_id'] . '">';
+                    echo '<input type="hidden" name="tier_id" value="' . (int) $state['tier_id'] . '">';
+                    echo '<input type="hidden" name="page" value="' . (int) $list['page'] . '">';
+                    echo '<input type="hidden" name="q" value="' . cms_h($q) . '">';
+                    echo '<button class="cms-btn cms-btn--ghost" type="submit">برداشت ثبت</button>';
+                    echo '</form>';
+                } else {
+                    echo '<div>رسیده — جایزه نداده</div>';
+                    echo '<form method="post" style="margin-top:.35rem">';
+                    echo '<input type="hidden" name="action" value="mark_gift">';
+                    echo '<input type="hidden" name="festival_id" value="' . $participantsId . '">';
+                    echo '<input type="hidden" name="sales_user_id" value="' . (int) $row['sales_user_id'] . '">';
+                    echo '<input type="hidden" name="tier_id" value="' . (int) $state['tier_id'] . '">';
+                    echo '<input type="hidden" name="page" value="' . (int) $list['page'] . '">';
+                    echo '<input type="hidden" name="q" value="' . cms_h($q) . '">';
+                    echo '<button class="cms-btn" type="submit">ثبت تحویل جایزه</button>';
+                    echo '</form>';
+                }
+                echo '</td>';
+            }
+            echo '</tr>';
+        }
+        echo '</tbody></table></div>';
+        if ((int) $list['total_pages'] > 1) {
+            echo '<p class="cms-btn-row">';
+            for ($i = 1; $i <= (int) $list['total_pages']; $i++) {
+                $qs = ['participants' => (string) $participantsId, 'page' => (string) $i];
+                if ($q !== '') {
+                    $qs['q'] = $q;
+                }
+                $cls = $i === (int) $list['page'] ? 'cms-btn' : 'cms-btn cms-btn--ghost';
+                echo '<a class="' . $cls . '" href="festivals.php?' . cms_h(http_build_query($qs)) . '">'
+                    . cms_h(cms_to_persian_digits((string) $i)) . '</a>';
+            }
+            echo '</p>';
+        }
+    }
+    cms_layout_end();
+    exit;
+}
 
 if ($editId >= 0) {
     $campaign = $editId > 0 ? festivals_get($pdo, $editId) : null;
@@ -145,16 +269,24 @@ if ($editId >= 0) {
     echo '</div></form>';
 
     if ($editId > 0 && is_array($campaign)) {
-        $participants = festivals_admin_participants($pdo, (int) $campaign['id'], 20);
-        if ($participants !== []) {
-            echo '<h2 style="margin-top:1.5rem">پیشرفت نمایندگان (۲۰ نفر اول)</h2>';
-            echo '<table class="cms-table"><thead><tr><th>نماینده</th><th>حجم خرید</th><th>به‌روزرسانی</th></tr></thead><tbody>';
-            foreach ($participants as $row) {
-                echo '<tr><td>' . cms_h((string) ($row['sales_user_name'] ?? ('#' . $row['sales_user_id']))) . '</td>';
+        $preview = festivals_admin_participants($pdo, (int) $campaign['id'], ['page' => 1, 'page_size' => 10]);
+        echo '<h2 style="margin-top:1.5rem">پیشرفت نمایندگان</h2>';
+        echo '<p><a class="cms-btn" href="festivals.php?participants=' . (int) $campaign['id'] . '">داشبورد نمایندگان و تحویل جایزه</a></p>';
+        if ($preview['items'] !== []) {
+            echo '<table class="cms-table"><thead><tr><th>نماینده</th><th>حجم خرید</th><th>آخرین پله</th><th>به‌روزرسانی</th></tr></thead><tbody>';
+            foreach ($preview['items'] as $row) {
+                $displayName = trim((string) ($row['sales_user_name'] ?? ''));
+                echo '<tr><td>' . cms_h($displayName !== '' ? $displayName : ('#' . (int) $row['sales_user_id'])) . '</td>';
                 echo '<td>' . cms_h((string) $row['total_text']) . '</td>';
-                echo '<td>' . cms_h(cms_jalali_format_datetime((string) $row['updated_at'])) . '</td></tr>';
+                echo '<td>' . cms_h((string) ($row['highest_tier_title'] ?? '—')) . '</td>';
+                echo '<td>' . cms_h((string) ($row['updated_at_jalali'] ?? '')) . '</td></tr>';
             }
             echo '</tbody></table>';
+            if ((int) $preview['total'] > 10) {
+                echo '<p class="cms-muted">و ' . cms_h(cms_to_persian_digits((string) ((int) $preview['total'] - 10))) . ' نماینده دیگر</p>';
+            }
+        } else {
+            echo '<p class="cms-muted">هنوز نماینده‌ای حجم خرید ندارد.</p>';
         }
 
         echo '<form method="post" class="cms-btn-row" style="margin-top:1rem">';
@@ -249,7 +381,10 @@ if ($list['items'] === []) {
         echo '<td>' . cms_h((string) $item['status_label']) . '</td>';
         echo '<td>' . cms_h((string) $item['starts_at_jalali']) . ' — ' . cms_h((string) $item['ends_at_jalali']) . '</td>';
         echo '<td>' . (int) ($item['tier_count'] ?? 0) . '</td>';
-        echo '<td><a class="cms-btn cms-btn--ghost" href="festivals.php?edit=' . (int) $item['id'] . '">ویرایش</a></td>';
+        echo '<td><div class="cms-btn-row" style="gap:.35rem">';
+        echo '<a class="cms-btn cms-btn--ghost" href="festivals.php?edit=' . (int) $item['id'] . '">ویرایش</a>';
+        echo '<a class="cms-btn cms-btn--ghost" href="festivals.php?participants=' . (int) $item['id'] . '">نمایندگان</a>';
+        echo '</div></td>';
         echo '</tr>';
     }
     echo '</tbody></table>';
