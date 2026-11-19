@@ -179,9 +179,9 @@ if ($editId >= 0) {
     echo '<textarea class="cms-input" name="description" rows="3">' . cms_h($value('description')) . '</textarea></label>';
     cms_image_field('banner_image', 'بنر (اختیاری)', $bannerValue);
     echo '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem">';
-    echo '<label class="cms-field"><span class="cms-label">شروع (شمسی)</span><input class="cms-input" name="start_date" placeholder="1404/07/23" value="' . cms_h($value('start_date')) . '" required></label>';
+    echo '<label class="cms-field"><span class="cms-label">شروع (شمسی)</span><input class="cms-input cms-jalali-date" name="start_date" placeholder="1404/07/23" autocomplete="off" value="' . cms_h($value('start_date')) . '" required></label>';
     echo '<label class="cms-field"><span class="cms-label">ساعت شروع</span><input class="cms-input" name="start_time" placeholder="09:00" value="' . cms_h($value('start_time')) . '" required></label>';
-    echo '<label class="cms-field"><span class="cms-label">پایان (شمسی)</span><input class="cms-input" name="end_date" placeholder="1404/07/24" value="' . cms_h($value('end_date')) . '" required></label>';
+    echo '<label class="cms-field"><span class="cms-label">پایان (شمسی)</span><input class="cms-input cms-jalali-date" name="end_date" placeholder="1404/07/24" autocomplete="off" value="' . cms_h($value('end_date')) . '" required></label>';
     echo '<label class="cms-field"><span class="cms-label">ساعت پایان</span><input class="cms-input" name="end_time" placeholder="21:00" value="' . cms_h($value('end_time')) . '" required></label>';
     echo '<label class="cms-field"><span class="cms-label">اولویت نمایش</span><input class="cms-input" type="number" name="display_priority" value="' . cms_h($value('display_priority', '0')) . '"></label>';
     echo '</div>';
@@ -332,6 +332,7 @@ document.getElementById('flash-deal-form').addEventListener('submit', () => sync
 sync();
 JS;
     echo '</script>';
+    echo '<script src="assets/cms-jalali-datepicker.js?v=1"></script>';
     cms_layout_end();
     exit;
 }
