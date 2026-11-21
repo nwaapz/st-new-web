@@ -1518,6 +1518,157 @@ function price_sheet_save_frames(PDO $pdo, array $postedFrames): array
 }
 
 /**
+ * @param array{id?:int,visual_id?:string,name?:string,price_text?:string,pack_size?:int|string|null,delete?:bool|string} $input
+ * @return array{ok:bool,visual_id:string,action:string,message:string,row_id:int,error?:string}
+ */
+function price_sheet_save_one_row(PDO $pdo, int $categoryId, array $input): array
+{
+    price_sheet_ensure_schema($pdo);
+    cms_ensure_product_categories_schema($pdo);
+
+    $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
+    $rowId = (int) ($input['id'] ?? 0);
+
+    try {
+        if ($categoryId <= 0) {
+            throw new RuntimeException('دسته انتخاب نشده است');
+        }
+
+        $catStmt = $pdo->prepare('SELECT id FROM categories WHERE id = ? LIMIT 1');
+        $catStmt->execute([$categoryId]);
+        if (!$catStmt->fetch()) {
+            throw new RuntimeException('دسته یافت نشد');
+        }
+
+        if (!empty($input['delete'])) {
+            if ($rowId <= 0) {
+                return [
+                    'ok' => true,
+                    'visual_id' => $visualId,
+                    'action' => 'deleted',
+                    'message' => 'ردیف جدید حذف شد',
+                    'row_id' => 0,
+                ];
+            }
+
+            $storedVisualId = price_sheet_visual_id_for_sheet_row($pdo, $rowId, $categoryId);
+            if ($storedVisualId !== '') {
+                $visualId = $storedVisualId;
+            }
+
+            $deleteStmt = $pdo->prepare('DELETE FROM price_sheet_rows WHERE id = ? AND category_id = ?');
+            $deleteStmt->execute([$rowId, $categoryId]);
+            if ($deleteStmt->rowCount() > 0 && $visualId !== '') {
+                price_sheet_unpublish_catalog_by_visual_id($pdo, $visualId);
+            }
+            price_sheet_touch_draft_updated($pdo);
+
+            return [
+                'ok' => true,
+                'visual_id' => $visualId,
+                'action' => 'deleted',
+                'message' => 'حذف شد',
+                'row_id' => $rowId,
+            ];
+        }
+
+        $fields = price_sheet_resolve_row_fields($input);
+        $visualId = $fields['visual_id'];
+        $name = $fields['name'];
+        $warrantyText = $fields['warranty_text'];
+        $priceText = $fields['price_text'];
+        $packSize = $fields['pack_size'];
+        $stockQty = $fields['stock_qty'];
+
+        if ($visualId === '' && $priceText === '' && $name === '') {
+            return [
+                'ok' => true,
+                'visual_id' => '',
+                'action' => 'skipped',
+                'message' => 'ردیف خالی نادیده گرفته شد',
+                'row_id' => $rowId,
+            ];
+        }
+        if ($visualId === '') {
+            throw new RuntimeException('کد کالا نمی‌تواند خالی باشد');
+        }
+        if ($priceText === '') {
+            throw new RuntimeException('قیمت برای کد ' . $visualId . ' خالی است');
+        }
+
+        $catalogByVisual = price_sheet_load_catalog_meta_by_visual_ids($pdo, [$visualId]);
+        $catalogMeta = $catalogByVisual[$visualId] ?? null;
+        $modelName = price_sheet_clean_cell_value((string) ($catalogMeta['model_name'] ?? ''));
+        $targetCategoryId = price_sheet_resolve_catalog_category_id($pdo, $visualId) ?? $categoryId;
+
+        $sortOrder = 0;
+        if ($rowId > 0) {
+            $sortStmt = $pdo->prepare('SELECT sort_order FROM price_sheet_rows WHERE id = ? LIMIT 1');
+            $sortStmt->execute([$rowId]);
+            $existingSort = $sortStmt->fetchColumn();
+            if ($existingSort === false) {
+                $rowId = 0;
+            } else {
+                $sortOrder = (int) $existingSort;
+            }
+        }
+        if ($rowId <= 0) {
+            $maxSortStmt = $pdo->prepare(
+                'SELECT COALESCE(MAX(sort_order), -1) FROM price_sheet_rows WHERE category_id = ?'
+            );
+            $maxSortStmt->execute([$targetCategoryId]);
+            $sortOrder = (int) $maxSortStmt->fetchColumn() + 1;
+        }
+
+        price_sheet_persist_draft_row(
+            $pdo,
+            $categoryId,
+            $rowId,
+            $targetCategoryId,
+            [
+                'visual_id' => $visualId,
+                'name' => $name,
+                'model_name' => $modelName,
+                'warranty_text' => $warrantyText,
+                'price_text' => $priceText,
+                'pack_size' => $packSize,
+                'stock_qty' => $stockQty,
+            ],
+            $sortOrder
+        );
+
+        price_sheet_push_row_to_catalog($pdo, [
+            'visual_id' => $visualId,
+            'name' => $name,
+            'price_text' => $priceText,
+            'pack_size' => $packSize,
+            'warranty_text' => $warrantyText,
+            'stock_qty' => $stockQty,
+            'category_id' => $targetCategoryId,
+        ], 1);
+
+        price_sheet_touch_draft_updated($pdo);
+
+        return [
+            'ok' => true,
+            'visual_id' => $visualId,
+            'action' => 'saved',
+            'message' => 'ذخیره شد',
+            'row_id' => $rowId,
+        ];
+    } catch (Throwable $e) {
+        return [
+            'ok' => false,
+            'visual_id' => $visualId,
+            'action' => '',
+            'message' => $e->getMessage(),
+            'row_id' => $rowId,
+            'error' => $e->getMessage(),
+        ];
+    }
+}
+
+/**
  * @return list<array{
  *   category_id:int,
  *   category_name:string,

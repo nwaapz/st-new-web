@@ -89,6 +89,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $postFromWarehouse = !empty($_POST['from_warehouse']);
 
     try {
+        if ($action === 'save_draft_row') {
+            $rowInput = [
+                'id' => (int) ($_POST['id'] ?? 0),
+                'visual_id' => (string) ($_POST['visual_id'] ?? ''),
+                'name' => (string) ($_POST['name'] ?? ''),
+                'warranty_text' => (string) ($_POST['warranty_text'] ?? ''),
+                'pack_size' => (string) ($_POST['pack_size'] ?? ''),
+                'price_text' => (string) ($_POST['price_text'] ?? ''),
+                'pack_price_text' => (string) ($_POST['pack_price_text'] ?? ''),
+                'stock_qty' => (string) ($_POST['stock_qty'] ?? ''),
+                'delete' => !empty($_POST['delete']),
+            ];
+            $result = price_sheet_save_one_row($pdo, $postCategoryId, $rowInput);
+            price_sheet_json_exit($result, !empty($result['ok']) ? 200 : 400);
+        }
+
+        if ($action === 'save_draft_summary') {
+            $saved = max(0, (int) ($_POST['saved'] ?? 0));
+            $failed = max(0, (int) ($_POST['failed'] ?? 0));
+            $deleted = max(0, (int) ($_POST['deleted'] ?? 0));
+            cms_admin_audit($pdo, 'price_sheet.save', [
+                'entity_type' => 'price_sheet',
+                'summary' => cms_current_username() . ' — ذخیره پیش‌نویس لیست قیمت (' . $saved . ' ردیف)',
+                'detail' => [
+                    'saved' => $saved,
+                    'failed' => $failed,
+                    'deleted' => $deleted,
+                ],
+            ]);
+            price_sheet_json_exit([
+                'ok' => true,
+                'saved' => $saved,
+                'failed' => $failed,
+                'deleted' => $deleted,
+                'message' => sprintf(
+                    'پیش‌نویس ذخیره شد — %s ردیف',
+                    cms_to_persian_digits((string) $saved)
+                ),
+                'redirect' => price_sheet_page_url($postFromWarehouse),
+            ]);
+        }
+
         if ($action === 'save_draft_all') {
             $postedFrames = is_array($_POST['frames'] ?? null) ? $_POST['frames'] : [];
             $result = price_sheet_save_frames($pdo, $postedFrames);
@@ -196,10 +238,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_redirect(price_sheet_page_url($postFromWarehouse));
         }
     } catch (Throwable $e) {
-        if ($action === 'save_draft_all' && price_sheet_wants_json()) {
+        if (in_array($action, ['save_draft_all', 'save_draft_row', 'save_draft_summary'], true)
+            && price_sheet_wants_json()) {
             price_sheet_json_exit([
                 'ok' => false,
                 'error' => $e->getMessage(),
+                'message' => $e->getMessage(),
             ], 400);
         }
         cms_flash($e->getMessage(), 'error');
@@ -222,6 +266,9 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       </div>
       <div id="price-sheet-save-body">
         <p id="price-sheet-save-now" style="margin:0 0 .75rem;font-weight:700"></p>
+        <div class="cms-price-sheet__save-progress" id="price-sheet-save-progress-wrap" hidden>
+          <progress id="price-sheet-save-progress" max="1" value="0"></progress>
+        </div>
         <ol id="price-sheet-save-log" class="cms-price-sheet__save-log"></ol>
       </div>
       <div class="cms-btn-row" id="price-sheet-save-actions" hidden>
@@ -699,6 +746,64 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     bindDeleteRow(row);
   }
 
+  function rowInput(row, field) {
+    return row.querySelector('input[name*="[' + field + ']"]');
+  }
+
+  function rowInputValue(row, field) {
+    var el = rowInput(row, field);
+    return el ? String(el.value || '') : '';
+  }
+
+  function snapshotRow(row) {
+    var del = rowInput(row, 'delete');
+    row.dataset.origVisual = rowInputValue(row, 'visual_id');
+    row.dataset.origName = rowInputValue(row, 'name');
+    row.dataset.origWarranty = rowInputValue(row, 'warranty_text');
+    row.dataset.origPack = rowInputValue(row, 'pack_size');
+    row.dataset.origPrice = rowInputValue(row, 'price_text');
+    row.dataset.origStock = rowInputValue(row, 'stock_qty');
+    row.dataset.origDelete = del && del.checked ? '1' : '0';
+  }
+
+  function isRowDirty(row) {
+    var del = rowInput(row, 'delete');
+    if (del && del.checked) return true;
+    if (parseInt(rowInputValue(row, 'id'), 10) === 0) return true;
+    return rowInputValue(row, 'visual_id') !== (row.dataset.origVisual || '')
+      || rowInputValue(row, 'name') !== (row.dataset.origName || '')
+      || rowInputValue(row, 'warranty_text') !== (row.dataset.origWarranty || '')
+      || rowInputValue(row, 'pack_size') !== (row.dataset.origPack || '')
+      || rowInputValue(row, 'price_text') !== (row.dataset.origPrice || '')
+      || rowInputValue(row, 'stock_qty') !== (row.dataset.origStock || '');
+  }
+
+  function collectDirtyRows() {
+    var out = [];
+    document.querySelectorAll('.cms-price-sheet__rows tr').forEach(function (row) {
+      if (!isRowDirty(row)) return;
+      var tbody = row.closest('.cms-price-sheet__rows');
+      var categoryId = tbody ? parseInt(tbody.getAttribute('data-category-id') || '0', 10) : 0;
+      var del = rowInput(row, 'delete');
+      out.push({
+        categoryId: categoryId,
+        visualId: rowInputValue(row, 'visual_id'),
+        payload: {
+          id: rowInputValue(row, 'id'),
+          visual_id: rowInputValue(row, 'visual_id'),
+          name: rowInputValue(row, 'name'),
+          warranty_text: rowInputValue(row, 'warranty_text'),
+          pack_size: rowInputValue(row, 'pack_size'),
+          price_text: rowInputValue(row, 'price_text'),
+          pack_price_text: rowInputValue(row, 'pack_price_text'),
+          stock_qty: rowInputValue(row, 'stock_qty'),
+          delete: del && del.checked ? '1' : ''
+        }
+      });
+    });
+    return out;
+  }
+
   function setRowDeleteState(row, checked) {
     if (checked) {
       row.classList.add('cms-price-sheet__row--delete');
@@ -726,6 +831,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   document.querySelectorAll('.cms-price-sheet__rows tr').forEach(function (row) {
     bindRow(row);
     updatePackPrice(row, true);
+    snapshotRow(row);
   });
 
   var highlightId = <?= json_encode($highlightVisualId, JSON_UNESCAPED_UNICODE) ?>;
@@ -787,6 +893,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           '</button></div></td>';
       tbody.appendChild(tr);
       bindRow(tr);
+      snapshotRow(tr);
       var firstInput = tr.querySelector('input[name*="[visual_id]"]');
       if (firstInput) firstInput.focus();
     });
@@ -798,6 +905,8 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
   var saveModalTitle = document.getElementById('price-sheet-save-title');
   var saveNowEl = document.getElementById('price-sheet-save-now');
   var saveLogEl = document.getElementById('price-sheet-save-log');
+  var saveProgressWrap = document.getElementById('price-sheet-save-progress-wrap');
+  var saveProgressEl = document.getElementById('price-sheet-save-progress');
   var saveModalActions = document.getElementById('price-sheet-save-actions');
   var saveModalDismiss = document.getElementById('price-sheet-save-dismiss');
   var saveInFlight = false;
@@ -840,9 +949,10 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     if (saveModalTitle && !saveFailed && !saveSucceeded) saveModalTitle.textContent = text;
   }
 
-  function appendSaveLog(text) {
+  function appendSaveLog(text, className) {
     if (!saveLogEl) return;
     var li = document.createElement('li');
+    if (className) li.className = className;
     var time = document.createElement('time');
     time.textContent = clockNow();
     li.appendChild(time);
@@ -878,6 +988,11 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     document.body.style.overflow = 'hidden';
     if (saveModalActions) saveModalActions.hidden = true;
     if (saveLogEl) saveLogEl.textContent = '';
+    if (saveProgressWrap) saveProgressWrap.hidden = true;
+    if (saveProgressEl) {
+      saveProgressEl.max = 1;
+      saveProgressEl.value = 0;
+    }
     if (saveModalTitle) {
       saveModalTitle.classList.remove('cms-ok');
       saveModalTitle.textContent = 'در حال ذخیره';
@@ -965,6 +1080,148 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     }
   });
 
+  function warehouseFlag() {
+    return form && form.querySelector('[name="from_warehouse"]') ? '1' : '';
+  }
+
+  function postFormFields(fields) {
+    var params = new URLSearchParams();
+    Object.keys(fields).forEach(function (key) {
+      if (fields[key] === '' || fields[key] === null || fields[key] === undefined) {
+        if (key === 'delete') return;
+      }
+      params.set(key, String(fields[key]));
+    });
+    return fetch(window.location.href, {
+      method: 'POST',
+      body: params.toString(),
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    }).then(function (res) {
+      return res.text().then(function (raw) {
+        var data = null;
+        try {
+          data = raw ? JSON.parse(raw) : null;
+        } catch (e) {
+          data = null;
+        }
+        return { res: res, data: data, raw: raw || '' };
+      });
+    });
+  }
+
+  function finishRowSave(saved, failed, deleted) {
+    if (saved + deleted + failed === 0) {
+      failSave('تغییری برای ذخیره نیست');
+      return Promise.resolve();
+    }
+    var summary = {
+      saved: saved,
+      failed: failed,
+      deleted: deleted,
+      message: 'پیش‌نویس ذخیره شد — ' + faNum(saved) + ' ردیف',
+      redirect: window.location.href
+    };
+    return postFormFields({
+      action: 'save_draft_summary',
+      ajax: '1',
+      from_warehouse: warehouseFlag(),
+      saved: saved,
+      failed: failed,
+      deleted: deleted
+    }).then(function (result) {
+      if (result.data && result.data.redirect) {
+        summary.redirect = result.data.redirect;
+      }
+      if (result.data && result.data.message) {
+        summary.message = result.data.message;
+      }
+    }).catch(function () {
+      return null;
+    }).then(function () {
+      if (saved + deleted > 0) {
+        if (failed > 0) {
+          summary.message += ' — ناموفق: ' + faNum(failed);
+        }
+        succeedSave(summary);
+        return;
+      }
+      failSave(failed > 0 ? 'هیچ ردیفی ذخیره نشد' : 'تغییری برای ذخیره نیست');
+    });
+  }
+
+  function saveDirtyRows(rows) {
+    var total = rows.length;
+    var index = 0;
+    var saved = 0;
+    var failed = 0;
+    var deleted = 0;
+    if (saveProgressWrap) saveProgressWrap.hidden = false;
+    if (saveProgressEl) {
+      saveProgressEl.max = total;
+      saveProgressEl.value = 0;
+    }
+
+    function next() {
+      if (index >= total) {
+        setSaveNow('در حال ثبت خلاصه ذخیره');
+        return finishRowSave(saved, failed, deleted);
+      }
+      var item = rows[index];
+      var n = index + 1;
+      var codeLabel = item.visualId !== '' ? faNum(item.visualId) : '—';
+      setSaveNow('در حال به‌روزرسانی کد ' + codeLabel + ' — ' + faNum(n) + ' از ' + faNum(total));
+      var fields = {
+        action: 'save_draft_row',
+        ajax: '1',
+        category_id: item.categoryId,
+        from_warehouse: warehouseFlag(),
+        id: item.payload.id,
+        visual_id: item.payload.visual_id,
+        name: item.payload.name,
+        warranty_text: item.payload.warranty_text,
+        pack_size: item.payload.pack_size,
+        price_text: item.payload.price_text,
+        pack_price_text: item.payload.pack_price_text,
+        stock_qty: item.payload.stock_qty
+      };
+      if (item.payload.delete === '1') {
+        fields.delete = '1';
+      }
+      return postFormFields(fields).then(function (result) {
+        var data = result.data || {};
+        var ok = !!data.ok;
+        var visual = data.visual_id || item.visualId || '—';
+        var message = data.message || data.error || (ok ? 'ذخیره شد' : 'ناموفق');
+        appendSaveLog(faNum(visual) + ' — ' + message, ok ? 'is-ok' : 'is-error');
+        if (ok) {
+          if (data.action === 'deleted') deleted++;
+          else if (data.action === 'saved') saved++;
+        } else {
+          failed++;
+        }
+        index++;
+        if (saveProgressEl) saveProgressEl.value = index;
+        return next();
+      }).catch(function (err) {
+        failed++;
+        appendSaveLog(
+          faNum(item.visualId || '—') + ' — ' + (err && err.message ? err.message : String(err || 'خطا')),
+          'is-error'
+        );
+        index++;
+        if (saveProgressEl) saveProgressEl.value = index;
+        return next();
+      });
+    }
+
+    return next();
+  }
+
   if (form) {
     form.addEventListener('submit', function (event) {
       event.preventDefault();
@@ -976,63 +1233,16 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
       }
       openSaveModal();
 
-      var rowCount = form.querySelectorAll('.cms-price-sheet__rows tr').length;
-      var categoryCount = form.querySelectorAll('.cms-price-sheet__frame').length;
-      var deleteCount = form.querySelectorAll('input[name*="[delete]"]:checked').length;
+      var dirty = collectDirtyRows();
       appendSaveLog(
-        'فرم خوانده شد: ' + faNum(rowCount) + ' ردیف در ' + faNum(categoryCount) + ' دسته' +
-        (deleteCount > 0 ? ' — ' + faNum(deleteCount) + ' ردیف برای حذف' : '')
+        'تغییرات: ' + faNum(dirty.length) + ' ردیف از ' +
+        faNum(form.querySelectorAll('.cms-price-sheet__rows tr').length)
       );
-
-      var params = new URLSearchParams(new FormData(form));
-      params.set('ajax', '1');
-      var payload = params.toString();
-      appendSaveLog('بدنه درخواست آماده شد: ' + formatBytes(payload.length));
-      setSaveNow('در حال ارسال به سرور');
-      appendSaveLog('POST به ' + window.location.pathname);
-
-      startSaveWaitTimer();
-      fetch(window.location.href, {
-        method: 'POST',
-        body: payload,
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        redirect: 'follow'
-      }).then(function (res) {
-        stopSaveWaitTimer();
-        var waitSec = Math.max(0, Math.floor((Date.now() - saveWaitStarted) / 1000));
-        appendSaveLog('پاسخ HTTP ' + faNum(res.status) + ' بعد از ' + faNum(waitSec) + ' ثانیه');
-        setSaveNow('در حال خواندن پاسخ سرور');
-        return res.text().then(function (raw) {
-          return { res: res, raw: raw };
-        });
-      }).then(function (payloadRes) {
-        var res = payloadRes.res;
-        var raw = payloadRes.raw || '';
-        var data = null;
-        try {
-          data = raw ? JSON.parse(raw) : null;
-        } catch (e) {
-          data = null;
-        }
-        if (!data) {
-          throw new Error(
-            res.ok
-              ? 'پاسخ سرور JSON نبود'
-              : 'HTTP ' + res.status + (raw ? ' — ' + raw.replace(/\s+/g, ' ').slice(0, 120) : '')
-          );
-        }
-        if (!data.ok) {
-          throw new Error(data.error || ('HTTP ' + res.status));
-        }
-        succeedSave(data);
-      }).catch(function (err) {
-        failSave(err && err.message ? err.message : String(err || 'خطای ناشناخته'));
-      });
+      if (dirty.length === 0) {
+        failSave('تغییری برای ذخیره نیست');
+        return;
+      }
+      saveDirtyRows(dirty);
     });
   }
 })();

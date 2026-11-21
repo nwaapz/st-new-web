@@ -3222,6 +3222,16 @@ a.cms-kpi:hover {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28);
 }
 
+.cms-price-sheet__save-progress {
+  margin: 0 0 0.85rem;
+}
+
+.cms-price-sheet__save-progress progress {
+  display: block;
+  width: 100%;
+  height: 0.65rem;
+}
+
 .cms-price-sheet__save-log {
   margin: 0;
   padding-right: 1.15rem;
@@ -3229,6 +3239,14 @@ a.cms-kpi:hover {
   line-height: 1.55;
   max-height: min(46vh, 18rem);
   overflow: auto;
+}
+
+.cms-price-sheet__save-log li.is-ok {
+  color: var(--cms-ok, #15803d);
+}
+
+.cms-price-sheet__save-log li.is-error {
+  color: var(--cms-danger, #b91c1c);
 }
 
 .cms-price-sheet__save-log li {
