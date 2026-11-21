@@ -3222,6 +3222,11 @@ a.cms-kpi:hover {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28);
 }
 
+.cms-price-sheet__save-panel {
+  width: min(1100px, 96vw);
+  max-height: min(92vh, 900px);
+}
+
 .cms-price-sheet__save-progress {
   margin: 0 0 0.85rem;
 }
@@ -3237,8 +3242,9 @@ a.cms-kpi:hover {
   padding-right: 1.15rem;
   font-size: 0.9rem;
   line-height: 1.55;
-  max-height: min(46vh, 18rem);
+  max-height: min(68vh, 36rem);
   overflow: auto;
+  overflow-wrap: anywhere;
 }
 
 .cms-price-sheet__save-log li.is-ok {

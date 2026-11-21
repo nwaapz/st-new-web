@@ -260,7 +260,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 ?>
 <div class="price-sheet-page cms-price-sheet<?= $fromWarehouse ? ' cms-price-sheet--warehouse' : '' ?>">
   <div id="price-sheet-save-modal" class="cms-confirm-modal" hidden>
-    <div class="cms-confirm-modal__panel" role="dialog" aria-modal="true" aria-labelledby="price-sheet-save-title" style="width:min(640px,100%)">
+    <div class="cms-confirm-modal__panel cms-price-sheet__save-panel" role="dialog" aria-modal="true" aria-labelledby="price-sheet-save-title">
       <div class="cms-confirm-modal__head">
         <strong id="price-sheet-save-title">در حال ذخیره</strong>
       </div>
