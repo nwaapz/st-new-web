@@ -20,18 +20,13 @@ cms_layout_start('امور مشتریان', cms_current_username(), 'customers')
 ?>
 <h1 style="margin-top:0">امور مشتریان</h1>
 <p class="cms-muted">
-  سفارش‌ها، چک‌ها، پیام مشتریان و نمایندگان، تیکت شعب و کاربران اپ فروش در این بخش است.
+  سفارش‌ها، پیام مشتریان و نمایندگان، تیکت شعب و کاربران اپ فروش در این بخش است.
 </p>
 <div class="cms-grid-comm cms-grid-2">
   <a class="cms-panel cms-hub-card" href="orders.php">
     <h2>سفارش‌ها</h2>
     <p style="font-size:1.6rem;margin:0;font-weight:700"><?= (int) $counts['new_orders'] ?></p>
     <p class="cms-muted">سفارش‌های جدید در انتظار بررسی انبار</p>
-  </a>
-  <a class="cms-panel cms-hub-card" href="cheques.php">
-    <h2>چک‌ها</h2>
-    <p style="font-size:1rem;margin:0;font-weight:700">دفتر چک سفارش‌ها</p>
-    <p class="cms-muted">سررسید، وصول، برگشت و وضعیت گردش چک</p>
   </a>
   <a class="cms-panel cms-hub-card" href="price-sheet.php?from=warehouse">
     <h2>لیست قیمت</h2>

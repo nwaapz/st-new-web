@@ -8,27 +8,6 @@ require_once __DIR__ . '/lib/price-sheet.php';
 
 cms_require_login();
 cms_session_start();
-
-function price_sheet_wants_json(): bool
-{
-    if ((string) ($_POST['ajax'] ?? '') === '1') {
-        return true;
-    }
-
-    $accept = (string) ($_SERVER['HTTP_ACCEPT'] ?? '');
-
-    return str_contains($accept, 'application/json');
-}
-
-function price_sheet_json_exit(array $payload, int $status = 200): void
-{
-    http_response_code($status);
-    header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-store');
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
 $pdo = cms_pdo();
 cms_ensure_product_categories_schema($pdo);
 price_sheet_ensure_schema($pdo);
@@ -89,48 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $postFromWarehouse = !empty($_POST['from_warehouse']);
 
     try {
-        if ($action === 'save_draft_row') {
-            $rowInput = [
-                'id' => (int) ($_POST['id'] ?? 0),
-                'visual_id' => (string) ($_POST['visual_id'] ?? ''),
-                'name' => (string) ($_POST['name'] ?? ''),
-                'warranty_text' => (string) ($_POST['warranty_text'] ?? ''),
-                'pack_size' => (string) ($_POST['pack_size'] ?? ''),
-                'price_text' => (string) ($_POST['price_text'] ?? ''),
-                'pack_price_text' => (string) ($_POST['pack_price_text'] ?? ''),
-                'stock_qty' => (string) ($_POST['stock_qty'] ?? ''),
-                'delete' => !empty($_POST['delete']),
-            ];
-            $result = price_sheet_save_one_row($pdo, $postCategoryId, $rowInput);
-            price_sheet_json_exit($result, !empty($result['ok']) ? 200 : 400);
-        }
-
-        if ($action === 'save_draft_summary') {
-            $saved = max(0, (int) ($_POST['saved'] ?? 0));
-            $failed = max(0, (int) ($_POST['failed'] ?? 0));
-            $deleted = max(0, (int) ($_POST['deleted'] ?? 0));
-            cms_admin_audit($pdo, 'price_sheet.save', [
-                'entity_type' => 'price_sheet',
-                'summary' => cms_current_username() . ' — ذخیره پیش‌نویس لیست قیمت (' . $saved . ' ردیف)',
-                'detail' => [
-                    'saved' => $saved,
-                    'failed' => $failed,
-                    'deleted' => $deleted,
-                ],
-            ]);
-            price_sheet_json_exit([
-                'ok' => true,
-                'saved' => $saved,
-                'failed' => $failed,
-                'deleted' => $deleted,
-                'message' => sprintf(
-                    'پیش‌نویس ذخیره شد — %s ردیف',
-                    cms_to_persian_digits((string) $saved)
-                ),
-                'redirect' => price_sheet_page_url($postFromWarehouse),
-            ]);
-        }
-
         if ($action === 'save_draft_all') {
             $postedFrames = is_array($_POST['frames'] ?? null) ? $_POST['frames'] : [];
             $result = price_sheet_save_frames($pdo, $postedFrames);
@@ -139,20 +76,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'summary' => cms_current_username() . ' — ذخیره پیش‌نویس لیست قیمت (' . $result['saved'] . ' ردیف)',
                 'detail' => $result,
             ]);
-            $savedMessage = sprintf(
+            cms_flash(sprintf(
                 'پیش‌نویس ذخیره شد — %s ردیف',
                 cms_to_persian_digits((string) $result['saved'])
-            );
-            if (price_sheet_wants_json()) {
-                price_sheet_json_exit([
-                    'ok' => true,
-                    'saved' => (int) $result['saved'],
-                    'deleted' => (int) ($result['deleted'] ?? 0),
-                    'message' => $savedMessage,
-                    'redirect' => price_sheet_page_url($postFromWarehouse),
-                ]);
-            }
-            cms_flash($savedMessage);
+            ));
             cms_redirect(price_sheet_page_url($postFromWarehouse));
         }
 
@@ -238,14 +165,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cms_redirect(price_sheet_page_url($postFromWarehouse));
         }
     } catch (Throwable $e) {
-        if (in_array($action, ['save_draft_all', 'save_draft_row', 'save_draft_summary'], true)
-            && price_sheet_wants_json()) {
-            price_sheet_json_exit([
-                'ok' => false,
-                'error' => $e->getMessage(),
-                'message' => $e->getMessage(),
-            ], 400);
-        }
         cms_flash($e->getMessage(), 'error');
         cms_redirect(price_sheet_page_url($postFromWarehouse));
     }
@@ -259,24 +178,6 @@ $frames = price_sheet_list_frames($pdo);
 cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 ?>
 <div class="price-sheet-page cms-price-sheet<?= $fromWarehouse ? ' cms-price-sheet--warehouse' : '' ?>">
-  <div id="price-sheet-save-modal" class="cms-confirm-modal" hidden>
-    <div class="cms-confirm-modal__panel cms-price-sheet__save-panel" role="dialog" aria-modal="true" aria-labelledby="price-sheet-save-title">
-      <div class="cms-confirm-modal__head">
-        <strong id="price-sheet-save-title">در حال ذخیره</strong>
-      </div>
-      <div id="price-sheet-save-body">
-        <p id="price-sheet-save-now" style="margin:0 0 .75rem;font-weight:700"></p>
-        <div class="cms-price-sheet__save-progress" id="price-sheet-save-progress-wrap" hidden>
-          <progress id="price-sheet-save-progress" max="1" value="0"></progress>
-        </div>
-        <ol id="price-sheet-save-log" class="cms-price-sheet__save-log"></ol>
-      </div>
-      <div class="cms-btn-row" id="price-sheet-save-actions" hidden>
-        <button type="button" class="cms-btn cms-btn--primary" id="price-sheet-save-dismiss">Close</button>
-      </div>
-    </div>
-  </div>
-  <p id="price-sheet-save-error" class="cms-error" hidden></p>
   <header class="cms-price-sheet__intro">
     <h1 style="margin:0">لیست قیمت<?= $fromWarehouse ? ' — انبار' : '' ?></h1>
     <p class="cms-muted">
@@ -293,6 +194,15 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 
   <div class="cms-card cms-price-sheet__toolbar" style="margin-bottom:1rem">
     <div class="cms-btn-row" style="flex-wrap:wrap;gap:.5rem;align-items:center">
+      <form method="post" style="display:inline">
+        <input type="hidden" name="action" value="publish_all">
+        <?php if ($fromWarehouse): ?>
+          <input type="hidden" name="from_warehouse" value="1">
+        <?php endif; ?>
+        <button class="cms-btn cms-btn--primary" type="submit" <?= $status['draft_rows'] <= 0 ? 'disabled' : '' ?>>
+          انتشار همه
+        </button>
+      </form>
       <form method="post" style="display:inline">
         <input type="hidden" name="action" value="sync_categories">
         <?php if ($fromWarehouse): ?>
@@ -377,6 +287,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
 
       <div class="cms-btn-row" style="justify-content:space-between;align-items:center;margin-bottom:.75rem">
         <p class="cms-muted" style="margin:0">همه دسته‌ها — همان چیدمان پورتال نمایندگان</p>
+        <button class="cms-btn cms-btn--primary" type="submit">ذخیره پیش‌نویس</button>
       </div>
 
       <?php foreach ($frames as $frame): ?>
@@ -389,6 +300,15 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           <header class="cms-price-sheet__frame-head">
             <h2><?= cms_h($categoryName) ?></h2>
             <span><?= cms_h(cms_to_persian_digits((string) count($frameRows))) ?> محصول</span>
+            <button
+              class="cms-btn cms-btn--ghost cms-price-sheet__publish-cat"
+              type="submit"
+              form="price-sheet-publish-<?= $categoryId ?>"
+              style="font-size:.78rem;padding:.2rem .55rem;margin-inline-start:auto"
+              <?= $frameRows === [] ? 'disabled' : '' ?>
+            >
+              انتشار این دسته
+            </button>
           </header>
           <div class="cms-price-sheet__scroll">
             <table class="cms-price-sheet__table">
@@ -457,20 +377,7 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
                         <input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[<?= $categoryId ?>][<?= $index ?>][stock_qty]" value="<?= cms_h($stockValue) ?>" dir="ltr" inputmode="numeric">
                       <?php endif; ?>
                     </td>
-                    <td class="cms-price-sheet__delete">
-                      <div class="cms-price-sheet__delete-tools">
-                        <input type="checkbox" name="frames[<?= $categoryId ?>][<?= $index ?>][delete]" value="1">
-                        <button type="button" class="cms-price-sheet__trash" data-delete-row aria-label="حذف ردیف" title="حذف">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
-                            <path d="M10 11v6"></path>
-                            <path d="M14 11v6"></path>
-                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
+                    <td class="cms-price-sheet__delete"><input type="checkbox" name="frames[<?= $categoryId ?>][<?= $index ?>][delete]" value="1"></td>
                   </tr>
                 <?php endforeach; ?>
               </tbody>
@@ -481,7 +388,22 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           </div>
         </article>
       <?php endforeach; ?>
+
+      <div class="cms-form__actions" style="margin-top:1rem">
+        <button class="cms-btn cms-btn--primary" type="submit">ذخیره پیش‌نویس</button>
+      </div>
     </form>
+
+    <?php foreach ($frames as $frame): ?>
+      <?php $categoryId = (int) $frame['category_id']; ?>
+      <form method="post" id="price-sheet-publish-<?= $categoryId ?>" hidden>
+        <input type="hidden" name="action" value="publish_category">
+        <input type="hidden" name="category_id" value="<?= $categoryId ?>">
+        <?php if ($fromWarehouse): ?>
+          <input type="hidden" name="from_warehouse" value="1">
+        <?php endif; ?>
+      </form>
+    <?php endforeach; ?>
   <?php endif; ?>
 
   <?php if (!$fromWarehouse): ?>
@@ -743,95 +665,11 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
     }
     if (packInput) packInput.addEventListener('input', function () { updatePackPrice(row, true); });
     bindStockAdjuster(row);
-    bindDeleteRow(row);
-  }
-
-  function rowInput(row, field) {
-    return row.querySelector('input[name*="[' + field + ']"]');
-  }
-
-  function rowInputValue(row, field) {
-    var el = rowInput(row, field);
-    return el ? String(el.value || '') : '';
-  }
-
-  function snapshotRow(row) {
-    var del = rowInput(row, 'delete');
-    row.dataset.origVisual = rowInputValue(row, 'visual_id');
-    row.dataset.origName = rowInputValue(row, 'name');
-    row.dataset.origWarranty = rowInputValue(row, 'warranty_text');
-    row.dataset.origPack = rowInputValue(row, 'pack_size');
-    row.dataset.origPrice = rowInputValue(row, 'price_text');
-    row.dataset.origStock = rowInputValue(row, 'stock_qty');
-    row.dataset.origDelete = del && del.checked ? '1' : '0';
-  }
-
-  function isRowDirty(row) {
-    var del = rowInput(row, 'delete');
-    if (del && del.checked) return true;
-    if (parseInt(rowInputValue(row, 'id'), 10) === 0) return true;
-    return rowInputValue(row, 'visual_id') !== (row.dataset.origVisual || '')
-      || rowInputValue(row, 'name') !== (row.dataset.origName || '')
-      || rowInputValue(row, 'warranty_text') !== (row.dataset.origWarranty || '')
-      || rowInputValue(row, 'pack_size') !== (row.dataset.origPack || '')
-      || rowInputValue(row, 'price_text') !== (row.dataset.origPrice || '')
-      || rowInputValue(row, 'stock_qty') !== (row.dataset.origStock || '');
-  }
-
-  function collectDirtyRows() {
-    var out = [];
-    document.querySelectorAll('.cms-price-sheet__rows tr').forEach(function (row) {
-      if (!isRowDirty(row)) return;
-      var tbody = row.closest('.cms-price-sheet__rows');
-      var categoryId = tbody ? parseInt(tbody.getAttribute('data-category-id') || '0', 10) : 0;
-      var del = rowInput(row, 'delete');
-      out.push({
-        categoryId: categoryId,
-        visualId: rowInputValue(row, 'visual_id'),
-        payload: {
-          id: rowInputValue(row, 'id'),
-          visual_id: rowInputValue(row, 'visual_id'),
-          name: rowInputValue(row, 'name'),
-          warranty_text: rowInputValue(row, 'warranty_text'),
-          pack_size: rowInputValue(row, 'pack_size'),
-          price_text: rowInputValue(row, 'price_text'),
-          pack_price_text: rowInputValue(row, 'pack_price_text'),
-          stock_qty: rowInputValue(row, 'stock_qty'),
-          delete: del && del.checked ? '1' : ''
-        }
-      });
-    });
-    return out;
-  }
-
-  function setRowDeleteState(row, checked) {
-    if (checked) {
-      row.classList.add('cms-price-sheet__row--delete');
-    } else {
-      row.classList.remove('cms-price-sheet__row--delete');
-    }
-  }
-
-  function bindDeleteRow(row) {
-    var box = row.querySelector('input[name*="[delete]"]');
-    var trash = row.querySelector('[data-delete-row]');
-    if (!box) return;
-    setRowDeleteState(row, box.checked);
-    if (trash) {
-      trash.addEventListener('click', function () {
-        box.checked = true;
-        setRowDeleteState(row, true);
-      });
-    }
-    box.addEventListener('change', function () {
-      setRowDeleteState(row, box.checked);
-    });
   }
 
   document.querySelectorAll('.cms-price-sheet__rows tr').forEach(function (row) {
     bindRow(row);
     updatePackPrice(row, true);
-    snapshotRow(row);
   });
 
   var highlightId = <?= json_encode($highlightVisualId, JSON_UNESCAPED_UNICODE) ?>;
@@ -880,371 +718,13 @@ cms_layout_start('لیست قیمت', cms_current_username(), $layoutSection);
           '<input class="cms-input cms-price-sheet__input cms-price-sheet__input--num" name="frames[' + categoryId + '][' + index + '][pack_price_text]" value="" dir="ltr" data-pack-price-input>' +
         '</td>' +
         stockCellHtml(categoryId, index) +
-        '<td class="cms-price-sheet__delete"><div class="cms-price-sheet__delete-tools">' +
-          '<input type="checkbox" name="frames[' + categoryId + '][' + index + '][delete]" value="1">' +
-          '<button type="button" class="cms-price-sheet__trash" data-delete-row aria-label="حذف ردیف" title="حذف">' +
-            '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-              '<polyline points="3 6 5 6 21 6"></polyline>' +
-              '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>' +
-              '<path d="M10 11v6"></path>' +
-              '<path d="M14 11v6"></path>' +
-              '<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>' +
-            '</svg>' +
-          '</button></div></td>';
+        '<td class="cms-price-sheet__delete"><input type="checkbox" name="frames[' + categoryId + '][' + index + '][delete]" value="1"></td>';
       tbody.appendChild(tr);
       bindRow(tr);
-      snapshotRow(tr);
       var firstInput = tr.querySelector('input[name*="[visual_id]"]');
       if (firstInput) firstInput.focus();
     });
   });
-
-  var form = document.getElementById('price-sheet-form');
-  var saveErrorEl = document.getElementById('price-sheet-save-error');
-  var saveModal = document.getElementById('price-sheet-save-modal');
-  var saveModalTitle = document.getElementById('price-sheet-save-title');
-  var saveNowEl = document.getElementById('price-sheet-save-now');
-  var saveLogEl = document.getElementById('price-sheet-save-log');
-  var saveProgressWrap = document.getElementById('price-sheet-save-progress-wrap');
-  var saveProgressEl = document.getElementById('price-sheet-save-progress');
-  var saveModalActions = document.getElementById('price-sheet-save-actions');
-  var saveModalDismiss = document.getElementById('price-sheet-save-dismiss');
-  var saveInFlight = false;
-  var saveFailed = false;
-  var saveSucceeded = false;
-  var saveRedirectUrl = '';
-  var saveWaitTimer = null;
-  var saveWaitStarted = 0;
-
-  function saveButtons() {
-    return document.querySelectorAll('button[form="price-sheet-form"], #price-sheet-form button[type="submit"]');
-  }
-
-  function setSaveBusy(busy) {
-    saveInFlight = busy;
-    saveButtons().forEach(function (btn) {
-      btn.disabled = busy;
-    });
-  }
-
-  function faNum(value) {
-    return String(value).replace(/\d/g, function (d) { return persianDigits[d] || d; });
-  }
-
-  function clockNow() {
-    try {
-      return new Date().toLocaleTimeString('fa-IR', { hour12: false });
-    } catch (e) {
-      return '';
-    }
-  }
-
-  function formatBytes(n) {
-    if (n < 1024) return faNum(n) + ' بایت';
-    return faNum((n / 1024).toFixed(1)) + ' کیلوبایت';
-  }
-
-  function setSaveNow(text) {
-    if (saveNowEl) saveNowEl.textContent = text;
-    if (saveModalTitle && !saveFailed && !saveSucceeded) saveModalTitle.textContent = text;
-  }
-
-  function appendSaveLog(text, className) {
-    if (!saveLogEl) return;
-    var li = document.createElement('li');
-    if (className) li.className = className;
-    var time = document.createElement('time');
-    time.textContent = clockNow();
-    li.appendChild(time);
-    li.appendChild(document.createTextNode(text));
-    saveLogEl.appendChild(li);
-    try { li.scrollIntoView({ block: 'nearest' }); } catch (e) {}
-  }
-
-  function stopSaveWaitTimer() {
-    if (saveWaitTimer) {
-      clearInterval(saveWaitTimer);
-      saveWaitTimer = null;
-    }
-  }
-
-  function startSaveWaitTimer() {
-    stopSaveWaitTimer();
-    saveWaitStarted = Date.now();
-    function tick() {
-      var sec = Math.max(0, Math.floor((Date.now() - saveWaitStarted) / 1000));
-      setSaveNow('منتظر پاسخ سرور… ' + faNum(sec) + ' ثانیه');
-    }
-    tick();
-    saveWaitTimer = setInterval(tick, 500);
-  }
-
-  function openSaveModal() {
-    if (!saveModal) return;
-    saveFailed = false;
-    saveSucceeded = false;
-    saveRedirectUrl = '';
-    saveModal.hidden = false;
-    document.body.style.overflow = 'hidden';
-    if (saveModalActions) saveModalActions.hidden = true;
-    if (saveLogEl) saveLogEl.textContent = '';
-    if (saveProgressWrap) saveProgressWrap.hidden = true;
-    if (saveProgressEl) {
-      saveProgressEl.max = 1;
-      saveProgressEl.value = 0;
-    }
-    if (saveModalTitle) {
-      saveModalTitle.classList.remove('cms-ok');
-      saveModalTitle.textContent = 'در حال ذخیره';
-    }
-    if (saveNowEl) saveNowEl.classList.remove('cms-ok');
-    setSaveNow('در حال خواندن فرم');
-  }
-
-  function failSave(message) {
-    stopSaveWaitTimer();
-    saveFailed = true;
-    saveSucceeded = false;
-    setSaveBusy(false);
-    if (saveModalTitle) {
-      saveModalTitle.classList.remove('cms-ok');
-      saveModalTitle.textContent = 'ذخیره انجام نشد';
-    }
-    if (saveNowEl) {
-      saveNowEl.classList.remove('cms-ok');
-      saveNowEl.textContent = message;
-    }
-    appendSaveLog(message);
-    if (saveModalActions) saveModalActions.hidden = false;
-    if (saveErrorEl) {
-      saveErrorEl.hidden = false;
-      saveErrorEl.textContent = message;
-    }
-  }
-
-  function succeedSave(data) {
-    stopSaveWaitTimer();
-    saveFailed = false;
-    saveSucceeded = true;
-    saveRedirectUrl = (data && data.redirect) ? data.redirect : window.location.href;
-    setSaveBusy(false);
-    appendSaveLog(
-      ((data && data.message) ? data.message : 'ذخیره شد') +
-      (data && typeof data.deleted === 'number' && data.deleted > 0
-        ? ' — حذف: ' + faNum(data.deleted)
-        : '')
-    );
-    if (saveModalTitle) {
-      saveModalTitle.textContent = 'save successful';
-      saveModalTitle.classList.add('cms-ok');
-    }
-    if (saveNowEl) {
-      saveNowEl.textContent = 'save successful';
-      saveNowEl.classList.add('cms-ok');
-    }
-    if (saveModalActions) saveModalActions.hidden = false;
-  }
-
-  function hideSaveModal() {
-    stopSaveWaitTimer();
-    if (!saveModal) return;
-    saveModal.hidden = true;
-    saveFailed = false;
-    saveSucceeded = false;
-    saveRedirectUrl = '';
-    document.body.style.overflow = '';
-    if (saveModalTitle) saveModalTitle.classList.remove('cms-ok');
-    if (saveNowEl) saveNowEl.classList.remove('cms-ok');
-  }
-
-  function finishSaveDialog() {
-    if (saveInFlight) return;
-    if (!saveFailed && !saveSucceeded) return;
-    var shouldReload = saveSucceeded;
-    var redirect = saveRedirectUrl || window.location.href;
-    hideSaveModal();
-    if (shouldReload) {
-      window.location.assign(redirect);
-    }
-  }
-
-  if (saveModalDismiss) {
-    saveModalDismiss.addEventListener('click', function () {
-      finishSaveDialog();
-    });
-  }
-
-  document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape') {
-      finishSaveDialog();
-    }
-  });
-
-  function warehouseFlag() {
-    return form && form.querySelector('[name="from_warehouse"]') ? '1' : '';
-  }
-
-  function postFormFields(fields) {
-    var params = new URLSearchParams();
-    Object.keys(fields).forEach(function (key) {
-      if (fields[key] === '' || fields[key] === null || fields[key] === undefined) {
-        if (key === 'delete') return;
-      }
-      params.set(key, String(fields[key]));
-    });
-    return fetch(window.location.href, {
-      method: 'POST',
-      body: params.toString(),
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest'
-      }
-    }).then(function (res) {
-      return res.text().then(function (raw) {
-        var data = null;
-        try {
-          data = raw ? JSON.parse(raw) : null;
-        } catch (e) {
-          data = null;
-        }
-        return { res: res, data: data, raw: raw || '' };
-      });
-    });
-  }
-
-  function finishRowSave(saved, failed, deleted) {
-    if (saved + deleted + failed === 0) {
-      failSave('تغییری برای ذخیره نیست');
-      return Promise.resolve();
-    }
-    var summary = {
-      saved: saved,
-      failed: failed,
-      deleted: deleted,
-      message: 'پیش‌نویس ذخیره شد — ' + faNum(saved) + ' ردیف',
-      redirect: window.location.href
-    };
-    return postFormFields({
-      action: 'save_draft_summary',
-      ajax: '1',
-      from_warehouse: warehouseFlag(),
-      saved: saved,
-      failed: failed,
-      deleted: deleted
-    }).then(function (result) {
-      if (result.data && result.data.redirect) {
-        summary.redirect = result.data.redirect;
-      }
-      if (result.data && result.data.message) {
-        summary.message = result.data.message;
-      }
-    }).catch(function () {
-      return null;
-    }).then(function () {
-      if (saved + deleted > 0) {
-        if (failed > 0) {
-          summary.message += ' — ناموفق: ' + faNum(failed);
-        }
-        succeedSave(summary);
-        return;
-      }
-      failSave(failed > 0 ? 'هیچ ردیفی ذخیره نشد' : 'تغییری برای ذخیره نیست');
-    });
-  }
-
-  function saveDirtyRows(rows) {
-    var total = rows.length;
-    var index = 0;
-    var saved = 0;
-    var failed = 0;
-    var deleted = 0;
-    if (saveProgressWrap) saveProgressWrap.hidden = false;
-    if (saveProgressEl) {
-      saveProgressEl.max = total;
-      saveProgressEl.value = 0;
-    }
-
-    function next() {
-      if (index >= total) {
-        setSaveNow('در حال ثبت خلاصه ذخیره');
-        return finishRowSave(saved, failed, deleted);
-      }
-      var item = rows[index];
-      var n = index + 1;
-      var codeLabel = item.visualId !== '' ? faNum(item.visualId) : '—';
-      setSaveNow('در حال به‌روزرسانی کد ' + codeLabel + ' — ' + faNum(n) + ' از ' + faNum(total));
-      var fields = {
-        action: 'save_draft_row',
-        ajax: '1',
-        category_id: item.categoryId,
-        from_warehouse: warehouseFlag(),
-        id: item.payload.id,
-        visual_id: item.payload.visual_id,
-        name: item.payload.name,
-        warranty_text: item.payload.warranty_text,
-        pack_size: item.payload.pack_size,
-        price_text: item.payload.price_text,
-        pack_price_text: item.payload.pack_price_text,
-        stock_qty: item.payload.stock_qty
-      };
-      if (item.payload.delete === '1') {
-        fields.delete = '1';
-      }
-      return postFormFields(fields).then(function (result) {
-        var data = result.data || {};
-        var ok = !!data.ok;
-        var visual = data.visual_id || item.visualId || '—';
-        var message = data.message || data.error || (ok ? 'ذخیره شد' : 'ناموفق');
-        appendSaveLog(faNum(visual) + ' — ' + message, ok ? 'is-ok' : 'is-error');
-        if (ok) {
-          if (data.action === 'deleted') deleted++;
-          else if (data.action === 'saved') saved++;
-        } else {
-          failed++;
-        }
-        index++;
-        if (saveProgressEl) saveProgressEl.value = index;
-        return next();
-      }).catch(function (err) {
-        failed++;
-        appendSaveLog(
-          faNum(item.visualId || '—') + ' — ' + (err && err.message ? err.message : String(err || 'خطا')),
-          'is-error'
-        );
-        index++;
-        if (saveProgressEl) saveProgressEl.value = index;
-        return next();
-      });
-    }
-
-    return next();
-  }
-
-  if (form) {
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-      if (saveInFlight) return;
-      setSaveBusy(true);
-      if (saveErrorEl) {
-        saveErrorEl.hidden = true;
-        saveErrorEl.textContent = '';
-      }
-      openSaveModal();
-
-      var dirty = collectDirtyRows();
-      appendSaveLog(
-        'تغییرات: ' + faNum(dirty.length) + ' ردیف از ' +
-        faNum(form.querySelectorAll('.cms-price-sheet__rows tr').length)
-      );
-      if (dirty.length === 0) {
-        failSave('تغییری برای ذخیره نیست');
-        return;
-      }
-      saveDirtyRows(dirty);
-    });
-  }
 })();
 </script>
 <?php

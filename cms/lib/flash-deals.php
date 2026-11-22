@@ -12,7 +12,6 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/invoices.php';
 require_once __DIR__ . '/jalali.php';
-require_once __DIR__ . '/search-text.php';
 
 class FlashDealException extends RuntimeException
 {
@@ -587,25 +586,13 @@ function flash_deals_search_products(PDO $pdo, string $q, int $limit = 20): arra
         );
         $stmt->execute();
     } else {
-        $nameLike = '%' . search_like_escape(search_normalize($q)) . '%';
-        [$visualSql, $visualParams] = search_visual_id_like_clause('visual_id', $q);
-        $exact = search_visual_id_normalize($q);
+        $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
         $stmt = $pdo->prepare(
-            $select . " WHERE (" . search_name_sql('name') . ' LIKE ?
-                OR ' . search_name_sql('slug') . " LIKE ?
-                OR {$visualSql})
-             ORDER BY
-                CASE
-                    WHEN visual_id = ? THEN 0
-                    WHEN {$visualSql} THEN 1
-                    ELSE 2
-                END,
-                published DESC,
-                name ASC
+            $select . " WHERE name LIKE ? ESCAPE '\\\\' OR slug LIKE ? ESCAPE '\\\\' OR visual_id LIKE ? ESCAPE '\\\\'
+             ORDER BY published DESC, name ASC
              LIMIT {$limit}"
         );
-        $params = [$nameLike, $nameLike, ...$visualParams, $exact, ...$visualParams];
-        $stmt->execute($params);
+        $stmt->execute([$like, $like, $like]);
     }
     $out = [];
     foreach ($stmt->fetchAll() ?: [] as $row) {

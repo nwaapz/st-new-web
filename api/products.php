@@ -249,12 +249,7 @@ try {
 
             . $modelNamesSqlForQ . ' LIKE ?)';
 
-        $params[] = $like;
-        if ($visualParams !== []) {
-            array_push($params, ...$visualParams);
-        }
-        $params[] = $like;
-        $params[] = $like;
+        array_push($params, $like, ...$visualParams, $like, $like);
 
     }
 

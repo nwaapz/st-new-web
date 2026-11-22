@@ -349,221 +349,20 @@ function price_sheet_apply_catalog_meta_to_row(array &$sheetRow, ?array $catalog
  *
  * @param array<string,mixed> $row
  */
-function price_sheet_unpublish_catalog_by_visual_id(PDO $pdo, string $visualId): void
-{
-    $visualId = price_import_normalize_visual_id($visualId);
-    if ($visualId === '') {
-        return;
-    }
-
-    $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
-    $product = $entities['product'] ?? null;
-    $series = $entities['series'] ?? null;
-    require_once __DIR__ . '/product-price-sync.php';
-
-    if (is_array($product) && (int) ($product['id'] ?? 0) > 0) {
-        $productId = (int) $product['id'];
-        $pdo->prepare('UPDATE products SET published = 0 WHERE id = ?')->execute([$productId]);
-        product_price_sync_mark_product($pdo, $productId);
-    }
-
-    if (is_array($series) && (int) ($series['id'] ?? 0) > 0) {
-        $seriesId = (int) $series['id'];
-        $pdo->prepare('UPDATE product_series SET published = 0 WHERE id = ?')->execute([$seriesId]);
-        product_price_sync_mark_series($pdo, $seriesId);
-    }
-}
-
-function price_sheet_visual_id_for_sheet_row(PDO $pdo, int $rowId, int $categoryId): string
-{
-    if ($rowId <= 0 || $categoryId <= 0) {
-        return '';
-    }
-    $stmt = $pdo->prepare(
-        'SELECT visual_id FROM price_sheet_rows WHERE id = ? AND category_id = ? LIMIT 1'
-    );
-    $stmt->execute([$rowId, $categoryId]);
-    $raw = $stmt->fetchColumn();
-    if ($raw === false) {
-        return '';
-    }
-
-    return price_import_normalize_visual_id((string) $raw);
-}
-
 function price_sheet_push_row_to_catalog(PDO $pdo, array $row, int $line = 1): void
 {
     $result = price_sheet_apply_row_to_catalog($pdo, $row, $line);
-    if (!empty($result['updated']) || !empty($result['created'])) {
+    if (!empty($result['updated'])) {
         return;
     }
     $reason = trim((string) ($result['reason'] ?? ''));
-    if ($reason === '' || $reason === 'تغییری برای انتشار یافت نشد') {
+    if ($reason === '') {
         return;
     }
     $visualId = (string) ($result['visual_id'] ?? '');
     throw new RuntimeException(
         $visualId !== '' ? $reason . ' (کد ' . $visualId . ')' : $reason
     );
-}
-
-function price_sheet_default_car_model_id(PDO $pdo): int
-{
-    try {
-        $row = $pdo->query(
-            'SELECT id FROM car_models ORDER BY sort_order ASC, id ASC LIMIT 1'
-        )->fetch(PDO::FETCH_ASSOC);
-        return (int) ($row['id'] ?? 0);
-    } catch (Throwable $e) {
-        return 0;
-    }
-}
-
-function price_sheet_ensure_product_shop_links(PDO $pdo, int $productId, int $categoryId): void
-{
-    if ($productId <= 0) {
-        return;
-    }
-    cms_ensure_product_categories_schema($pdo);
-    cms_ensure_product_car_models_schema($pdo);
-
-    $existingCats = cms_product_load_category_ids($pdo, $productId);
-    if ($existingCats === []) {
-        if ($categoryId <= 0) {
-            throw new RuntimeException('دسته محصول برای نمایش در فروشگاه الزامی است');
-        }
-        cms_product_save_category_ids($pdo, $productId, [$categoryId]);
-        $existingCats = [$categoryId];
-    } elseif ($categoryId > 0 && !in_array($categoryId, $existingCats, true) && count($existingCats) < 2) {
-        $existingCats[] = $categoryId;
-        cms_product_save_category_ids($pdo, $productId, $existingCats);
-    }
-
-    $existingCars = cms_product_load_car_model_ids($pdo, $productId);
-    if ($existingCars !== []) {
-        return;
-    }
-    $carModelId = price_sheet_default_car_model_id($pdo);
-    if ($carModelId <= 0) {
-        throw new RuntimeException('حداقل یک مدل خودرو در سیستم لازم است');
-    }
-    $catForCar = $categoryId > 0 ? $categoryId : (int) ($existingCats[0] ?? 0);
-    cms_product_save_car_model_ids(
-        $pdo,
-        $productId,
-        [$carModelId],
-        $catForCar > 0 ? [$carModelId => $catForCar] : []
-    );
-}
-
-function price_sheet_ensure_series_shop_links(PDO $pdo, int $seriesId, int $categoryId): void
-{
-    if ($seriesId <= 0 || $categoryId <= 0) {
-        return;
-    }
-    cms_series_ensure_categories_schema($pdo);
-    $existing = cms_series_load_category_ids($pdo, $seriesId);
-    if ($existing === []) {
-        cms_series_save_category_ids($pdo, $seriesId, [$categoryId]);
-    }
-}
-
-/**
- * @param array<string,mixed> $row
- */
-function price_sheet_create_catalog_product(PDO $pdo, array $row): int
-{
-    $visualId = price_import_normalize_visual_id((string) ($row['visual_id'] ?? ''));
-    $name = trim((string) ($row['name'] ?? ''));
-    $priceText = trim((string) ($row['price_text'] ?? ''));
-    $categoryId = (int) ($row['category_id'] ?? 0);
-    $warrantyText = price_sheet_clean_cell_value((string) ($row['warranty_text'] ?? ''));
-    $packSize = isset($row['pack_size']) && $row['pack_size'] !== null
-        ? (int) $row['pack_size']
-        : null;
-    if ($packSize !== null && $packSize <= 0) {
-        $packSize = null;
-    }
-    $stockQty = array_key_exists('stock_qty', $row) && $row['stock_qty'] !== null
-        ? products_normalize_stock_qty($row['stock_qty'], 0)
-        : PRODUCTS_STOCK_DEFAULT;
-
-    if ($visualId === '') {
-        throw new RuntimeException('کد کالا خالی است');
-    }
-    if ($name === '') {
-        throw new RuntimeException('نام محصول برای کد ' . $visualId . ' الزامی است');
-    }
-    if ($priceText === '') {
-        throw new RuntimeException('قیمت محصول الزامی است');
-    }
-    if ($categoryId <= 0) {
-        throw new RuntimeException('دسته محصول برای ایجاد الزامی است');
-    }
-
-    $carModelId = price_sheet_default_car_model_id($pdo);
-    if ($carModelId <= 0) {
-        throw new RuntimeException('حداقل یک مدل خودرو در سیستم لازم است');
-    }
-
-    products_ensure_stock_schema($pdo);
-    $slug = price_import_unique_slug($pdo, $name);
-    $description = price_import_description_with_warranty(null, $warrantyText);
-
-    $cols = [];
-    foreach ($pdo->query('SHOW COLUMNS FROM products')->fetchAll() ?: [] as $col) {
-        $cols[(string) ($col['Field'] ?? '')] = true;
-    }
-
-    $insert = [
-        'name' => $name,
-        'slug' => $slug,
-        'visual_id' => $visualId,
-        'description' => $description,
-        'price_text' => $priceText,
-        'pack_size' => $packSize,
-        'banner' => 'none',
-        'published' => 1,
-        'sort_order' => 0,
-        'stock_qty' => $stockQty,
-        'category_id' => $categoryId,
-        'car_model_id' => $carModelId,
-    ];
-    $insertCols = [];
-    $placeholders = [];
-    $values = [];
-    foreach ($insert as $column => $value) {
-        if (!isset($cols[$column])) {
-            continue;
-        }
-        $insertCols[] = '`' . $column . '`';
-        $placeholders[] = '?';
-        $values[] = $value;
-    }
-    if ($insertCols === []) {
-        throw new RuntimeException('ایجاد محصول ناموفق بود');
-    }
-
-    $sql = 'INSERT INTO products (' . implode(', ', $insertCols) . ') VALUES (' . implode(', ', $placeholders) . ')';
-    try {
-        $pdo->prepare($sql)->execute($values);
-    } catch (PDOException $e) {
-        throw new RuntimeException('ایجاد محصول ناموفق بود');
-    }
-    $productId = (int) $pdo->lastInsertId();
-    if ($productId <= 0) {
-        throw new RuntimeException('ایجاد محصول ناموفق بود');
-    }
-
-    cms_ensure_product_categories_schema($pdo);
-    cms_ensure_product_car_models_schema($pdo);
-    cms_product_save_category_ids($pdo, $productId, [$categoryId]);
-    cms_product_save_car_model_ids($pdo, $productId, [$carModelId], [$carModelId => $categoryId]);
-
-    require_once __DIR__ . '/product-price-sync.php';
-    product_price_sync_mark_product($pdo, $productId);
-
-    return $productId;
 }
 
 function price_sheet_resolve_catalog_category_id(PDO $pdo, string $visualId): ?int
@@ -925,31 +724,12 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
     }
 
     products_ensure_stock_schema($pdo);
-    $categoryId = (int) ($row['category_id'] ?? 0);
     $entities = price_import_find_entities_by_visual_id($pdo, $visualId);
     $product = $entities['product'] ?? null;
     $series = $entities['series'] ?? null;
 
     if (!$product && !$series) {
-        if ($name === '') {
-            $result['reason'] = 'نام محصول برای ایجاد الزامی است';
-            return $result;
-        }
-        $createdId = price_sheet_create_catalog_product($pdo, [
-            'visual_id' => $visualId,
-            'name' => $name,
-            'price_text' => $priceText,
-            'pack_size' => $newPackSize,
-            'warranty_text' => $warrantyText,
-            'stock_qty' => $stockQty,
-            'category_id' => $categoryId,
-        ]);
-        $result['updated'] = true;
-        $result['created'] = true;
-        $result['entity'] = 'product';
-        $result['name'] = $name;
-        $result['pack_size'] = $newPackSize;
-        $result['product_id'] = $createdId;
+        $result['reason'] = 'محصول یا سری کیت با این کد در سایت یافت نشد';
         return $result;
     }
 
@@ -966,53 +746,66 @@ function price_sheet_apply_row_to_catalog(PDO $pdo, array $row, int $excelRow): 
 
     if (is_array($product)) {
         $productId = (int) ($product['id'] ?? 0);
+        $existingPrice = trim((string) ($product['price_text'] ?? ''));
+        $existingPackSize = price_import_db_pack_size($product);
         $existingName = trim((string) ($product['name'] ?? ''));
         $existingDescription = (string) ($product['description'] ?? '');
         $existingStock = products_stock_qty($pdo, $productId);
         $newDescription = price_import_description_with_warranty($existingDescription, $warrantyText);
+        $descriptionChanged = (string) ($newDescription ?? '') !== $existingDescription;
+        $nameChanged = $name !== '' && $name !== $existingName;
+        $stockChanged = $stockQty !== null && $stockQty !== $existingStock;
+        $priceChanged = $existingPrice !== $priceText || $existingPackSize !== $newPackSize;
 
-        $stmt = $pdo->prepare(
-            'UPDATE products
-             SET price_text = ?, pack_size = ?, name = ?, description = ?, stock_qty = ?, published = 1
-             WHERE id = ?'
-        );
-        $stmt->execute([
-            $priceText,
-            $newPackSize,
-            $name !== '' ? $name : $existingName,
-            $newDescription,
-            $stockQty !== null ? $stockQty : $existingStock,
-            $productId,
-        ]);
-        require_once __DIR__ . '/product-price-sync.php';
-        product_price_sync_mark_product($pdo, $productId);
-        price_sheet_ensure_product_shop_links($pdo, $productId, $categoryId);
-        $updatedProduct = true;
+        if ($priceChanged || $nameChanged || $descriptionChanged || $stockChanged) {
+            $stmt = $pdo->prepare(
+                'UPDATE products
+                 SET price_text = ?, pack_size = ?, name = ?, description = ?, stock_qty = ?
+                 WHERE id = ?'
+            );
+            $stmt->execute([
+                $priceText,
+                $newPackSize,
+                $name !== '' ? $name : $existingName,
+                $newDescription,
+                $stockQty !== null ? $stockQty : $existingStock,
+                $productId,
+            ]);
+            require_once __DIR__ . '/product-price-sync.php';
+            product_price_sync_mark_product($pdo, $productId);
+            $updatedProduct = true;
+        }
     }
 
     if (is_array($series)) {
         $seriesId = (int) ($series['id'] ?? 0);
+        $existingPrice = trim((string) ($series['price_text'] ?? ''));
+        $existingPackSize = price_import_db_pack_size($series);
         $seriesRow = $pdo->prepare('SELECT name, description, model_name FROM product_series WHERE id = ? LIMIT 1');
         $seriesRow->execute([$seriesId]);
         $seriesExisting = $seriesRow->fetch(PDO::FETCH_ASSOC) ?: [];
         $existingSeriesName = trim((string) ($seriesExisting['name'] ?? ''));
         $existingSeriesDescription = (string) ($seriesExisting['description'] ?? '');
         $newSeriesDescription = price_import_description_with_warranty($existingSeriesDescription, $warrantyText);
+        $seriesNameChanged = $name !== '' && $name !== $existingSeriesName;
+        $seriesDescriptionChanged = (string) ($newSeriesDescription ?? '') !== $existingSeriesDescription;
+        $seriesPriceChanged = $existingPrice !== $priceText || $existingPackSize !== $newPackSize;
 
-        $stmt = $pdo->prepare(
-            'UPDATE product_series SET price_text = ?, pack_size = ?, name = ?, description = ?, published = 1 WHERE id = ?'
-        );
-        $stmt->execute([
-            $priceText,
-            $newPackSize,
-            $name !== '' ? $name : $existingSeriesName,
-            $newSeriesDescription,
-            $seriesId,
-        ]);
-        require_once __DIR__ . '/product-price-sync.php';
-        product_price_sync_mark_series($pdo, $seriesId);
-        price_sheet_ensure_series_shop_links($pdo, $seriesId, $categoryId);
-        $updatedSeries = true;
+        if ($seriesPriceChanged || $seriesNameChanged || $seriesDescriptionChanged) {
+            $stmt = $pdo->prepare(
+                'UPDATE product_series SET price_text = ?, pack_size = ?, name = ?, description = ? WHERE id = ?'
+            );
+            $stmt->execute([
+                $priceText,
+                $newPackSize,
+                $name !== '' ? $name : $existingSeriesName,
+                $newSeriesDescription,
+                $seriesId,
+            ]);
+            require_once __DIR__ . '/product-price-sync.php';
+            product_price_sync_mark_series($pdo, $seriesId);
+            $updatedSeries = true;
+        }
     }
 
     if ($stockQty !== null) {
@@ -1331,16 +1124,9 @@ function price_sheet_apply_posted_rows(
         $rowId = (int) ($input['id'] ?? 0);
         if (!empty($input['delete'])) {
             if ($rowId > 0) {
-                $visualId = price_sheet_visual_id_for_sheet_row($pdo, $rowId, $categoryId);
-                if ($visualId === '') {
-                    $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
-                }
                 $deleteStmt->execute([$rowId, $categoryId]);
                 if ($deleteStmt->rowCount() > 0) {
                     $deleted++;
-                    if ($visualId !== '') {
-                        price_sheet_unpublish_catalog_by_visual_id($pdo, $visualId);
-                    }
                 }
             }
             continue;
@@ -1392,7 +1178,6 @@ function price_sheet_apply_posted_rows(
             'pack_size' => $packSize,
             'warranty_text' => $warrantyText,
             'stock_qty' => $stockQty,
-            'category_id' => $targetCategoryId,
         ], $saved + 1);
         $saved++;
         $sortOrder++;
@@ -1515,157 +1300,6 @@ function price_sheet_save_frames(PDO $pdo, array $postedFrames): array
     }
 
     return ['saved' => $savedTotal, 'deleted' => $deletedTotal];
-}
-
-/**
- * @param array{id?:int,visual_id?:string,name?:string,price_text?:string,pack_size?:int|string|null,delete?:bool|string} $input
- * @return array{ok:bool,visual_id:string,action:string,message:string,row_id:int,error?:string}
- */
-function price_sheet_save_one_row(PDO $pdo, int $categoryId, array $input): array
-{
-    price_sheet_ensure_schema($pdo);
-    cms_ensure_product_categories_schema($pdo);
-
-    $visualId = price_import_normalize_visual_id((string) ($input['visual_id'] ?? ''));
-    $rowId = (int) ($input['id'] ?? 0);
-
-    try {
-        if ($categoryId <= 0) {
-            throw new RuntimeException('دسته انتخاب نشده است');
-        }
-
-        $catStmt = $pdo->prepare('SELECT id FROM categories WHERE id = ? LIMIT 1');
-        $catStmt->execute([$categoryId]);
-        if (!$catStmt->fetch()) {
-            throw new RuntimeException('دسته یافت نشد');
-        }
-
-        if (!empty($input['delete'])) {
-            if ($rowId <= 0) {
-                return [
-                    'ok' => true,
-                    'visual_id' => $visualId,
-                    'action' => 'deleted',
-                    'message' => 'ردیف جدید حذف شد',
-                    'row_id' => 0,
-                ];
-            }
-
-            $storedVisualId = price_sheet_visual_id_for_sheet_row($pdo, $rowId, $categoryId);
-            if ($storedVisualId !== '') {
-                $visualId = $storedVisualId;
-            }
-
-            $deleteStmt = $pdo->prepare('DELETE FROM price_sheet_rows WHERE id = ? AND category_id = ?');
-            $deleteStmt->execute([$rowId, $categoryId]);
-            if ($deleteStmt->rowCount() > 0 && $visualId !== '') {
-                price_sheet_unpublish_catalog_by_visual_id($pdo, $visualId);
-            }
-            price_sheet_touch_draft_updated($pdo);
-
-            return [
-                'ok' => true,
-                'visual_id' => $visualId,
-                'action' => 'deleted',
-                'message' => 'حذف شد',
-                'row_id' => $rowId,
-            ];
-        }
-
-        $fields = price_sheet_resolve_row_fields($input);
-        $visualId = $fields['visual_id'];
-        $name = $fields['name'];
-        $warrantyText = $fields['warranty_text'];
-        $priceText = $fields['price_text'];
-        $packSize = $fields['pack_size'];
-        $stockQty = $fields['stock_qty'];
-
-        if ($visualId === '' && $priceText === '' && $name === '') {
-            return [
-                'ok' => true,
-                'visual_id' => '',
-                'action' => 'skipped',
-                'message' => 'ردیف خالی نادیده گرفته شد',
-                'row_id' => $rowId,
-            ];
-        }
-        if ($visualId === '') {
-            throw new RuntimeException('کد کالا نمی‌تواند خالی باشد');
-        }
-        if ($priceText === '') {
-            throw new RuntimeException('قیمت برای کد ' . $visualId . ' خالی است');
-        }
-
-        $catalogByVisual = price_sheet_load_catalog_meta_by_visual_ids($pdo, [$visualId]);
-        $catalogMeta = $catalogByVisual[$visualId] ?? null;
-        $modelName = price_sheet_clean_cell_value((string) ($catalogMeta['model_name'] ?? ''));
-        $targetCategoryId = price_sheet_resolve_catalog_category_id($pdo, $visualId) ?? $categoryId;
-
-        $sortOrder = 0;
-        if ($rowId > 0) {
-            $sortStmt = $pdo->prepare('SELECT sort_order FROM price_sheet_rows WHERE id = ? LIMIT 1');
-            $sortStmt->execute([$rowId]);
-            $existingSort = $sortStmt->fetchColumn();
-            if ($existingSort === false) {
-                $rowId = 0;
-            } else {
-                $sortOrder = (int) $existingSort;
-            }
-        }
-        if ($rowId <= 0) {
-            $maxSortStmt = $pdo->prepare(
-                'SELECT COALESCE(MAX(sort_order), -1) FROM price_sheet_rows WHERE category_id = ?'
-            );
-            $maxSortStmt->execute([$targetCategoryId]);
-            $sortOrder = (int) $maxSortStmt->fetchColumn() + 1;
-        }
-
-        price_sheet_persist_draft_row(
-            $pdo,
-            $categoryId,
-            $rowId,
-            $targetCategoryId,
-            [
-                'visual_id' => $visualId,
-                'name' => $name,
-                'model_name' => $modelName,
-                'warranty_text' => $warrantyText,
-                'price_text' => $priceText,
-                'pack_size' => $packSize,
-                'stock_qty' => $stockQty,
-            ],
-            $sortOrder
-        );
-
-        price_sheet_push_row_to_catalog($pdo, [
-            'visual_id' => $visualId,
-            'name' => $name,
-            'price_text' => $priceText,
-            'pack_size' => $packSize,
-            'warranty_text' => $warrantyText,
-            'stock_qty' => $stockQty,
-            'category_id' => $targetCategoryId,
-        ], 1);
-
-        price_sheet_touch_draft_updated($pdo);
-
-        return [
-            'ok' => true,
-            'visual_id' => $visualId,
-            'action' => 'saved',
-            'message' => 'ذخیره شد',
-            'row_id' => $rowId,
-        ];
-    } catch (Throwable $e) {
-        return [
-            'ok' => false,
-            'visual_id' => $visualId,
-            'action' => '',
-            'message' => $e->getMessage(),
-            'row_id' => $rowId,
-            'error' => $e->getMessage(),
-        ];
-    }
 }
 
 /**
@@ -1848,7 +1482,6 @@ function price_sheet_upsert_parsed_rows(PDO $pdo, int $categoryId, array $parsed
             'pack_size' => $packSize,
             'warranty_text' => $warrantyText,
             'stock_qty' => $stockQty,
-            'category_id' => $rowCategoryId,
         ], $imported + 1);
         $imported++;
         $sortByCategory[$rowCategoryId]++;
@@ -2374,16 +2007,12 @@ function price_sheet_export_include_stock_from_query(array $query, bool $fromWar
 }
 
 /**
- * One worksheet with every category table from the CMS page (Google Sheets import
- * only reads the first tab of a multi-sheet xlsx).
- *
  * @return list<array{name:string,rows:list<list<string>>}>
  */
 function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): array
 {
     $frames = price_sheet_list_frames($pdo);
     $header = [
-        'دسته',
         'کد کالا',
         'نام',
         'خودرو',
@@ -2396,14 +2025,14 @@ function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): 
         $header[] = 'موجودی انبار';
     }
 
-    $rows = [$header];
+    $sheets = [];
     foreach ($frames as $frame) {
         $frameRows = is_array($frame['rows'] ?? null) ? $frame['rows'] : [];
         if ($frameRows === []) {
             continue;
         }
 
-        $categoryName = (string) ($frame['category_name'] ?? '');
+        $rows = [$header];
         foreach ($frameRows as $row) {
             $packPrice = (string) ($row['pack_price_text'] ?? '');
             if ($packPrice === '—') {
@@ -2411,7 +2040,6 @@ function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): 
             }
 
             $line = [
-                $categoryName,
                 (string) ($row['visual_id'] ?? ''),
                 (string) ($row['name'] ?? ''),
                 (string) ($row['model_name'] ?? ''),
@@ -2426,18 +2054,14 @@ function price_sheet_build_export_sheets(PDO $pdo, bool $includeStock = false): 
 
             $rows[] = $line;
         }
-    }
 
-    if (count($rows) <= 1) {
-        return [];
-    }
-
-    return [
-        [
-            'name' => 'لیست قیمت',
+        $sheets[] = [
+            'name' => (string) ($frame['category_name'] ?? 'دسته'),
             'rows' => $rows,
-        ],
-    ];
+        ];
+    }
+
+    return $sheets;
 }
 
 function price_sheet_export_page_url(bool $fromWarehouse = false, bool $includeStock = false): string
@@ -2448,7 +2072,7 @@ function price_sheet_export_page_url(bool $fromWarehouse = false, bool $includeS
         $query .= '&include_stock=1';
     }
 
-    return $base . (strpos($base, '?') !== false ? '&' : '?') . $query;
+    return $base . (str_contains($base, '?') ? '&' : '?') . $query;
 }
 
 function price_sheet_send_xlsx_export(PDO $pdo, bool $fromWarehouse = false, bool $includeStock = false): void

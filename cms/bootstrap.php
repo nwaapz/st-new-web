@@ -295,3 +295,13 @@ function cms_call_for_price_label(): string
 {
     return 'تماس برای قیمت';
 }
+
+function cms_sell_units_enabled(): bool
+{
+    $stored = cms_setting_get('sell_units', '');
+    if ($stored === '0') {
+        return false;
+    }
+
+    return true;
+}

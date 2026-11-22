@@ -24,6 +24,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_price_mode'])) {
     cms_redirect('shop.php');
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_sell_units'])) {
+    $enabled = isset($_POST['sell_units']) ? '1' : '0';
+    try {
+        cms_setting_set('sell_units', $enabled);
+        cms_audit_settings($pdo, 'فروشگاه — فروش عدد');
+        cms_flash($enabled === '1'
+            ? 'فروش به‌صورت عدد فعال شد'
+            : 'فروش فقط به‌صورت بسته است');
+    } catch (Throwable $e) {
+        cms_flash($e->getMessage(), 'error');
+    }
+    cms_redirect('shop.php');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_header_image'])) {
     try {
         $existing = cms_setting_get('shop_header_image', '');
@@ -76,6 +90,7 @@ try {
 }
 
 $callForPrice = cms_call_for_price_enabled();
+$sellUnits = cms_sell_units_enabled();
 $shopHeaderImage = cms_setting_get('shop_header_image', '');
 $intro = cms_page_intro_stored('shop');
 $introDefaults = cms_page_intro_defaults()['shop'];
@@ -134,6 +149,23 @@ cms_layout_start('فروشگاه', cms_current_username(), 'shop');
   </div>
 </form>
 
+<form class="cms-panel" method="post" style="margin-bottom:1.25rem">
+  <h2 style="margin-top:0">فروش عدد یا فقط بسته</h2>
+  <p class="cms-muted" style="margin:.25rem 0 1rem">
+    اگر خاموش باشد، فروشگاه وب و اپ مشتری فقط <strong>بسته</strong> می‌فروشند (محصول باید «تعداد در هر بسته» داشته باشد).
+    اگر روشن باشد، مشتری می‌تواند عدد یا بسته بخرد.
+  </p>
+  <input type="hidden" name="save_sell_units" value="1">
+  <label class="cms-check" style="margin-bottom:1rem">
+    <input type="checkbox" name="sell_units" value="1" <?= $sellUnits ? 'checked' : '' ?>>
+    فروش به‌صورت عدد
+  </label>
+  <div class="cms-btn-row" style="margin-top:0">
+    <button class="cms-btn" type="submit">ذخیره</button>
+    <span class="cms-muted">وضعیت فعلی: <?= $sellUnits ? 'عدد و بسته' : 'فقط بسته' ?></span>
+  </div>
+</form>
+
 <div class="cms-grid-2">
   <a class="cms-panel cms-hub-card" href="factories.php">
     <h2>کارخانه‌ها</h2>
@@ -174,6 +206,11 @@ cms_layout_start('فروشگاه', cms_current_username(), 'shop');
     <h2>نظرات محصولات</h2>
     <p class="cms-muted" style="margin:0 0 .35rem">در انتظار تأیید</p>
     <p style="font-size:1.6rem;margin:0;font-weight:700"><?= $counts['reviews_pending'] ?></p>
+  </a>
+  <a class="cms-panel cms-hub-card" href="price-sheet.php">
+    <h2>لیست قیمت</h2>
+    <p class="cms-muted" style="margin:0 0 .35rem">پیش‌نویس و انتشار</p>
+    <p style="font-size:1rem;margin:0;font-weight:700">جدول قیمت نمایندگان</p>
   </a>
 </div>
 <p class="cms-muted" style="margin-top:1rem">اگر دیتابیس قدیمی است یک‌بار <a href="migrate-run.php">آپدیت ساختار</a> را اجرا کنید.</p>

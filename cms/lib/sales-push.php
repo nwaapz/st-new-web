@@ -14,7 +14,7 @@ function sales_push_ensure_schema(PDO $pdo): void
         'CREATE TABLE IF NOT EXISTS sales_push_tokens (
           id INT UNSIGNED NOT NULL AUTO_INCREMENT,
           sales_user_id INT UNSIGNED NOT NULL,
-          fcm_token VARCHAR(1024) NOT NULL,
+          fcm_token VARCHAR(512) NOT NULL,
           platform VARCHAR(32) NOT NULL DEFAULT \'android\',
           updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           PRIMARY KEY (id),
@@ -22,11 +22,6 @@ function sales_push_ensure_schema(PDO $pdo): void
           KEY idx_sales_fcm_token (fcm_token)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
-    try {
-        $pdo->exec('ALTER TABLE sales_push_tokens MODIFY fcm_token VARCHAR(1024) NOT NULL');
-    } catch (Throwable $e) {
-        // already wide enough
-    }
 
     $ready = true;
 }
@@ -102,7 +97,7 @@ function sales_push_message_for_status(string $publicCode, string $notifyType, s
         case 'accepted':
             return [
                 'title' => 'تأیید انبار',
-                'body' => 'سفارش ' . $code . ' تأیید شد. پیش‌فاکتور آماده است. لطفاً مدارک پرداخت را ارسال کنید.',
+                'body' => 'سفارش ' . $code . ' تأیید شد. پیش‌فاکتور آماده است.',
             ];
         case 'rejected':
             return [

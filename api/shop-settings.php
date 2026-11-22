@@ -11,6 +11,7 @@ try {
     api_json([
         'call_for_price' => cms_public_call_for_price_enabled(),
         'call_for_price_label' => cms_call_for_price_label(),
+        'sell_units' => cms_sell_units_enabled(),
         'header_image' => $headerImage !== '' ? $headerImage : null,
         'title' => $intro['title'],
         'explanation' => $intro['explanation'],

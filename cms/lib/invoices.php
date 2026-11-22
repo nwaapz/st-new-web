@@ -39,8 +39,7 @@ function invoices_parse_toman_amount(?string $raw): ?int
         '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
         '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
         '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
-        '٬' => '', '٫' => '', '،' => '', ',' => '', '.' => '',
-        ' ' => '', "\u{00A0}" => '',
+        '٬' => '', '،' => '', ',' => '', ' ' => '', "\u{00A0}" => '',
     ]);
     // Strip optional currency word (toman only — rial rejected below).
     $normalized = preg_replace('/تومان$/u', '', $normalized) ?? $normalized;
@@ -70,13 +69,6 @@ function invoices_format_toman(int $amount): string
     $amount = max(0, $amount);
     $grouped = number_format($amount, 0, '.', '٬');
     return cms_to_persian_digits($grouped) . ' تومان';
-}
-
-function invoices_format_toman_input(int $amount): string
-{
-    $amount = max(0, $amount);
-    $grouped = number_format($amount, 0, '.', '٬');
-    return cms_to_persian_digits($grouped);
 }
 
 /**
@@ -168,16 +160,9 @@ function invoices_display_totals_from_items(array $items): array
         $row = $item;
         $saved = trim((string) ($item['price_text'] ?? ''));
         if ($saved === '') {
-            $promo = isset($item['promo_unit_price']) && $item['promo_unit_price'] !== null && $item['promo_unit_price'] !== ''
-                ? (int) $item['promo_unit_price']
-                : 0;
-            if (!empty($item['flash_deal_id']) && $promo > 0) {
-                $row['price_text'] = (string) $promo;
-            } else {
-                $catalog = trim((string) ($item['catalog_price_text'] ?? ''));
-                if ($catalog !== '') {
-                    $row['price_text'] = $catalog;
-                }
+            $catalog = trim((string) ($item['catalog_price_text'] ?? ''));
+            if ($catalog !== '') {
+                $row['price_text'] = $catalog;
             }
         }
         $displayItems[] = $row;

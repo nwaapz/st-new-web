@@ -22,6 +22,10 @@ function cms_subnav_link_is_active(string $href, string $script, string $aliasPa
         return true;
     }
 
+    if ($href === 'price-sheet.php' && $script === 'price-sheet.php') {
+        return (string) ($_GET['from'] ?? '') !== 'warehouse';
+    }
+
     if ($script === $href) {
         return true;
     }
@@ -80,6 +84,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
             'products.php' => 'محصولات',
             'media-upload.php' => 'آپلود تصاویر',
             'media-library.php' => 'کتابخانه تصاویر',
+            'price-sheet.php' => 'لیست قیمت',
             'product-price-import.php' => 'ورود قیمت',
             'product-reviews.php' => 'نظرات',
             'flash-deals.php' => 'پیشنهاد ویژه',
@@ -89,7 +94,6 @@ function cms_layout_start(string $title, string $username = '', string $section 
         $subNav = [
             'customers.php' => 'خلاصه',
             'orders.php' => 'سفارش‌ها',
-            'cheques.php' => 'چک‌ها',
             'price-sheet.php?from=warehouse' => 'لیست قیمت',
             'messages.php' => 'پیام‌ها',
             'branch-messages.php' => 'پیام نمایندگان',
@@ -114,7 +118,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<meta name="color-scheme" content="dark">';
     echo '<title>' . cms_h($title) . ' | StarTech CMS</title>';
-    echo '<link rel="stylesheet" href="assets/cms.css?v=37">';
+    echo '<link rel="stylesheet" href="assets/cms.css?v=30">';
     echo '</head><body><div class="cms-shell">';
 
     echo '<header class="cms-nav">';
@@ -137,12 +141,7 @@ function cms_layout_start(string $title, string $username = '', string $section 
     }
     echo '</nav>';
 
-    echo '<div class="cms-nav__actions">';
-    if ($script === 'price-sheet.php') {
-        echo '<button type="submit" class="cms-btn cms-btn--primary" form="price-sheet-form">ذخیره</button>';
-    }
     echo '<a class="cms-btn cms-btn--ghost" href="logout.php">خروج</a>';
-    echo '</div>';
     echo '</header>';
 
     $subNavAliases = [

@@ -139,7 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $returnScope = 'customers';
     }
     $returnTab = trim((string) ($_POST['return_tab'] ?? ''));
-    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'chat', 'history'];
+    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'history'];
     if (!in_array($returnTab, $allowedTabs, true)) {
         $returnTab = '';
     }
@@ -163,7 +163,7 @@ if ($viewId > 0) {
         $orderIsBranch = !empty($viewOrder['branch_id']);
         $scope = $orderIsBranch ? 'branches' : 'customers';
         $isBranchScope = $orderIsBranch;
-        $viewItems = orders_admin_enrich_items($pdo, orders_fetch_items($pdo, $viewId));
+        $viewItems = orders_fetch_items($pdo, $viewId);
         $viewEvents = orders_fetch_events($pdo, $viewId);
         require_once __DIR__ . '/lib/order-cheques.php';
         $viewCheques = order_cheques_fetch($pdo, $viewId);
@@ -222,7 +222,7 @@ if ($viewOrder) {
         $defaultDetailTab = 'invoices';
     }
     $tabParam = isset($_GET['tab']) ? trim((string) $_GET['tab']) : '';
-    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'chat', 'history'];
+    $allowedTabs = ['actions', 'items', 'invoices', 'payment', 'cheques', 'history'];
     if (in_array($tabParam, $allowedTabs, true)) {
         $defaultDetailTab = $tabParam;
     }
@@ -323,10 +323,9 @@ if ($viewOrder) {
             <?php else: ?>
               <th>موبایل</th>
             <?php endif; ?>
-            <th>مراحل</th>
+            <th>وضعیت</th>
             <th>اقلام</th>
             <th>تاریخ</th>
-            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -334,8 +333,6 @@ if ($viewOrder) {
           <?php
             $rowArchived = orders_is_archived((string) $item['status']);
             $rowHref = $ordersListQs($scope, $statusFilter, $searchQ, $page, (int) $item['id'], $ongoingMode);
-            $chatHref = $rowHref . '&tab=chat';
-            $pipe = orders_pipeline_view((string) $item['status']);
           ?>
           <tr class="cms-orders-row<?= $rowArchived ? ' cms-row--archived' : '' ?><?= $viewId === (int) $item['id'] ? ' is-open' : '' ?>"
               data-href="<?= cms_h($rowHref) ?>"
@@ -352,23 +349,13 @@ if ($viewOrder) {
               <td dir="ltr"><?= cms_h((string) $item['phone']) ?></td>
             <?php endif; ?>
             <td>
-              <ol class="cms-order-pipe cms-order-pipe--compact" aria-label="<?= cms_h($statusLabels[(string) $item['status']] ?? (string) $item['status']) ?>">
-                <?php foreach ($pipe as $step): ?>
-                  <li class="cms-order-pipe__step is-<?= cms_h($step['state']) ?>" title="<?= cms_h($step['label']) ?>">
-                    <span class="cms-order-pipe__dot"></span>
-                    <span class="cms-order-pipe__label"><?= cms_h($step['label']) ?></span>
-                  </li>
-                <?php endforeach; ?>
-              </ol>
+              <?= cms_h($statusLabels[(string) $item['status']] ?? (string) $item['status']) ?>
               <?php if ($rowArchived): ?>
                 <span class="cms-client-msg__badge" style="margin-right:6px;background:rgba(154,144,132,.85)">بسته</span>
               <?php endif; ?>
             </td>
             <td><?= (int) $item['item_count'] ?></td>
             <td dir="ltr"><?= cms_h((string) $item['created_at']) ?></td>
-            <td>
-              <a class="cms-btn cms-btn--ghost cms-orders-chat-link" href="<?= cms_h($chatHref) ?>">گفتگو</a>
-            </td>
           </tr>
         <?php endforeach; ?>
         </tbody>
@@ -396,12 +383,8 @@ if ($viewOrder) {
       var href = row.getAttribute('data-href');
       if (href) window.location.href = href;
     }
-    row.addEventListener('click', function (e) {
-      if (e.target && e.target.closest && e.target.closest('a')) return;
-      go();
-    });
+    row.addEventListener('click', go);
     row.addEventListener('keydown', function (e) {
-      if (e.target && e.target.closest && e.target.closest('a')) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         go();
@@ -483,7 +466,6 @@ if ($viewOrder) {
         }
     }
     $orderCode = (string) $viewOrder['public_code'];
-    $viewPipe = orders_pipeline_view($cur);
     $draftMessage = $cur === 'payment_proof_sent' && $payWarn !== '' ? $payWarn : '';
     $statusTone = orders_is_archived($cur) ? 'danger' : (orders_is_finished($cur) ? 'ok' : (orders_is_parcel_open($cur) ? 'warn' : 'info'));
     $chatOpen = orders_chat_send_allowed($cur);
@@ -529,14 +511,6 @@ if ($viewOrder) {
               <?= cms_h($statusLabels[$cur] ?? $cur) ?>
             </span>
           </div>
-          <ol class="cms-order-pipe" aria-label="مراحل سفارش">
-            <?php foreach ($viewPipe as $step): ?>
-              <li class="cms-order-pipe__step is-<?= cms_h($step['state']) ?>">
-                <span class="cms-order-pipe__dot"></span>
-                <span class="cms-order-pipe__label"><?= cms_h($step['label']) ?></span>
-              </li>
-            <?php endforeach; ?>
-          </ol>
           <dl class="cms-order-meta">
             <div><dt>تاریخ</dt><dd dir="ltr"><?= cms_h((string) $viewOrder['created_at']) ?></dd></div>
             <div><dt>موبایل</dt><dd dir="ltr"><?= cms_h((string) ($viewOrder['branch_phone'] ?: $viewOrder['phone'])) ?></dd></div>
@@ -548,10 +522,7 @@ if ($viewOrder) {
             <div><dt>اقلام</dt><dd><?= count($viewItems) ?> خط</dd></div>
           </dl>
         </div>
-        <div class="cms-order-modal__head-actions">
-          <button type="button" class="cms-btn" data-open-tab="chat">گفتگوی سفارش</button>
-          <a class="cms-btn cms-btn--secondary" id="cms-order-modal-close" href="<?= cms_h($listCloseHref) ?>">بستن</a>
-        </div>
+        <a class="cms-btn cms-btn--secondary" id="cms-order-modal-close" href="<?= cms_h($listCloseHref) ?>">بستن</a>
       </header>
 
       <div class="cms-order-modal__body">
@@ -665,7 +636,7 @@ if ($viewOrder) {
               <?php if ($viewItems === []): ?>
                 <p class="cms-empty">قلمی ثبت نشده.</p>
               <?php else: ?>
-                <?php $itemTotals = invoices_display_totals_from_items($viewItems); ?>
+                <?php $itemTotals = invoices_totals_from_items($viewItems); ?>
                 <form method="post" class="cms-invoice-form" id="order-prices-form">
                   <input type="hidden" name="id" value="<?= (int) $viewOrder['id'] ?>">
                   <?php $returnHiddens(); ?>
@@ -675,9 +646,7 @@ if ($viewOrder) {
                   <table class="cms-table">
                     <thead>
                       <tr>
-                        <th>کد کالا</th>
-                        <th>نام محصول</th>
-                        <th>خودرو</th>
+                        <th>محصول</th>
                         <th>واحد / تعداد</th>
                         <th>قیمت واحد (تومان)</th>
                         <th>مبلغ ردیف</th>
@@ -687,26 +656,17 @@ if ($viewOrder) {
                     <?php foreach ($viewItems as $idx => $line): ?>
                       <?php
                         $lineMeta = $itemTotals['lines'][$idx] ?? null;
-                        $priceInput = orders_admin_unit_price_input($line);
-                        $unitVal = $priceInput['value'];
-                        $unitDisplay = '';
-                        if ($unitVal !== '') {
-                            try {
-                                $unitParsed = invoices_parse_toman_amount($unitVal);
-                            } catch (Throwable $e) {
-                                $unitParsed = null;
-                            }
-                            $unitDisplay = $unitParsed !== null
-                                ? invoices_format_toman_input($unitParsed)
-                                : cms_to_persian_digits($unitVal);
+                        $unitVal = '';
+                        try {
+                            $parsedUnit = invoices_parse_toman_amount(
+                                isset($line['price_text']) ? (string) $line['price_text'] : null
+                            );
+                            $unitVal = $parsedUnit !== null ? (string) $parsedUnit : '';
+                        } catch (Throwable $e) {
+                            $unitVal = trim((string) ($line['price_text'] ?? ''));
                         }
-                        $visualId = isset($line['visual_id']) ? trim((string) $line['visual_id']) : '';
-                        $modelName = isset($line['model_name']) ? trim((string) $line['model_name']) : '';
                       ?>
                       <tr>
-                        <td class="cms-order-item-code" dir="ltr">
-                          <?= $visualId !== '' ? cms_h(cms_to_persian_digits($visualId)) : '—' ?>
-                        </td>
                         <td>
                           <?= cms_h((string) $line['name']) ?>
                           <?php if (!empty($line['flash_deal_id'])): ?>
@@ -715,59 +675,28 @@ if ($viewOrder) {
                           <?php
                             $bits = array_filter([
                                 $line['factory_name'] ?? null,
+                                $line['model_name'] ?? null,
                                 $line['category_name'] ?? null,
-                            ], static fn ($v): bool => $v !== null && trim((string) $v) !== '');
+                            ]);
                             if ($bits !== []):
                           ?>
                             <div class="cms-muted" style="font-size:.8rem;margin-top:.2rem"><?= cms_h(implode(' · ', $bits)) ?></div>
                           <?php endif; ?>
                         </td>
-                        <td><?= $modelName !== '' ? cms_h($modelName) : '—' ?></td>
                         <td><?= cms_h(invoices_unit_label($line)) ?></td>
                         <td>
                           <?php if ($canEditPrices): ?>
                             <input
                               class="cms-input cms-price-toman"
                               name="price[<?= (int) $line['id'] ?>]"
-                              value="<?= cms_h($unitDisplay) ?>"
+                              value="<?= cms_h($unitVal) ?>"
                               inputmode="numeric"
-                              placeholder="مثلاً ۱۲۵٬۰۰۰"
+                              placeholder="مثلاً 125000"
                               data-qty="<?= (int) ($line['quantity'] ?? 1) ?>"
-                              data-unit-type="<?= cms_h(orders_item_unit_type($line)) ?>"
-                              data-pack-size="<?= (int) ($line['pack_size'] ?? 0) ?>"
                               dir="ltr"
                               autocomplete="off"
                               <?= $cur === 'submitted' ? 'required' : '' ?>
                             >
-                            <?php
-                              $catalogHint = $priceInput['catalog_label'];
-                              $showCatalogHint = false;
-                              if ($catalogHint !== null && $catalogHint !== '') {
-                                  $unitParsedHint = null;
-                                  if ($unitVal !== '') {
-                                      try {
-                                          $unitParsedHint = invoices_parse_toman_amount($unitVal);
-                                      } catch (Throwable $e) {
-                                          $unitParsedHint = null;
-                                      }
-                                  }
-                                  $catalogParsedHint = null;
-                                  try {
-                                      $catalogParsedHint = invoices_parse_toman_amount($catalogHint);
-                                  } catch (Throwable $e) {
-                                      $catalogParsedHint = null;
-                                  }
-                                  $differs = $unitParsedHint === null
-                                      || $catalogParsedHint === null
-                                      || $unitParsedHint !== $catalogParsedHint;
-                                  $showCatalogHint = $priceInput['used_default'] || $differs;
-                              }
-                            ?>
-                            <?php if ($showCatalogHint): ?>
-                              <div class="cms-muted" style="font-size:.75rem;margin-top:.25rem">
-                                لیست قیمت: <?= cms_h($catalogHint) ?>
-                              </div>
-                            <?php endif; ?>
                           <?php else: ?>
                             <?= cms_h((string) ($lineMeta['unit_label'] ?? ($line['price_text'] ?? '—'))) ?>
                           <?php endif; ?>
@@ -780,7 +709,7 @@ if ($viewOrder) {
                     </tbody>
                     <tfoot>
                       <tr>
-                        <th colspan="5" style="text-align:left">جمع کل (تومان)</th>
+                        <th colspan="3" style="text-align:left">جمع کل (تومان)</th>
                         <th id="order-prices-grand" dir="ltr"><?= cms_h(invoices_format_toman((int) $itemTotals['total'])) ?></th>
                       </tr>
                     </tfoot>
@@ -811,65 +740,15 @@ if ($viewOrder) {
                       var form = document.getElementById('order-prices-form');
                       if (!form) return;
                       var grand = document.getElementById('order-prices-grand');
-                      var persianDigits = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'};
-                      var asciiDigits = {
-                        '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9',
-                        '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'
-                      };
-                      var digitChar = /[0-9۰-۹٠-٩]/;
                       function digits(s) {
-                        var out = '';
-                        String(s || '').split('').forEach(function (ch) {
-                          if (asciiDigits[ch]) out += asciiDigits[ch];
-                          else if (ch >= '0' && ch <= '9') out += ch;
-                        });
-                        if (out.length > 12) out = out.slice(0, 12);
-                        return out;
-                      }
-                      function formatInputAmount(amount) {
-                        var n = Math.max(0, Math.floor(Number(amount)));
-                        if (!isFinite(n)) return '';
-                        var s = String(n);
-                        var grouped = '';
-                        for (var i = 0; i < s.length; i++) {
-                          if (i > 0 && (s.length - i) % 3 === 0) grouped += '٬';
-                          grouped += persianDigits[s.charAt(i)] || s.charAt(i);
-                        }
-                        return grouped;
-                      }
-                      function countDigits(text) {
-                        var count = 0;
-                        String(text || '').split('').forEach(function (ch) {
-                          if (digitChar.test(ch)) count++;
-                        });
-                        return count;
-                      }
-                      function cursorAfterDigits(formatted, digitCount) {
-                        if (digitCount <= 0) return 0;
-                        var seen = 0;
-                        for (var i = 0; i < formatted.length; i++) {
-                          if (digitChar.test(formatted.charAt(i))) {
-                            seen++;
-                            if (seen >= digitCount) return i + 1;
-                          }
-                        }
-                        return formatted.length;
-                      }
-                      function formatPriceInput(input) {
-                        if (!input) return;
-                        var before = input.selectionStart;
-                        var digitsBefore = before === null
-                          ? countDigits(input.value)
-                          : countDigits(String(input.value || '').slice(0, before));
-                        var raw = digits(input.value);
-                        input.value = raw === '' ? '' : formatInputAmount(parseInt(raw, 10));
-                        if (before !== null && typeof input.setSelectionRange === 'function') {
-                          var pos = cursorAfterDigits(input.value, digitsBefore);
-                          try { input.setSelectionRange(pos, pos); } catch (e) {}
-                        }
+                        return String(s || '')
+                          .replace(/[۰-۹]/g, function (c) { return String(c.charCodeAt(0) - 1728); })
+                          .replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 1632); })
+                          .replace(/[^\d]/g, '');
                       }
                       function fmt(n) {
-                        return formatInputAmount(n) + ' تومان';
+                        try { return (n || 0).toLocaleString('fa-IR') + ' تومان'; }
+                        catch (e) { return String(n) + ' تومان'; }
                       }
                       function recalc() {
                         var total = 0;
@@ -877,29 +756,17 @@ if ($viewOrder) {
                           var row = input.closest('tr');
                           var cell = row ? row.querySelector('.cms-line-total') : null;
                           var qty = parseInt(input.getAttribute('data-qty') || '1', 10) || 1;
-                          var packSize = parseInt(input.getAttribute('data-pack-size') || '0', 10) || 0;
-                          var unitType = input.getAttribute('data-unit-type') || 'piece';
                           var raw = digits(input.value);
                           if (!raw) { if (cell) cell.textContent = '—'; return; }
                           var unit = parseInt(raw, 10) || 0;
                           var line = unit * qty;
-                          if (unitType === 'pack' && packSize > 0) {
-                            line = unit * packSize * qty;
-                          }
                           total += line;
                           if (cell) cell.textContent = fmt(line);
                         });
                         if (grand) grand.textContent = fmt(total);
                       }
-                      form.querySelectorAll('.cms-price-toman').forEach(function (input) {
-                        formatPriceInput(input);
-                      });
-                      recalc();
                       form.addEventListener('input', function (e) {
-                        if (e.target && e.target.classList && e.target.classList.contains('cms-price-toman')) {
-                          formatPriceInput(e.target);
-                          recalc();
-                        }
+                        if (e.target && e.target.classList && e.target.classList.contains('cms-price-toman')) recalc();
                       });
                     })();
                     </script>
@@ -1433,16 +1300,6 @@ if ($viewOrder) {
     }
     tabs.forEach(function (t) {
       t.addEventListener('click', function () { activate(t.getAttribute('data-tab') || 'actions'); });
-    });
-    document.querySelectorAll('[data-open-tab]').forEach(function (el) {
-      el.addEventListener('click', function (e) {
-        e.preventDefault();
-        activate(el.getAttribute('data-open-tab') || 'chat');
-        var panel = root.querySelector('[data-panel="chat"]');
-        if (panel && panel.scrollIntoView) {
-          panel.scrollIntoView({ block: 'nearest' });
-        }
-      });
     });
     activate(def);
   })();

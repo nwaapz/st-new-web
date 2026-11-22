@@ -596,65 +596,6 @@ function orders_ongoing_mode_labels(): array
     ];
 }
 
-/**
- * Same five-stage pipeline as the sales/admin apps.
- *
- * @return list<array{key:string,label:string}>
- */
-function orders_pipeline_steps(): array
-{
-    return [
-        ['key' => 'submitted', 'label' => 'ثبت سفارش'],
-        ['key' => 'accepted', 'label' => 'بررسی انبار'],
-        ['key' => 'paid', 'label' => 'پرداخت'],
-        ['key' => 'shipped', 'label' => 'ارسال'],
-        ['key' => 'received', 'label' => 'دریافت'],
-    ];
-}
-
-function orders_pipeline_index(string $status): ?int
-{
-    $map = [
-        'submitted' => 0,
-        'accepted' => 1,
-        'payment_proof_sent' => 1,
-        'paid' => 2,
-        'shipped' => 3,
-        'not_received' => 3,
-        'returned_to_origin' => 3,
-        'lost' => 3,
-        'received' => 4,
-    ];
-
-    return $map[$status] ?? null;
-}
-
-/**
- * @return list<array{key:string,label:string,state:'done'|'now'|'pending'}>
- */
-function orders_pipeline_view(string $status): array
-{
-    $idx = orders_pipeline_index($status);
-    $out = [];
-    foreach (orders_pipeline_steps() as $i => $step) {
-        $state = 'pending';
-        if ($idx !== null) {
-            if ($i < $idx) {
-                $state = 'done';
-            } elseif ($i === $idx) {
-                $state = 'now';
-            }
-        }
-        $out[] = [
-            'key' => $step['key'],
-            'label' => $step['label'],
-            'state' => $state,
-        ];
-    }
-
-    return $out;
-}
-
 function orders_normalize_ongoing_mode(string $mode): string
 {
     $mode = trim($mode);
@@ -1991,115 +1932,8 @@ function orders_admin_lookup_catalog_price(PDO $pdo, array $item): ?string
     return null;
 }
 
-function orders_admin_item_field_blank(array $item, string $key): bool
-{
-    return !isset($item[$key]) || trim((string) $item[$key]) === '';
-}
-
 /**
- * @return array{visual_id:?string,name:?string,model_name:?string}|null
- */
-function orders_admin_lookup_catalog_identity(PDO $pdo, array $item): ?array
-{
-    if (!function_exists('cms_product_model_names_sql')) {
-        $lib = __DIR__ . '/product-car-models.php';
-        if (is_readable($lib)) {
-            require_once $lib;
-        }
-    }
-    if (!function_exists('cms_product_model_names_sql') || !function_exists('cms_series_model_names_sql')) {
-        return null;
-    }
-
-    $normalize = static function (?array $row): ?array {
-        if ($row === null) {
-            return null;
-        }
-        $visualId = isset($row['visual_id']) ? trim((string) $row['visual_id']) : '';
-        $name = isset($row['name']) ? trim((string) $row['name']) : '';
-        $modelName = isset($row['model_name']) ? trim((string) $row['model_name']) : '';
-        if ($visualId === '' && $name === '' && $modelName === '') {
-            return null;
-        }
-
-        return [
-            'visual_id' => $visualId !== '' ? $visualId : null,
-            'name' => $name !== '' ? $name : null,
-            'model_name' => $modelName !== '' ? $modelName : null,
-        ];
-    };
-
-    $fetch = static function (PDO $pdo, string $sql, array $params) use ($normalize): ?array {
-        try {
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
-            $row = $stmt->fetch();
-            return $normalize(is_array($row) ? $row : null);
-        } catch (Throwable $e) {
-            return null;
-        }
-    };
-
-    $productSql = 'SELECT p.visual_id, p.name, ' . cms_product_model_names_sql('p') . ' AS model_name
-         FROM products p
-         WHERE %s
-         LIMIT 1';
-    $seriesSql = 'SELECT s.visual_id, s.name, ' . cms_series_model_names_sql('s') . ' AS model_name
-         FROM product_series s
-         WHERE %s
-         LIMIT 1';
-
-    $productId = isset($item['product_id']) && $item['product_id'] !== null
-        ? (int) $item['product_id']
-        : 0;
-    if ($productId > 0) {
-        $found = $fetch($pdo, sprintf($productSql, 'p.id = ?'), [$productId]);
-        if ($found !== null) {
-            return $found;
-        }
-    }
-
-    $slug = isset($item['slug']) ? trim((string) $item['slug']) : '';
-    foreach (function_exists('orders_admin_slug_variants') ? orders_admin_slug_variants($slug) : ($slug !== '' ? [$slug] : []) as $slugVariant) {
-        $found = $fetch($pdo, sprintf($productSql, 'p.slug = ?'), [$slugVariant]);
-        if ($found !== null) {
-            return $found;
-        }
-        $found = $fetch($pdo, sprintf($seriesSql, 's.slug = ?'), [$slugVariant]);
-        if ($found !== null) {
-            return $found;
-        }
-    }
-
-    $visualId = isset($item['visual_id']) ? trim((string) $item['visual_id']) : '';
-    if ($visualId !== '') {
-        $found = $fetch($pdo, sprintf($productSql, 'p.visual_id = ?'), [$visualId]);
-        if ($found !== null) {
-            return $found;
-        }
-        $found = $fetch($pdo, sprintf($seriesSql, 's.visual_id = ?'), [$visualId]);
-        if ($found !== null) {
-            return $found;
-        }
-    }
-
-    $name = isset($item['name']) ? trim((string) $item['name']) : '';
-    if ($name !== '') {
-        $found = $fetch($pdo, sprintf($productSql, 'p.name = ?'), [$name]);
-        if ($found !== null) {
-            return $found;
-        }
-        $found = $fetch($pdo, sprintf($seriesSql, 's.name = ?'), [$name]);
-        if ($found !== null) {
-            return $found;
-        }
-    }
-
-    return null;
-}
-
-/**
- * Attach live catalog default prices and fill missing product identity for admin UI.
+ * Attach live catalog default prices for admin pricing UI.
  *
  * @param list<array<string, mixed>> $items
  * @return list<array<string, mixed>>
@@ -2110,95 +1944,10 @@ function orders_admin_enrich_items(PDO $pdo, array $items): array
     foreach ($items as $item) {
         $row = $item;
         $row['catalog_price_text'] = orders_admin_lookup_catalog_price($pdo, $item);
-        $identity = orders_admin_lookup_catalog_identity($pdo, $item);
-        if (is_array($identity)) {
-            foreach (['visual_id', 'name', 'model_name'] as $key) {
-                $live = isset($identity[$key]) ? trim((string) $identity[$key]) : '';
-                if ($live !== '' && orders_admin_item_field_blank($row, $key)) {
-                    $row[$key] = $live;
-                }
-            }
-        }
         $enriched[] = $row;
     }
 
     return $enriched;
-}
-
-/**
- * Default unit-price field for CMS admin: saved line, else flash promo, else catalog.
- *
- * @param array<string, mixed> $item
- * @return array{value:string, used_default:bool, catalog_label:?string}
- */
-function orders_admin_unit_price_input(array $item): array
-{
-    if (!function_exists('invoices_parse_toman_amount')) {
-        require_once __DIR__ . '/invoices.php';
-    }
-
-    $parse = static function (?string $raw): ?int {
-        $raw = trim((string) $raw);
-        if ($raw === '') {
-            return null;
-        }
-        try {
-            return invoices_parse_toman_amount($raw);
-        } catch (Throwable $e) {
-            return null;
-        }
-    };
-
-    $catalogRaw = isset($item['catalog_price_text']) ? trim((string) $item['catalog_price_text']) : '';
-    $catalogParsed = $parse($catalogRaw);
-    $catalogLabel = null;
-    if ($catalogParsed !== null) {
-        $catalogLabel = invoices_format_toman($catalogParsed);
-    } elseif ($catalogRaw !== '') {
-        $catalogLabel = $catalogRaw;
-    }
-
-    $savedRaw = isset($item['price_text']) ? trim((string) $item['price_text']) : '';
-    if ($savedRaw !== '') {
-        $savedParsed = $parse($savedRaw);
-        return [
-            'value' => $savedParsed !== null ? (string) $savedParsed : $savedRaw,
-            'used_default' => false,
-            'catalog_label' => $catalogLabel,
-        ];
-    }
-
-    $promo = isset($item['promo_unit_price']) && $item['promo_unit_price'] !== null && $item['promo_unit_price'] !== ''
-        ? (int) $item['promo_unit_price']
-        : 0;
-    if (!empty($item['flash_deal_id']) && $promo > 0) {
-        return [
-            'value' => (string) $promo,
-            'used_default' => true,
-            'catalog_label' => $catalogLabel,
-        ];
-    }
-
-    if ($catalogParsed !== null) {
-        return [
-            'value' => (string) $catalogParsed,
-            'used_default' => true,
-            'catalog_label' => $catalogLabel,
-        ];
-    }
-    if ($catalogRaw !== '') {
-        return [
-            'value' => $catalogRaw,
-            'used_default' => true,
-            'catalog_label' => $catalogLabel,
-        ];
-    }
-
-    return [
-        'value' => '',
-        'used_default' => false,
-        'catalog_label' => null,
-    ];
 }
 
 /**
@@ -2719,6 +2468,16 @@ function orders_normalize_cart_items(PDO $pdo, array $rawItems, ?bool $hidePrice
             $snapshot['price_text'] = null;
         }
 
+        if (!cms_sell_units_enabled()) {
+            $packOnlySize = isset($snapshot['pack_size']) ? (int) $snapshot['pack_size'] : 0;
+            if ($packOnlySize > 0) {
+                $snapshot['unit_type'] = 'pack';
+                $snapshot['pack_size'] = $packOnlySize;
+            } else {
+                continue;
+            }
+        }
+
         $mergeKey = ($isSeriesKit ? 'series:' . (-$productId) : (string) $productId)
             . ':' . $snapshot['unit_type']
             . ($flashDealId > 0 ? ':fd' . $flashDealId : '');
@@ -3078,87 +2837,7 @@ function orders_create_from_normalized(
         ]);
     }
 
-    orders_try_auto_sale($pdo, $orderId);
-
     return ['order_id' => $orderId, 'duplicate' => false];
-}
-
-function orders_auto_sale_enabled(): bool
-{
-    if (!function_exists('cms_setting_get')) {
-        return false;
-    }
-
-    return cms_setting_get('auto_sale_orders', '0') === '1';
-}
-
-function orders_try_auto_sale(PDO $pdo, int $orderId): void
-{
-    if ($orderId <= 0 || !orders_auto_sale_enabled()) {
-        return;
-    }
-
-    try {
-        $order = orders_get_by_id($pdo, $orderId);
-        if ($order === null) {
-            return;
-        }
-        $status = (string) ($order['status'] ?? '');
-        if ($status !== 'submitted') {
-            return;
-        }
-
-        require_once __DIR__ . '/invoices.php';
-        $items = orders_active_order_items(orders_fetch_items($pdo, $orderId));
-        if ($items === []) {
-            throw new RuntimeException('سفارش بدون قلم فعال است');
-        }
-
-        $prices = [];
-        foreach ($items as $item) {
-            $itemId = (int) ($item['id'] ?? 0);
-            if ($itemId <= 0) {
-                throw new RuntimeException('قلم نامعتبر است');
-            }
-            $catalog = orders_admin_lookup_catalog_price($pdo, $item);
-            if ($catalog === null || trim((string) $catalog) === '') {
-                throw new RuntimeException('قیمت کاتالوگ برای قلم #' . $itemId . ' موجود نیست');
-            }
-            try {
-                $normalized = invoices_normalize_price_text((string) $catalog);
-            } catch (InvalidArgumentException $e) {
-                throw new RuntimeException('قلم #' . $itemId . ': ' . $e->getMessage());
-            }
-            if ($normalized === null || $normalized === '') {
-                throw new RuntimeException('قیمت کاتالوگ قلم #' . $itemId . ' نامعتبر است');
-            }
-            $prices[(string) $itemId] = $normalized;
-        }
-
-        orders_admin_apply_action(
-            $pdo,
-            $orderId,
-            'accept',
-            'فروش خودکار — قیمت کاتالوگ',
-            $prices
-        );
-    } catch (Throwable $e) {
-        error_log('[orders_try_auto_sale] order ' . $orderId . ': ' . $e->getMessage());
-        if (function_exists('cms_app_log') || is_file(__DIR__ . '/application-logs.php')) {
-            require_once __DIR__ . '/application-logs.php';
-            cms_app_log([
-                'source_app' => 'backend',
-                'severity' => 'WARNING',
-                'category' => 'order',
-                'event_code' => 'auto_sale_skipped',
-                'summary' => 'فروش خودکار انجام نشد؛ سفارش در وضعیت ثبت‌شده ماند',
-                'related_order_id' => $orderId,
-                'metadata' => [
-                    'error' => $e->getMessage(),
-                ],
-            ]);
-        }
-    }
 }
 
 /**
