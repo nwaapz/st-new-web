@@ -796,6 +796,12 @@ textarea.cms-input {
   color: var(--cms-text-soft);
 }
 
+.cms-order-item-code {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  unicode-bidi: isolate;
+}
+
 .cms-search {
   display: flex;
   flex-wrap: wrap;

@@ -1991,8 +1991,115 @@ function orders_admin_lookup_catalog_price(PDO $pdo, array $item): ?string
     return null;
 }
 
+function orders_admin_item_field_blank(array $item, string $key): bool
+{
+    return !isset($item[$key]) || trim((string) $item[$key]) === '';
+}
+
 /**
- * Attach live catalog default prices for admin pricing UI.
+ * @return array{visual_id:?string,name:?string,model_name:?string}|null
+ */
+function orders_admin_lookup_catalog_identity(PDO $pdo, array $item): ?array
+{
+    if (!function_exists('cms_product_model_names_sql')) {
+        $lib = __DIR__ . '/product-car-models.php';
+        if (is_readable($lib)) {
+            require_once $lib;
+        }
+    }
+    if (!function_exists('cms_product_model_names_sql') || !function_exists('cms_series_model_names_sql')) {
+        return null;
+    }
+
+    $normalize = static function (?array $row): ?array {
+        if ($row === null) {
+            return null;
+        }
+        $visualId = isset($row['visual_id']) ? trim((string) $row['visual_id']) : '';
+        $name = isset($row['name']) ? trim((string) $row['name']) : '';
+        $modelName = isset($row['model_name']) ? trim((string) $row['model_name']) : '';
+        if ($visualId === '' && $name === '' && $modelName === '') {
+            return null;
+        }
+
+        return [
+            'visual_id' => $visualId !== '' ? $visualId : null,
+            'name' => $name !== '' ? $name : null,
+            'model_name' => $modelName !== '' ? $modelName : null,
+        ];
+    };
+
+    $fetch = static function (PDO $pdo, string $sql, array $params) use ($normalize): ?array {
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $row = $stmt->fetch();
+            return $normalize(is_array($row) ? $row : null);
+        } catch (Throwable $e) {
+            return null;
+        }
+    };
+
+    $productSql = 'SELECT p.visual_id, p.name, ' . cms_product_model_names_sql('p') . ' AS model_name
+         FROM products p
+         WHERE %s
+         LIMIT 1';
+    $seriesSql = 'SELECT s.visual_id, s.name, ' . cms_series_model_names_sql('s') . ' AS model_name
+         FROM product_series s
+         WHERE %s
+         LIMIT 1';
+
+    $productId = isset($item['product_id']) && $item['product_id'] !== null
+        ? (int) $item['product_id']
+        : 0;
+    if ($productId > 0) {
+        $found = $fetch($pdo, sprintf($productSql, 'p.id = ?'), [$productId]);
+        if ($found !== null) {
+            return $found;
+        }
+    }
+
+    $slug = isset($item['slug']) ? trim((string) $item['slug']) : '';
+    foreach (function_exists('orders_admin_slug_variants') ? orders_admin_slug_variants($slug) : ($slug !== '' ? [$slug] : []) as $slugVariant) {
+        $found = $fetch($pdo, sprintf($productSql, 'p.slug = ?'), [$slugVariant]);
+        if ($found !== null) {
+            return $found;
+        }
+        $found = $fetch($pdo, sprintf($seriesSql, 's.slug = ?'), [$slugVariant]);
+        if ($found !== null) {
+            return $found;
+        }
+    }
+
+    $visualId = isset($item['visual_id']) ? trim((string) $item['visual_id']) : '';
+    if ($visualId !== '') {
+        $found = $fetch($pdo, sprintf($productSql, 'p.visual_id = ?'), [$visualId]);
+        if ($found !== null) {
+            return $found;
+        }
+        $found = $fetch($pdo, sprintf($seriesSql, 's.visual_id = ?'), [$visualId]);
+        if ($found !== null) {
+            return $found;
+        }
+    }
+
+    $name = isset($item['name']) ? trim((string) $item['name']) : '';
+    if ($name !== '') {
+        $found = $fetch($pdo, sprintf($productSql, 'p.name = ?'), [$name]);
+        if ($found !== null) {
+            return $found;
+        }
+        $found = $fetch($pdo, sprintf($seriesSql, 's.name = ?'), [$name]);
+        if ($found !== null) {
+            return $found;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Attach live catalog default prices and fill missing product identity for admin UI.
  *
  * @param list<array<string, mixed>> $items
  * @return list<array<string, mixed>>
@@ -2003,6 +2110,15 @@ function orders_admin_enrich_items(PDO $pdo, array $items): array
     foreach ($items as $item) {
         $row = $item;
         $row['catalog_price_text'] = orders_admin_lookup_catalog_price($pdo, $item);
+        $identity = orders_admin_lookup_catalog_identity($pdo, $item);
+        if (is_array($identity)) {
+            foreach (['visual_id', 'name', 'model_name'] as $key) {
+                $live = isset($identity[$key]) ? trim((string) $identity[$key]) : '';
+                if ($live !== '' && orders_admin_item_field_blank($row, $key)) {
+                    $row[$key] = $live;
+                }
+            }
+        }
         $enriched[] = $row;
     }
 

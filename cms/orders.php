@@ -675,7 +675,9 @@ if ($viewOrder) {
                   <table class="cms-table">
                     <thead>
                       <tr>
-                        <th>محصول</th>
+                        <th>کد کالا</th>
+                        <th>نام محصول</th>
+                        <th>خودرو</th>
                         <th>واحد / تعداد</th>
                         <th>قیمت واحد (تومان)</th>
                         <th>مبلغ ردیف</th>
@@ -687,8 +689,13 @@ if ($viewOrder) {
                         $lineMeta = $itemTotals['lines'][$idx] ?? null;
                         $priceInput = orders_admin_unit_price_input($line);
                         $unitVal = $priceInput['value'];
+                        $visualId = isset($line['visual_id']) ? trim((string) $line['visual_id']) : '';
+                        $modelName = isset($line['model_name']) ? trim((string) $line['model_name']) : '';
                       ?>
                       <tr>
+                        <td class="cms-order-item-code" dir="ltr">
+                          <?= $visualId !== '' ? cms_h(cms_to_persian_digits($visualId)) : '—' ?>
+                        </td>
                         <td>
                           <?= cms_h((string) $line['name']) ?>
                           <?php if (!empty($line['flash_deal_id'])): ?>
@@ -697,14 +704,14 @@ if ($viewOrder) {
                           <?php
                             $bits = array_filter([
                                 $line['factory_name'] ?? null,
-                                $line['model_name'] ?? null,
                                 $line['category_name'] ?? null,
-                            ]);
+                            ], static fn ($v): bool => $v !== null && trim((string) $v) !== '');
                             if ($bits !== []):
                           ?>
                             <div class="cms-muted" style="font-size:.8rem;margin-top:.2rem"><?= cms_h(implode(' · ', $bits)) ?></div>
                           <?php endif; ?>
                         </td>
+                        <td><?= $modelName !== '' ? cms_h($modelName) : '—' ?></td>
                         <td><?= cms_h(invoices_unit_label($line)) ?></td>
                         <td>
                           <?php if ($canEditPrices): ?>
@@ -760,7 +767,7 @@ if ($viewOrder) {
                     </tbody>
                     <tfoot>
                       <tr>
-                        <th colspan="3" style="text-align:left">جمع کل (تومان)</th>
+                        <th colspan="5" style="text-align:left">جمع کل (تومان)</th>
                         <th id="order-prices-grand" dir="ltr"><?= cms_h(invoices_format_toman((int) $itemTotals['total'])) ?></th>
                       </tr>
                     </tfoot>
