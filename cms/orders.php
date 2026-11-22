@@ -689,6 +689,17 @@ if ($viewOrder) {
                         $lineMeta = $itemTotals['lines'][$idx] ?? null;
                         $priceInput = orders_admin_unit_price_input($line);
                         $unitVal = $priceInput['value'];
+                        $unitDisplay = '';
+                        if ($unitVal !== '') {
+                            try {
+                                $unitParsed = invoices_parse_toman_amount($unitVal);
+                            } catch (Throwable $e) {
+                                $unitParsed = null;
+                            }
+                            $unitDisplay = $unitParsed !== null
+                                ? invoices_format_toman_input($unitParsed)
+                                : cms_to_persian_digits($unitVal);
+                        }
                         $visualId = isset($line['visual_id']) ? trim((string) $line['visual_id']) : '';
                         $modelName = isset($line['model_name']) ? trim((string) $line['model_name']) : '';
                       ?>
@@ -718,9 +729,9 @@ if ($viewOrder) {
                             <input
                               class="cms-input cms-price-toman"
                               name="price[<?= (int) $line['id'] ?>]"
-                              value="<?= cms_h($unitVal) ?>"
+                              value="<?= cms_h($unitDisplay) ?>"
                               inputmode="numeric"
-                              placeholder="مثلاً 125000"
+                              placeholder="مثلاً ۱۲۵٬۰۰۰"
                               data-qty="<?= (int) ($line['quantity'] ?? 1) ?>"
                               dir="ltr"
                               autocomplete="off"
@@ -798,11 +809,48 @@ if ($viewOrder) {
                       var form = document.getElementById('order-prices-form');
                       if (!form) return;
                       var grand = document.getElementById('order-prices-grand');
+                      var persianDigits = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'};
+                      var digitChar = /[0-9۰-۹٠-٩]/;
                       function digits(s) {
                         return String(s || '')
                           .replace(/[۰-۹]/g, function (c) { return String(c.charCodeAt(0) - 1728); })
                           .replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 1632); })
                           .replace(/[^\d]/g, '');
+                      }
+                      function formatInputAmount(amount) {
+                        var grouped = Math.max(0, Math.floor(amount)).toLocaleString('en-US').replace(/,/g, '٬');
+                        return grouped.replace(/\d/g, function (d) { return persianDigits[d] || d; });
+                      }
+                      function countDigits(text) {
+                        var count = 0;
+                        String(text || '').split('').forEach(function (ch) {
+                          if (digitChar.test(ch)) count++;
+                        });
+                        return count;
+                      }
+                      function cursorAfterDigits(formatted, digitCount) {
+                        if (digitCount <= 0) return 0;
+                        var seen = 0;
+                        for (var i = 0; i < formatted.length; i++) {
+                          if (digitChar.test(formatted.charAt(i))) {
+                            seen++;
+                            if (seen >= digitCount) return i + 1;
+                          }
+                        }
+                        return formatted.length;
+                      }
+                      function formatPriceInput(input) {
+                        if (!input) return;
+                        var before = input.selectionStart;
+                        var digitsBefore = before === null
+                          ? countDigits(input.value)
+                          : countDigits(String(input.value || '').slice(0, before));
+                        var raw = digits(input.value);
+                        input.value = raw === '' ? '' : formatInputAmount(parseInt(raw, 10));
+                        if (before !== null && typeof input.setSelectionRange === 'function') {
+                          var pos = cursorAfterDigits(input.value, digitsBefore);
+                          try { input.setSelectionRange(pos, pos); } catch (e) {}
+                        }
                       }
                       function fmt(n) {
                         try { return (n || 0).toLocaleString('fa-IR') + ' تومان'; }
@@ -823,8 +871,15 @@ if ($viewOrder) {
                         });
                         if (grand) grand.textContent = fmt(total);
                       }
+                      form.querySelectorAll('.cms-price-toman').forEach(function (input) {
+                        formatPriceInput(input);
+                      });
+                      recalc();
                       form.addEventListener('input', function (e) {
-                        if (e.target && e.target.classList && e.target.classList.contains('cms-price-toman')) recalc();
+                        if (e.target && e.target.classList && e.target.classList.contains('cms-price-toman')) {
+                          formatPriceInput(e.target);
+                          recalc();
+                        }
                       });
                     })();
                     </script>

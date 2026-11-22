@@ -71,6 +71,13 @@ function invoices_format_toman(int $amount): string
     return cms_to_persian_digits($grouped) . ' تومان';
 }
 
+function invoices_format_toman_input(int $amount): string
+{
+    $amount = max(0, $amount);
+    $grouped = number_format($amount, 0, '.', '٬');
+    return cms_to_persian_digits($grouped);
+}
+
 /**
  * Normalize CMS price input to stored price_text, or null if empty.
  *
