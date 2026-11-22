@@ -802,6 +802,12 @@ textarea.cms-input {
   unicode-bidi: isolate;
 }
 
+.cms-price-toman {
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+  min-width: 10rem;
+}
+
 .cms-search {
   display: flex;
   flex-wrap: wrap;

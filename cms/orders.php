@@ -810,16 +810,30 @@ if ($viewOrder) {
                       if (!form) return;
                       var grand = document.getElementById('order-prices-grand');
                       var persianDigits = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'};
+                      var asciiDigits = {
+                        '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9',
+                        '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'
+                      };
                       var digitChar = /[0-9۰-۹٠-٩]/;
                       function digits(s) {
-                        return String(s || '')
-                          .replace(/[۰-۹]/g, function (c) { return String(c.charCodeAt(0) - 1728); })
-                          .replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 1632); })
-                          .replace(/[^\d]/g, '');
+                        var out = '';
+                        String(s || '').split('').forEach(function (ch) {
+                          if (asciiDigits[ch]) out += asciiDigits[ch];
+                          else if (ch >= '0' && ch <= '9') out += ch;
+                        });
+                        if (out.length > 12) out = out.slice(0, 12);
+                        return out;
                       }
                       function formatInputAmount(amount) {
-                        var grouped = Math.max(0, Math.floor(amount)).toLocaleString('en-US').replace(/,/g, '٬');
-                        return grouped.replace(/\d/g, function (d) { return persianDigits[d] || d; });
+                        var n = Math.max(0, Math.floor(Number(amount)));
+                        if (!isFinite(n)) return '';
+                        var s = String(n);
+                        var grouped = '';
+                        for (var i = 0; i < s.length; i++) {
+                          if (i > 0 && (s.length - i) % 3 === 0) grouped += '٬';
+                          grouped += persianDigits[s.charAt(i)] || s.charAt(i);
+                        }
+                        return grouped;
                       }
                       function countDigits(text) {
                         var count = 0;
@@ -853,8 +867,7 @@ if ($viewOrder) {
                         }
                       }
                       function fmt(n) {
-                        try { return (n || 0).toLocaleString('fa-IR') + ' تومان'; }
-                        catch (e) { return String(n) + ' تومان'; }
+                        return formatInputAmount(n) + ' تومان';
                       }
                       function recalc() {
                         var total = 0;
