@@ -733,6 +733,8 @@ if ($viewOrder) {
                               inputmode="numeric"
                               placeholder="مثلاً ۱۲۵٬۰۰۰"
                               data-qty="<?= (int) ($line['quantity'] ?? 1) ?>"
+                              data-unit-type="<?= cms_h(orders_item_unit_type($line)) ?>"
+                              data-pack-size="<?= (int) ($line['pack_size'] ?? 0) ?>"
                               dir="ltr"
                               autocomplete="off"
                               <?= $cur === 'submitted' ? 'required' : '' ?>
@@ -875,10 +877,15 @@ if ($viewOrder) {
                           var row = input.closest('tr');
                           var cell = row ? row.querySelector('.cms-line-total') : null;
                           var qty = parseInt(input.getAttribute('data-qty') || '1', 10) || 1;
+                          var packSize = parseInt(input.getAttribute('data-pack-size') || '0', 10) || 0;
+                          var unitType = input.getAttribute('data-unit-type') || 'piece';
                           var raw = digits(input.value);
                           if (!raw) { if (cell) cell.textContent = '—'; return; }
                           var unit = parseInt(raw, 10) || 0;
                           var line = unit * qty;
+                          if (unitType === 'pack' && packSize > 0) {
+                            line = unit * packSize * qty;
+                          }
                           total += line;
                           if (cell) cell.textContent = fmt(line);
                         });
